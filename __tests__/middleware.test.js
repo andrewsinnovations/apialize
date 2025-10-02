@@ -63,16 +63,17 @@ describe("middleware access control for odd numbers (Sequelize)", () => {
     };
 
     // List route (only odd numbers will be queried)
-    app.use("/numbers", list(NumberModel, oddNumbersFilter));
-
-    // Single route (still applies oddOnlyMiddleware to block even IDs)
-    app.use("/numbers", single(NumberModel, oddOnlyMiddleware));
+    app.use("/numbers", list(NumberModel, { middleware: [oddNumbersFilter] }));
+    app.use(
+      "/numbers",
+      single(NumberModel, { middleware: [oddOnlyMiddleware] }),
+    );
   });
 
   test("list returns only odd numbers", async () => {
-  const res = await request(app).get("/numbers");
-  expect(res.body.meta.count).toBe(50);
-  expect(res.body.data.every((row) => row.value % 2 === 1)).toBe(true);
+    const res = await request(app).get("/numbers");
+    expect(res.body.meta.count).toBe(50);
+    expect(res.body.data.every((row) => row.value % 2 === 1)).toBe(true);
   });
 
   test("single returns odd number", async () => {

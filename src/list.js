@@ -1,0 +1,290 @@
+const { express, apializeContext, ensureFn, asyncHandler } = require("./utils");
+
+// Default configuration for list operation
+const LIST_DEFAULTS = {
+  middleware: [],
+  allowFiltering: true, // allow non "api:" query params to become where filters
+  allowOrdering: true, // allow api:orderby / api:orderdir query params
+  metaShowFilters: false, // include applied filters in meta.filters
+  metaShowOrdering: false, // include applied ordering in meta.order
+  defaultPageSize: 100, // default page size when not specified in query or model config
+  defaultOrderBy: "id", // default column to order by when no ordering is specified
+  defaultOrderDir: "ASC", // default order direction when no ordering is specified
+};
+
+// Helper function to get model attributes with their data types
+function getModelAttributes(model) {
+  if (!model || !model.rawAttributes) return {};
+  return model.rawAttributes;
+}
+
+// Helper function to validate if a column exists on the model
+function validateColumnExists(model, columnName) {
+  const attributes = getModelAttributes(model);
+  return attributes.hasOwnProperty(columnName);
+}
+
+// Helper function to validate data type compatibility
+function validateDataType(model, columnName, value) {
+  const attributes = getModelAttributes(model);
+  const attribute = attributes[columnName];
+  
+  if (!attribute || !attribute.type) return true; // Allow if no type info
+  
+  const dataType = attribute.type;
+  const typeName = dataType.constructor.name.toLowerCase();
+  
+  try {
+    switch (typeName) {
+      case 'integer':
+      case 'bigint':
+        return !isNaN(parseInt(value, 10));
+      case 'float':
+      case 'real':
+      case 'double':
+      case 'decimal':
+        return !isNaN(parseFloat(value));
+      case 'boolean':
+        return ['true', 'false', '1', '0', 'yes', 'no'].includes(String(value).toLowerCase());
+      case 'date':
+      case 'dateonly':
+        return !isNaN(Date.parse(value));
+      case 'string':
+      case 'text':
+      case 'char':
+      case 'varchar':
+        return true; // Strings are always valid
+      default:
+        return true; // Allow unknown types
+    }
+  } catch (err) {
+    return true; // Allow if validation fails
+  }
+}
+
+// Handle pagination logic
+function setupPagination(req, query, modelCfg, defaultPageSize) {
+  let page = parseInt(query["api:page"], 10);
+  if (isNaN(page) || page < 1) page = 1;
+  
+  const effectivePageSize =
+    Number.isInteger(modelCfg.page_size) && modelCfg.page_size > 0
+      ? modelCfg.page_size
+      : defaultPageSize;
+  
+  let pageSize = parseInt(query["api:pagesize"], 10);
+  if (isNaN(pageSize) || pageSize < 1) pageSize = effectivePageSize;
+  
+  req.apialize.options.limit = pageSize;
+  req.apialize.options.offset = (page - 1) * pageSize;
+  
+  return { page, pageSize };
+}
+
+// Handle ordering logic
+function setupOrdering(req, res, model, query, modelCfg, allowOrdering, defaultOrderBy, defaultOrderDir) {
+  let rawOrderBy, globalDir;
+  
+  if (allowOrdering) {
+    // Use query params first, then model config as fallback
+    rawOrderBy = query["api:orderby"] || modelCfg.orderby;
+    globalDir = (query["api:orderdir"] || modelCfg.orderdir || "ASC").toString().toUpperCase();
+  } else {
+    // When ordering is disabled, still use model config but ignore query params
+    rawOrderBy = modelCfg.orderby;
+    globalDir = (modelCfg.orderdir || "ASC").toString().toUpperCase();
+  }
+
+  if (rawOrderBy) {
+    const fields = rawOrderBy
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const order = [];
+    
+    for (const f of fields) {
+      if (!f) continue;
+      
+      let columnName;
+      let direction;
+      if (f.startsWith("-")) {
+        columnName = f.slice(1);
+        direction = "DESC";
+      } else if (f.startsWith("+")) {
+        columnName = f.slice(1);
+        direction = "ASC";
+      } else {
+        columnName = f;
+        direction = globalDir === "DESC" ? "DESC" : "ASC";
+      }
+      
+      // Validate column exists on model
+      if (!validateColumnExists(model, columnName)) {
+        console.warn(`[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`);
+        res.status(400).json({
+          success: false,
+          error: "Bad request",
+        });
+        return false; // Indicate validation failed
+      }
+      
+      order.push([columnName, direction]);
+    }
+    if (order.length) req.apialize.options.order = order;
+  }
+  
+  // Default ordering if none specified
+  if (!req.apialize.options.order) {
+    req.apialize.options.order = [[defaultOrderBy, defaultOrderDir]];
+  }
+  
+  return true; // Indicate success
+}
+
+// Handle filtering logic
+function setupFiltering(req, res, model, query, allowFiltering) {
+  let appliedFilters = {};
+  
+  if (!allowFiltering) return appliedFilters;
+  
+  for (const [key, value] of Object.entries(query)) {
+    if (key.startsWith("api:")) continue;
+    if (value === undefined) continue;
+    
+    // Validate column exists on model
+    if (!validateColumnExists(model, key)) {
+      console.warn(`[Apialize] Bad request: Invalid filter column '${key}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`);
+      res.status(400).json({
+        success: false,
+        error: "Bad request",
+      });
+      return false; // Indicate validation failed
+    }
+    
+    // Validate data type compatibility
+    if (!validateDataType(model, key, value)) {
+      console.warn(`[Apialize] Bad request: Invalid filter value '${value}' is not compatible with column '${key}' data type on model '${model.name}'. Query: ${req.originalUrl}`);
+      res.status(400).json({
+        success: false,
+        error: "Bad request",
+      });
+      return false; // Indicate validation failed
+    }
+    
+    appliedFilters[key] = value;
+  }
+  
+  if (Object.keys(appliedFilters).length) {
+    req.apialize.options.where = {
+      ...(req.apialize.options.where || {}),
+      ...appliedFilters,
+    };
+  }
+  
+  return appliedFilters;
+}
+
+// Process query results and build response
+function buildResponse(result, page, pageSize, appliedFilters, metaShowFilters, metaShowOrdering, allowFiltering, req) {
+  const rows = Array.isArray(result.rows)
+    ? result.rows.map((r) => (r && r.get ? r.get({ plain: true }) : r))
+    : result.rows;
+  const totalPages = Math.max(1, Math.ceil(result.count / pageSize));
+
+  let orderOut;
+  if (metaShowOrdering) {
+    orderOut = Array.isArray(req.apialize.options.order)
+      ? req.apialize.options.order.map((o) => {
+          if (Array.isArray(o))
+            return [o[0], (o[1] || "ASC").toUpperCase()];
+          if (typeof o === "string") return [o, "ASC"];
+          return o;
+        })
+      : [];
+  }
+
+  const meta = {
+    page,
+    page_size: pageSize,
+    total_pages: totalPages,
+    count: result.count,
+  };
+  
+  if (metaShowOrdering) meta.order = orderOut;
+  if (metaShowFilters) meta.filters = allowFiltering ? appliedFilters : {};
+
+  return {
+    success: true,
+    meta,
+    data: rows,
+  };
+}
+
+// list(model, options, modelOptions)
+// options.middleware: array of express middleware
+// Configurable flags (all optional, see LIST_DEFAULTS above for defaults)
+// modelOptions: passed directly to Sequelize findAndCountAll (attributes, include, etc.)
+function list(model, options = {}, modelOptions = {}) {
+  ensureFn(model, "findAndCountAll");
+  const {
+    middleware,
+    allowFiltering,
+    allowOrdering,
+    metaShowFilters,
+    metaShowOrdering,
+    defaultPageSize,
+    defaultOrderBy,
+    defaultOrderDir,
+  } = { ...LIST_DEFAULTS, ...options };
+
+  const inline = middleware.filter((fn) => typeof fn === "function");
+  const router = express.Router({ mergeParams: true });
+
+  router.get(
+    "/",
+    // Pre-middleware to disable query param filtering when allowFiltering is false
+    (req, _res, next) => {
+      if (!allowFiltering) req._apializeDisableQueryFilters = true;
+      next();
+    },
+    apializeContext,
+    ...inline,
+    asyncHandler(async (req, res) => {
+      const q = req.query || {};
+      const modelCfg = (model && model.apialize) || {};
+
+      // Merge base model options with request-specific options
+      req.apialize.options = { ...modelOptions, ...req.apialize.options };
+
+      // Setup pagination
+      const { page, pageSize } = setupPagination(req, q, modelCfg, defaultPageSize);
+
+      // Setup ordering (returns false if validation fails)
+      const orderingValid = setupOrdering(
+        req, res, model, q, modelCfg, 
+        allowOrdering, defaultOrderBy, defaultOrderDir
+      );
+      if (!orderingValid) return; // Response already sent
+
+      // Setup filtering (returns false if validation fails)
+      const appliedFilters = setupFiltering(req, res, model, q, allowFiltering);
+      if (appliedFilters === false) return; // Response already sent
+
+      // Execute query
+      const result = await model.findAndCountAll(req.apialize.options);
+
+      // Build and send response
+      const response = buildResponse(
+        result, page, pageSize, appliedFilters,
+        metaShowFilters, metaShowOrdering, allowFiltering, req
+      );
+      
+      res.json(response);
+    }),
+  );
+
+  router.apialize = {};
+  return router;
+}
+
+module.exports = list;

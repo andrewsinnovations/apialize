@@ -49,31 +49,31 @@ describe("list() where clause integration (Sequelize sqlite::memory:)", () => {
 
     app = express();
     app.use(bodyParser.json());
-    app.use("/items", list(Item));
+    app.use("/items", list(Item)); // options-form signature
   });
 
   test("applies simple where filter from query", async () => {
-  const res = await request(app).get("/items?type=fruit");
-  expect(res.status).toBe(200);
-  expect(res.body.meta.count).toBe(3);
-  expect(res.body.data.every((r) => r.type === "fruit")).toBe(true);
+    const res = await request(app).get("/items?type=fruit");
+    expect(res.status).toBe(200);
+    expect(res.body.meta.count).toBe(3);
+    expect(res.body.data.every((r) => r.type === "fruit")).toBe(true);
     expect(calls.length).toBe(1);
     expect(calls[0]).toHaveProperty("where");
     expect(calls[0].where).toMatchObject({ type: "fruit" });
   });
 
   test("applies multi-field where filter from query", async () => {
-  const res = await request(app).get("/items?type=fruit&name=pear");
-  expect(res.status).toBe(200);
-  expect(res.body.meta.count).toBe(1);
-  expect(res.body.data[0].name).toBe("pear");
+    const res = await request(app).get("/items?type=fruit&name=pear");
+    expect(res.status).toBe(200);
+    expect(res.body.meta.count).toBe(1);
+    expect(res.body.data[0].name).toBe("pear");
     expect(calls[0].where).toMatchObject({ type: "fruit", name: "pear" });
   });
 
   test("empty query yields full set", async () => {
-  const res = await request(app).get("/items");
-  expect(res.status).toBe(200);
-  expect(res.body.meta.count).toBe(4);
+    const res = await request(app).get("/items");
+    expect(res.status).toBe(200);
+    expect(res.body.meta.count).toBe(4);
     expect(calls[calls.length - 1].where).toMatchObject({});
   });
 });

@@ -3,7 +3,7 @@ const request = require("supertest");
 const bodyParser = require("body-parser");
 function randId() {
   return (
-    'u-' +
+    "u-" +
     Math.random().toString(16).slice(2, 10) +
     Date.now().toString(16) +
     Math.random().toString(16).slice(2, 6)
@@ -16,7 +16,7 @@ const { Sequelize, DataTypes } = require("sequelize");
  * Multi-user ownership test
  * Table: records
  *  - id (auto increment PK)
- *  - external_id (uuid string, unique, used as public id via idField option)
+ *  - external_id (uuid string, unique)
  *  - user_id (string) user owner
  *  - data (string) arbitrary payload
  *
@@ -26,7 +26,7 @@ const { Sequelize, DataTypes } = require("sequelize");
  *  - Attempts to access another user's record return 404 (not found)
  */
 
-describe("multi-user ownership with external uuid id field (bearer auth)", () => {
+describe("multi-user ownership with default numeric id (bearer auth)", () => {
   let sequelize;
   let Record;
   let Session;
@@ -56,8 +56,8 @@ describe("multi-user ownership with external uuid id field (bearer auth)", () =>
     await sequelize.sync({ force: true });
 
     // Hook to always generate external_id if not provided
-      Record.beforeCreate((instance) => {
-        if (!instance.external_id) instance.external_id = randId();
+    Record.beforeCreate((instance) => {
+      if (!instance.external_id) instance.external_id = randId();
     });
   });
 
@@ -102,10 +102,8 @@ describe("multi-user ownership with external uuid id field (bearer auth)", () =>
       next();
     };
 
-  // Set apialize id attribute on model instead of passing idField option
-  Record.apialize = { id_attribute: "external_id" };
-  const opts = { middlewares: [authOwnership] };
-  app.use("/records", crud(Record, opts));
+    const opts = { middleware: [authOwnership] };
+    app.use("/records", crud(Record, opts)); // crud adapts to new operation signatures
 
     app.use((err, _req, res, _next) =>
       res.status(500).json({ error: err.message }),
@@ -131,7 +129,7 @@ describe("multi-user ownership with external uuid id field (bearer auth)", () =>
     }
     expect(createA1.status).toBe(201);
     expect(createA2.status).toBe(201);
-    expect(createA1.body).toHaveProperty("id");
+    expect(createA1.body).toHaveProperty("id"); // internal numeric id
     const a1 = createA1.body.id;
     const a2 = createA2.body.id;
 
@@ -144,15 +142,15 @@ describe("multi-user ownership with external uuid id field (bearer auth)", () =>
     const b1 = createB1.body.id;
 
     // List endpoints only show each user's own data
-  const listA = await request(app).get("/records").set(authA);
-  expect(listA.status).toBe(200);
-  expect(listA.body.meta.count).toBe(2);
-  expect(listA.body.data.map((r) => r.data).sort()).toEqual(["A1", "A2"]);
+    const listA = await request(app).get("/records").set(authA);
+    expect(listA.status).toBe(200);
+    expect(listA.body.meta.count).toBe(2);
+    expect(listA.body.data.map((r) => r.data).sort()).toEqual(["A1", "A2"]);
 
-  const listB = await request(app).get("/records").set(authB);
-  expect(listB.status).toBe(200);
-  expect(listB.body.meta.count).toBe(1);
-  expect(listB.body.data[0].data).toBe("B1");
+    const listB = await request(app).get("/records").set(authB);
+    expect(listB.status).toBe(200);
+    expect(listB.body.meta.count).toBe(1);
+    expect(listB.body.data[0].data).toBe("B1");
 
     // User A can read own record
     const getA1 = await request(app).get(`/records/${a1}`).set(authA);
@@ -203,8 +201,8 @@ describe("multi-user ownership with external uuid id field (bearer auth)", () =>
     expect(delA1ByB.status).toBe(404);
 
     // Final list userA should have 1 remaining
-  const finalListA = await request(app).get("/records").set(authA);
-  expect(finalListA.body.meta.count).toBe(1);
-  expect(finalListA.body.data[0].id).toBe(a1);
+    const finalListA = await request(app).get("/records").set(authA);
+    expect(finalListA.body.meta.count).toBe(1);
+    expect(finalListA.body.data[0].id).toBe(a1);
   });
 });

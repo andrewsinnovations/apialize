@@ -39,10 +39,10 @@ describe("apialize individual operations (Sequelize raw model)", () => {
     app.use("/items", list(Item));
     await request(app).post("/items").send({ name: "A" });
     await request(app).post("/items").send({ name: "B" });
-  const res = await request(app).get("/items");
-  expect(res.body).toHaveProperty("success", true);
-  expect(res.body.meta).toMatchObject({ page: 1, page_size: 100, count: 2 });
-  expect(res.body.data.length).toBe(2);
+    const res = await request(app).get("/items");
+    expect(res.body).toHaveProperty("success", true);
+    expect(res.body.meta).toMatchObject({ page: 1, page_size: 100, count: 2 });
+    expect(res.body.data.length).toBe(2);
   });
 
   test("single() returns one record", async () => {
