@@ -404,6 +404,77 @@ This mounts endpoints like:
 
 Because nested `get` uses core `single()`, you get consistent 404 handling, response shape `{ success: true, record }`, and you can keep nesting by adding further `related` entries.
 
+---
+
+## 9. Bulk delete on related collections
+
+apialize supports a collection-level DELETE for related resources mounted via `single(..., { related: [...] })`. This lets you remove all child records for a given parent (or nested parent) in one call — with a built-in dry-run safety.
+
+Key behavior:
+
+- Endpoint: DELETE on the related collection path (no `:id` at the end).
+  - Examples:
+    - `DELETE /users/:userId/posts` (delete all posts for the user)
+    - `DELETE /users/:userId/posts/:postId/comments` (delete all comments for the post)
+- Dry-run by default: If `?confirm=true` is not provided, the endpoint does not delete anything and instead returns the list of identifiers that would be deleted.
+- Confirm to execute: Pass `?confirm=true` to proceed with deletion.
+- Parent scoping: Deletions are always scoped to the current parent(s) based on the configured foreign key.
+- Identifier mapping: The identifiers in the response respect the per-operation `id_mapping` for `delete` if provided; otherwise they default to `'id'`.
+- Mount control: The bulk route is enabled by default when `delete` operations are allowed for the related resource; you can disable it via `perOperation.delete.allow_bulk_delete = false`.
+
+Config example (third level):
+
+```js
+single(User, {
+  related: [
+    {
+      model: Post,
+      related: [
+        {
+          model: Comment,
+          perOperation: {
+            delete: {
+              // Show comment_key in responses instead of internal id
+              id_mapping: 'comment_key',
+              // Optional: disable collection DELETE route entirely
+              // allow_bulk_delete: false,
+            },
+          },
+        },
+      ],
+    },
+  ],
+});
+```
+
+Requests and responses:
+
+- Dry run (no confirm):
+
+  `DELETE /users/123/posts/456/comments`
+
+  Response:
+
+  ```json
+  { "success": true, "confirm_required": true, "ids": ["k1", "k2", "k3"] }
+  ```
+
+- Confirmed deletion:
+
+  `DELETE /users/123/posts/456/comments?confirm=true`
+
+  Response:
+
+  ```json
+  { "success": true, "deleted": 3, "ids": ["k1", "k2", "k3"] }
+  ```
+
+Notes:
+
+- The bulk DELETE route is mounted only when `delete` operations are enabled for that related item and `allow_bulk_delete` is not set to `false`.
+- The result `ids` array is derived using the configured `id_mapping` for `delete`; if none is set, `'id'` is used.
+- Any scoping middleware you add (e.g., tenant or ownership filters) will also apply to the bulk DELETE via `req.apialize.options.where`.
+
 ## License
 
 MIT

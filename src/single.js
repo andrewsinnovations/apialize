@@ -86,14 +86,15 @@ function setupRelatedEndpoints(router, parentModel, related, parentIdMapping, pa
     
     // Helper: merge base related options with per-operation overrides and base middleware
     const resolveOpConfig = (opName) => {
-  const op = (perOperation && perOperation[opName]) || {};
-  const isWrite = opName === 'post' || opName === 'put' || opName === 'patch' || opName === 'delete';
+      const op = (perOperation && perOperation[opName]) || {};
+      const isWrite = opName === 'post' || opName === 'put' || opName === 'patch' || opName === 'delete';
       const baseMiddleware = isWrite ? baseWriteMiddleware : baseReadMiddleware;
       return {
         options: { ...relatedOptions, ...op, middleware: [...baseMiddleware, ...(op.middleware || [])] },
         modelOptions: op.modelOptions || relatedOptions.modelOptions || {},
         id_mapping: op.id_mapping || relatedOptions.id_mapping || 'id',
         middleware: [...baseMiddleware, ...(op.middleware || [])],
+        allow_bulk_delete: typeof op.allow_bulk_delete === 'boolean' ? op.allow_bulk_delete : true,
       };
     };
 
@@ -151,6 +152,7 @@ function setupRelatedEndpoints(router, parentModel, related, parentIdMapping, pa
       const { options: patchOptions, modelOptions: patchModelOptions } = resolveOpConfig('patch');
       const relatedPatchRouter = patch(relatedModel, patchOptions, patchModelOptions || {});
       // Mount at "/" so inner router's ":id" becomes ":relatedId" at the edge
+          storeParentIdMiddleware,
       relatedRouter.use('/', storeParentIdMiddleware, relatedPatchRouter);
     }
     
@@ -160,8 +162,60 @@ function setupRelatedEndpoints(router, parentModel, related, parentIdMapping, pa
       const relatedDestroyRouter = destroy(relatedModel, destroyOptions, deleteModelOptions || {});
       // Mount at "/" so inner router's ":id" becomes ":relatedId" at the edge
       relatedRouter.use('/', storeParentIdMiddleware, relatedDestroyRouter);
+
+      // Bulk DELETE on collection: DELETE /:id/related_things?confirm=true
+      // Behavior: when confirm!=true, act as dry run and return the list of ids to be deleted
+      //           when confirm==true, delete all scoped related records and return count and ids
+      const { modelOptions: bulkDelModelOptions, id_mapping: bulkDelIdMapping, middleware: bulkDelMiddleware, allow_bulk_delete } = resolveOpConfig('delete');
+      if (allow_bulk_delete) {
+        relatedRouter.delete(
+          '/',
+          storeParentIdMiddleware,
+          apializeContext,
+          ...bulkDelMiddleware,
+          asyncHandler(async (req, res) => {
+            // Determine confirmation flag
+            const q = req.query || {};
+            const confirmed = ['true', '1', 'yes', 'y'].includes(String(q.confirm).toLowerCase());
+
+            // Where clause should already include parent FK scope from middleware
+            const baseWhere = (req.apialize && req.apialize.options && req.apialize.options.where) || {};
+            // Strip out non-column query flags potentially merged by apializeContext
+            if (Object.prototype.hasOwnProperty.call(baseWhere, 'confirm')) {
+              delete baseWhere.confirm;
+            }
+
+            // Fetch ids to be affected (respect id_mapping override)
+            const findOptions = { ...bulkDelModelOptions, where: baseWhere, attributes: [bulkDelIdMapping] };
+            const rows = await relatedModel.findAll(findOptions);
+            const ids = rows.map((r) => (r && r.get ? r.get(bulkDelIdMapping) : r[bulkDelIdMapping]));
+            
+            if (!confirmed) {
+              return res.json({ success: true, confirm_required: true, ids });
+            }
+
+            // Perform deletion
+            try {
+              const destroyOptions = { ...bulkDelModelOptions, where: baseWhere };
+              const deleted = await relatedModel.destroy(destroyOptions);
+              return res.json({ success: true, deleted, ids });
+            } catch (err) {
+              // Surface error for debugging purposes
+              console.error('[Apialize] Bulk delete error:', err);
+              return res.status(500).json({ success: false, error: String((err && err.message) || err) });
+            }
+          }),
+        );
+      }
     }
     
+    // Attach an error handler for related routes to surface middleware errors as JSON
+    relatedRouter.use((err, _req, res, _next) => {
+      // eslint-disable-next-line no-console
+      console.error('[Apialize] Related route error:', err);
+      res.status(500).json({ success: false, error: String((err && err.message) || err) });
+    });
+
     // Mount the related router
     router.use(`/:${parentParamName}/${endpointPath}`, relatedRouter);
     // Note: true recursion is handled by passing 'related' to the child single() above
@@ -195,7 +249,7 @@ function single(model, options = {}, modelOptions = {}) {
   const { middleware = [], id_mapping = 'id', param_name = 'id', related = [] } = options;
   const inline = middleware.filter((fn) => typeof fn === "function");
   const router = express.Router({ mergeParams: true });
-  
+
   // Main single record endpoint
   router.get(
     `/:${param_name}`,

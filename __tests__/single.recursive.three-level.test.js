@@ -135,5 +135,46 @@ describe("single() recursion with three levels (users -> posts -> comments)", ()
     expect(getComment.status).toBe(200);
     expect(getComment.body.success).toBe(true);
     expect(getComment.body.record.text).toBe("Nice!");
+
+    // UPDATE third-level comment via PUT (must include required fields)
+    const putComment = await request(app)
+      .put(`/users/${userId}/posts/${post1Id}/comments/${commentId}`)
+      .send({ text: "Updated comment", user_id: userId });
+    expect(putComment.status).toBe(200);
+    expect(putComment.body.success).toBe(true);
+
+    // Verify the update took effect
+    const getAfterPut = await request(app).get(`/users/${userId}/posts/${post1Id}/comments/${commentId}`);
+    expect(getAfterPut.status).toBe(200);
+    expect(getAfterPut.body.success).toBe(true);
+    expect(getAfterPut.body.record.text).toBe("Updated comment");
+    expect(getAfterPut.body.record.user_id).toBe(userId);
+    expect(getAfterPut.body.record.post_id).toBe(post1Id);
+
+    // PATCH third-level comment (partial update)
+    const patchComment = await request(app)
+      .patch(`/users/${userId}/posts/${post1Id}/comments/${commentId}`)
+      .send({ text: "Patched comment" });
+    expect(patchComment.status).toBe(200);
+    expect(patchComment.body.success).toBe(true);
+  expect(patchComment.body.id).toBe(String(commentId));
+
+    // Verify the patch took effect
+    const getAfterPatch = await request(app).get(`/users/${userId}/posts/${post1Id}/comments/${commentId}`);
+    expect(getAfterPatch.status).toBe(200);
+    expect(getAfterPatch.body.record.text).toBe("Patched comment");
+
+    // DELETE third-level comment
+    const delComment = await request(app)
+      .delete(`/users/${userId}/posts/${post1Id}/comments/${commentId}`);
+    expect(delComment.status).toBe(200);
+    expect(delComment.body.success).toBe(true);
+  expect(delComment.body.id).toBe(String(commentId));
+
+    // Ensure it's gone from the list
+    const listCommentsAfterDelete = await request(app)
+      .get(`/users/${userId}/posts/${post1Id}/comments`);
+    expect(listCommentsAfterDelete.status).toBe(200);
+    expect(listCommentsAfterDelete.body.data.map(r => r.text).sort()).toEqual(["Agreed"]);
   });
 });
