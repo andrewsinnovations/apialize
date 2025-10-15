@@ -120,7 +120,8 @@ Each helper accepts `(model, options = {}, modelOptions = {})` unless otherwise 
 
 For `single()`, `update()`, `patch()`, and `destroy()` the `options` object supports:
 - `middleware`: array of middleware functions
-- `id_mapping`: string mapping URL `:id` to a field (default `'id'`)
+- `id_mapping`: string mapping URL param to a field (default `'id'`)
+- `param_name` (single only): change the name of the URL parameter used by `single()` for the record id (default `'id'`)
 
 Passing an empty object `{}` as the second argument is ignored (backwards compatibility). Any function argument is treated as middleware.
 
@@ -343,6 +344,65 @@ Examples:
 - `DELETE /users/:id/posts/:postId` → delete one
 
 ---
+
+## 8. Nested related routes (recursion)
+
+You can nest related definitions at any depth by attaching a `related` array on a child related item. The child `get` operation is implemented using the same core `single()` helper under the hood, so all of its behavior (middleware, `id_mapping`, `modelOptions`, and further `related` nesting) applies consistently.
+
+Key points:
+- Recursion: define `related` on any child to continue nesting (e.g., users → posts → comments → ...).
+- Parent scoping: every nested level is automatically filtered by the parent through its foreign key; writes inject the correct parent foreign key automatically.
+- Identifier mapping: each level can customize `id_mapping` independently.
+- Param names: the parent `single()` uses `param_name` (default `'id'`). Nested levels use a child id parameter segment internally; clients see concrete values in the URL, so the actual placeholder name is only relevant if you inspect `req.params` in middleware.
+
+Example: users → posts → comments, with external identifiers and attribute exclusions at each level:
+
+```js
+app.use(
+  "/users",
+  single(User, {
+    // Expose users by external_id and hide internal id in responses
+    id_mapping: "external_id",
+    middleware: [auth],
+    related: [
+      {
+        model: Post,
+        path: "posts", // optional; defaults from model name
+        foreignKey: "user_id", // optional; defaults to `${parent}_id`
+        options: {
+          id_mapping: "external_id",
+          modelOptions: { attributes: { exclude: ["id"] } },
+        },
+        // Nest comments under each post
+        related: [
+          {
+            model: Comment,
+            options: {
+              id_mapping: "uuid",
+              modelOptions: { attributes: { exclude: ["id", "post_id"] } },
+            },
+          },
+        ],
+        perOperation: {
+          list: { defaultPageSize: 25 },
+          get:  { modelOptions: { attributes: ["external_id", "title", "content"] } },
+        },
+      },
+    ],
+  }, {
+    // Sequelize options for the top-level single() query
+    attributes: { exclude: ["id"] },
+  })
+);
+```
+
+This mounts endpoints like:
+- `GET /users/:id/posts` and `GET /users/:id/posts/:post` (id mapping applied per level)
+- `POST /users/:id/posts` (FK injected)
+- `GET /users/:id/posts/:post/comments` and `GET /users/:id/posts/:post/comments/:comment`
+- `PUT|PATCH|DELETE` available per allowed operations at each level
+
+Because nested `get` uses core `single()`, you get consistent 404 handling, response shape `{ success: true, record }`, and you can keep nesting by adding further `related` entries.
 
 ## License
 

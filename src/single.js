@@ -11,7 +11,7 @@ const update = require("./update");
 const patch = require("./patch");
 const destroy = require("./destroy");
 
-function setupRelatedEndpoints(router, parentModel, related, parentIdMapping, parentModelOptions) {
+function setupRelatedEndpoints(router, parentModel, related, parentIdMapping, parentModelOptions, parentParamName = 'id') {
   related.forEach((relatedConfig) => {
     if (!relatedConfig.model) {
       throw new Error("Related model configuration must include a 'model' property");
@@ -32,9 +32,12 @@ function setupRelatedEndpoints(router, parentModel, related, parentIdMapping, pa
     // Determine the foreign key that links to the parent model
     const relatedForeignKey = foreignKey || `${parentModel.name.toLowerCase()}_id`;
     
-    // Resolve parent's internal id (primary key) when id_mapping is not 'id'
-    const resolveParentInternalId = async (req) => {
-      const parentParamId = req.apialize?.parentId || req.params['id'];
+    // Resolve parent's internal id (primary key) honoring the param name for this nesting level
+    const resolveParentInternalId = async (req, currentParamName = parentParamName, preferStored = false) => {
+      // Choose id source depending on context: for reads use current route param first; for writes prefer stored parentId
+      const parentParamId = preferStored
+        ? ((req.apialize && req.apialize.parentId) ?? req.params[currentParamName] ?? req.params['id'])
+        : (req.params[currentParamName] ?? req.params['id'] ?? (req.apialize && req.apialize.parentId));
       if (!parentParamId) return null;
       if ((parentIdMapping || 'id') === 'id') return parentParamId;
       // Find parent by its exposed identifier to obtain internal id
@@ -49,24 +52,24 @@ function setupRelatedEndpoints(router, parentModel, related, parentIdMapping, pa
     };
 
     // Create middleware that filters related records by parent internal ID
-    const parentFilterMiddlewareFactory = (parentParamName = 'id') => asyncHandler(async (req, res, next) => {
+  const parentFilterMiddlewareFactory = (paramName = parentParamName, preferStored = false) => asyncHandler(async (req, res, next) => {
       if (!req.apialize) req.apialize = {};
       if (!req.apialize.options) req.apialize.options = {};
       if (!req.apialize.options.where) req.apialize.options.where = {};
 
-      // Resolve parent internal id
-      const parentInternalId = await resolveParentInternalId(req);
+      // Resolve parent internal id for this nesting level
+  const parentInternalId = await resolveParentInternalId(req, paramName, preferStored);
       // If not found, use impossible value to ensure empty matches (for list)
       req.apialize.options.where[relatedForeignKey] = parentInternalId ?? '__apialize_none__';
       next();
     });
     
-    // Create middleware for write operations that sets the foreign key
-    const setForeignKeyMiddleware = asyncHandler(async (req, res, next) => {
+    // Create middleware for write operations that sets the foreign key (param-aware)
+  const setForeignKeyMiddlewareFactory = (paramName = parentParamName, preferStored = false) => asyncHandler(async (req, res, next) => {
       if (["POST", "PUT", "PATCH"].includes(req.method)) {
         if (!req.apialize) req.apialize = {};
         if (!req.apialize.values) req.apialize.values = {};
-        const parentInternalId = await resolveParentInternalId(req);
+  const parentInternalId = await resolveParentInternalId(req, paramName, preferStored);
         if (parentInternalId == null) return defaultNotFound(res);
         req.apialize.values[relatedForeignKey] = parentInternalId;
       }
@@ -74,17 +77,17 @@ function setupRelatedEndpoints(router, parentModel, related, parentIdMapping, pa
     });
     
     // Create middleware instances for read and write operations
-  const parentFilterForRead = parentFilterMiddlewareFactory('id'); // For list/get operations, use parent 'id' param
-  const parentFilterForWrite = parentFilterMiddlewareFactory('id'); // For write operations, also use parent 'id' param initially
+  const parentFilterForRead = parentFilterMiddlewareFactory(parentParamName, false); // reads: prefer route param
+  const parentFilterForWrite = parentFilterMiddlewareFactory(parentParamName, true); // writes: prefer stored parentId
     
   // Base middleware (per-op middleware will be appended later)
   const baseReadMiddleware = [parentFilterForRead, ...(relatedOptions.middleware || [])];
-  const baseWriteMiddleware = [parentFilterForWrite, setForeignKeyMiddleware, ...(relatedOptions.middleware || [])];
+  const baseWriteMiddleware = [parentFilterForWrite, setForeignKeyMiddlewareFactory(parentParamName, true), ...(relatedOptions.middleware || [])];
     
     // Helper: merge base related options with per-operation overrides and base middleware
     const resolveOpConfig = (opName) => {
-      const op = (perOperation && perOperation[opName]) || {};
-      const isWrite = opName === 'post' || opName === 'put' || opName === 'patch';
+  const op = (perOperation && perOperation[opName]) || {};
+  const isWrite = opName === 'post' || opName === 'put' || opName === 'patch' || opName === 'delete';
       const baseMiddleware = isWrite ? baseWriteMiddleware : baseReadMiddleware;
       return {
         options: { ...relatedOptions, ...op, middleware: [...baseMiddleware, ...(op.middleware || [])] },
@@ -96,9 +99,17 @@ function setupRelatedEndpoints(router, parentModel, related, parentIdMapping, pa
 
     // Create a sub-router for all related operations
     const relatedRouter = express.Router({ mergeParams: true });
+
+    // Middleware to capture parent id before inner route adds its own ":id"/":relatedId"
+    const storeParentIdMiddleware = (req, _res, next) => {
+      req.apialize = req.apialize || {};
+      // Always set current level parent id to ensure deeper levels can reference the latest context if they rely on parentId
+      req.apialize.parentId = req.params[parentParamName];
+      next();
+    };
     
-    // LIST operation: GET /:id/related_things
-    if (operations.includes('list')) {
+  // LIST operation: GET /:id/related_things
+  if (operations.includes('list')) {
       const { options: listOptions, modelOptions: listModelOptions } = resolveOpConfig('list');
       const relatedListRouter = list(relatedModel, listOptions, listModelOptions);
       relatedRouter.use('/', relatedListRouter);
@@ -111,43 +122,20 @@ function setupRelatedEndpoints(router, parentModel, related, parentIdMapping, pa
       relatedRouter.use('/', relatedCreateRouter);
     }
     
-    // SINGLE GET operation: GET /:id/related_things/:relatedId  
-    if (operations.includes('get') || operations.includes('single')) {
-      const { modelOptions: getModelOptions, id_mapping: getIdMapping, middleware: getMiddleware } = resolveOpConfig('get');
-      relatedRouter.get(
-        "/:relatedId",
-        apializeContext,
-        ...getMiddleware,
-        asyncHandler(async (req, res) => {
-          const relatedIdMapping = getIdMapping;
-          req.apialize.id = req.params.relatedId;
-          if (!req.apialize.where) req.apialize.where = {};
-          if (typeof req.apialize.where[relatedIdMapping] === "undefined")
-            req.apialize.where[relatedIdMapping] = req.params.relatedId;
-          
-          const baseWhere =
-            (req.apialize.options && req.apialize.options.where) || {};
-          const fullWhere = { ...baseWhere, ...req.apialize.where };
-          
-          // Merge model options with where clause
-          const queryOptions = { ...getModelOptions, where: fullWhere };
-          const result = await relatedModel.findOne(queryOptions);
-          if (result == null) return defaultNotFound(res);
-          let payload = result;
-          if (payload && typeof payload === "object")
-            payload = payload.get ? payload.get({ plain: true}) : { ...payload };
-          res.json({success: true, record: payload});
-        }),
+    // SINGLE operation: GET /:id/related_things/:relatedId using built-in single() via a nested router
+    if (operations.includes('get')) {
+      const { options: getOptions, modelOptions: getModelOptions } = resolveOpConfig('get');
+      // Configure child single to read ':relatedId' param and pass child related configs for true recursion
+      const childSingleRouter = single(
+        relatedModel,
+        { ...getOptions, param_name: 'relatedId', related: Array.isArray(relatedConfig.related) ? relatedConfig.related : [] },
+        getModelOptions,
       );
+      const nested = express.Router({ mergeParams: true });
+      // Mount at '/' so inner single's '/:relatedId' is the only id segment
+      nested.use('/', storeParentIdMiddleware, childSingleRouter);
+      relatedRouter.use('/', nested);
     }
-    
-    // Middleware to capture parent id before inner route adds its own ":id"
-    const storeParentIdMiddleware = (req, _res, next) => {
-      // At this stage, req.params.id refers to the parent id
-      req.apialize = req.apialize || {};
-      if (!req.apialize.parentId) req.apialize.parentId = req.params.id;
-      next();
-    };
     
     // UPDATE operation: PUT /:id/related_things/:relatedId
     if (operations.includes('put') || operations.includes('update')) {
@@ -175,7 +163,8 @@ function setupRelatedEndpoints(router, parentModel, related, parentIdMapping, pa
     }
     
     // Mount the related router
-    router.use(`/:id/${endpointPath}`, relatedRouter);
+    router.use(`/:${parentParamName}/${endpointPath}`, relatedRouter);
+    // Note: true recursion is handled by passing 'related' to the child single() above
   });
 }
 
@@ -203,20 +192,21 @@ function pluralize(word) {
 
 function single(model, options = {}, modelOptions = {}) {
   ensureFn(model, "findOne");
-  const { middleware = [], id_mapping = 'id', related = [] } = options;
+  const { middleware = [], id_mapping = 'id', param_name = 'id', related = [] } = options;
   const inline = middleware.filter((fn) => typeof fn === "function");
   const router = express.Router({ mergeParams: true });
   
   // Main single record endpoint
   router.get(
-    "/:id",
+    `/:${param_name}`,
     apializeContext,
     ...inline,
     asyncHandler(async (req, res) => {
-      req.apialize.id = req.params.id;
+      const paramValue = req.params[param_name];
+      req.apialize.id = paramValue;
       if (!req.apialize.where) req.apialize.where = {};
       if (typeof req.apialize.where[id_mapping] === "undefined")
-        req.apialize.where[id_mapping] = req.params.id;
+        req.apialize.where[id_mapping] = paramValue;
       const baseWhere =
         (req.apialize.options && req.apialize.options.where) || {};
       const fullWhere = { ...baseWhere, ...req.apialize.where };
@@ -234,7 +224,8 @@ function single(model, options = {}, modelOptions = {}) {
 
   // Create related model endpoints
   if (Array.isArray(related) && related.length > 0) {
-    setupRelatedEndpoints(router, model, related, id_mapping, modelOptions);
+    // Propagate param_name to ensure child routes mount under the correct parent param segment
+    setupRelatedEndpoints(router, model, related, id_mapping, modelOptions, param_name);
   }
 
   router.apialize = {};
