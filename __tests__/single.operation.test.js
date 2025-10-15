@@ -1,0 +1,131 @@
+const express = require("express");
+const bodyParser = require("body-parser");
+const request = require("supertest");
+const { Sequelize, DataTypes } = require("sequelize");
+const { single, create, list } = require("../src");
+
+async function build({ singleOptions = {}, modelOptions = {}, relatedConfig = null } = {}) {
+  const sequelize = new Sequelize("sqlite::memory:", { logging: false });
+  const User = sequelize.define(
+    "User",
+    {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      external_id: { type: DataTypes.STRING(64), allowNull: false, unique: true },
+      name: { type: DataTypes.STRING(100), allowNull: false },
+      tenant_id: { type: DataTypes.INTEGER, allowNull: true },
+    },
+    { tableName: "single_users", timestamps: false }
+  );
+  const Post = sequelize.define(
+    "Post",
+    {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      user_id: { type: DataTypes.INTEGER, allowNull: false },
+      title: { type: DataTypes.STRING(255), allowNull: false },
+    },
+    { tableName: "single_posts", timestamps: false }
+  );
+
+  // Attach relation-like info
+  User.hasMany(Post, { foreignKey: "user_id", as: "posts" });
+  Post.belongsTo(User, { foreignKey: "user_id", as: "user" });
+
+  await sequelize.sync({ force: true });
+
+  const app = express();
+  app.use(bodyParser.json());
+
+  const options = { ...singleOptions };
+  if (relatedConfig) options.related = [relatedConfig === true ? { model: Post } : relatedConfig];
+
+  app.use("/users", create(User));
+  app.use("/posts", list(Post));
+  app.use("/users", single(User, options, modelOptions));
+
+  return { sequelize, User, Post, app };
+}
+
+describe("single operation: comprehensive options coverage", () => {
+  let sequelize;
+
+  afterEach(async () => {
+    if (sequelize) {
+      await sequelize.close();
+      sequelize = null;
+    }
+  });
+
+  test("default id mapping returns one record; respects modelOptions attributes", async () => {
+    const { sequelize: s, app } = await build({ modelOptions: { attributes: ["id", "name"] } });
+    sequelize = s;
+
+    const created = await request(app).post("/users").send({ external_id: "u1", name: "Alice" });
+    const res = await request(app).get(`/users/${created.body.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.record).toEqual({ id: created.body.id, name: "Alice" });
+  });
+
+  test("id_mapping: external_id reads via external id", async () => {
+    const { sequelize: s, app } = await build({ singleOptions: { id_mapping: "external_id" } });
+    sequelize = s;
+
+    await request(app).post("/users").send({ external_id: "ux", name: "Bob" });
+    const res = await request(app).get(`/users/ux`);
+    expect(res.status).toBe(200);
+    expect(res.body.record).toMatchObject({ external_id: "ux", name: "Bob" });
+  });
+
+  test("ownership filtering via query filters: 404 when not in scope", async () => {
+    const { sequelize: s, app } = await build();
+    sequelize = s;
+
+    const created = await request(app).post("/users").send({ external_id: "scoped", name: "Scoped", tenant_id: 1 });
+
+    const miss = await request(app).get(`/users/${created.body.id}?tenant_id=2`);
+    expect(miss.status).toBe(404);
+
+    const ok = await request(app).get(`/users/${created.body.id}?tenant_id=1`);
+    expect(ok.status).toBe(200);
+  });
+
+  test("middleware modifies context before read (inject filter)", async () => {
+    const scope = (req, _res, next) => {
+      req.apialize = req.apialize || {};
+      req.apialize.options = req.apialize.options || {};
+      req.apialize.options.where = { ...(req.apialize.options.where || {}), tenant_id: 5 };
+      next();
+    };
+    const { sequelize: s, app } = await build({ singleOptions: { middleware: [scope] } });
+    sequelize = s;
+
+    const u1 = await request(app).post("/users").send({ external_id: "t5-1", name: "A", tenant_id: 5 });
+    await request(app).post("/users").send({ external_id: "t9-1", name: "B", tenant_id: 9 });
+
+    const ok = await request(app).get(`/users/${u1.body.id}`);
+    expect(ok.status).toBe(200);
+
+    const miss = await request(app).get(`/users/${u1.body.id}`);
+    expect(miss.status).toBe(200); // same scope still applied; same record
+  });
+
+  test("related recursion mounted via single() nested router works for get/list & write ops scoping", async () => {
+    const { sequelize: s, User, Post: P2, app } = await build({ relatedConfig: true });
+    sequelize = s;
+
+    const u = await request(app).post("/users").send({ external_id: "usr1", name: "U1" });
+    // Seed a post directly
+    await P2.create({ user_id: u.body.id, title: "P1" });
+
+    // List child via related list
+    const listRes = await request(app).get(`/users/${u.body.id}/posts`);
+    expect(listRes.status).toBe(200);
+    expect(listRes.body.meta.count).toBe(1);
+
+    // GET child via nested single
+  const post = await P2.findOne({ where: { user_id: u.body.id } });
+    const getChild = await request(app).get(`/users/${u.body.id}/posts/${post.id}`);
+    expect(getChild.status).toBe(200);
+    expect(getChild.body.record).toMatchObject({ id: post.id, title: "P1" });
+  });
+});

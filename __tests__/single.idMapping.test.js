@@ -56,9 +56,12 @@ describe("single() with id_mapping option", () => {
       const getRes = await request(app).get(`/items/${recordId}`);
       expect(getRes.status).toBe(200);
       expect(getRes.body).toMatchObject({
-        id: recordId,
-        name: "Test Item",
-        external_id: "ext-123"
+        success: true,
+        record: {
+          id: recordId,
+          name: "Test Item",
+          external_id: "ext-123"
+        }
       });
     });
 
@@ -78,9 +81,12 @@ describe("single() with id_mapping option", () => {
       const getRes = await request(app).get(`/items/${recordId}`);
       expect(getRes.status).toBe(200);
       expect(getRes.body).toMatchObject({
-        id: recordId,
-        name: "Test Item",
-        external_id: "ext-456"
+        success: true,
+        record: {
+          id: recordId,
+          name: "Test Item",
+          external_id: "ext-456"
+        }
       });
     });
   });
@@ -101,8 +107,11 @@ describe("single() with id_mapping option", () => {
       const getRes = await request(app).get(`/items/ext-789`);
       expect(getRes.status).toBe(200);
       expect(getRes.body).toMatchObject({
-        name: "Test Item",
-        external_id: "ext-789"
+        success: true,
+        record: {
+          name: "Test Item",
+          external_id: "ext-789"
+        }
       });
     });
 
@@ -136,8 +145,11 @@ describe("single() with id_mapping option", () => {
       const getRes = await request(app).get(`/items/ext-middleware-test`);
       expect(getRes.status).toBe(200);
       expect(getRes.body).toMatchObject({
-        name: "Test Item",
-        external_id: "ext-middleware-test"
+        success: true,
+        record: {
+          name: "Test Item",
+          external_id: "ext-middleware-test"
+        }
       });
     });
   });
@@ -158,8 +170,11 @@ describe("single() with id_mapping option", () => {
       const getRes = await request(app).get(`/items/12345`);
       expect(getRes.status).toBe(200);
       expect(getRes.body).toMatchObject({
-        name: "Numeric External ID",
-        external_id: "12345"
+        success: true,
+        record: {
+          name: "Numeric External ID",
+          external_id: "12345"
+        }
       });
     });
 
@@ -180,8 +195,11 @@ describe("single() with id_mapping option", () => {
       const getRes = await request(app).get(`/items/${specialId}`);
       expect(getRes.status).toBe(200);
       expect(getRes.body).toMatchObject({
-        name: "Special ID",
-        external_id: specialId
+        success: true,
+        record: {
+          name: "Special ID",
+          external_id: specialId
+        }
       });
     });
   });
@@ -237,7 +255,7 @@ describe("single() with id_mapping option", () => {
       // This should find the record because name matches the middleware condition
       const getRes1 = await request(app).get(`/items/shared-ext-id`);
       expect(getRes1.status).toBe(200);
-      expect(getRes1.body.name).toBe("Context Test");
+      expect(getRes1.body.record.name).toBe("Context Test");
 
       // This should not find the record because name doesn't match
       const getRes2 = await request(app).get(`/items/other-ext-id`);
