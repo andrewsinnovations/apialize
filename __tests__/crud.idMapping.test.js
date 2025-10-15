@@ -59,8 +59,11 @@ describe("CRUD operations with id_mapping option", () => {
       const getRes = await request(app).get(`/items/ext-single-123`);
       expect(getRes.status).toBe(200);
       expect(getRes.body).toMatchObject({
-        name: "Test Item",
-        external_id: "ext-single-123"
+        success: true,
+        record: {
+          name: "Test Item",
+          external_id: "ext-single-123"
+        }
       });
     });
   });
@@ -84,9 +87,7 @@ describe("CRUD operations with id_mapping option", () => {
       
       expect(updateRes.status).toBe(200);
       expect(updateRes.body).toMatchObject({
-        name: "Updated Name",
-        external_id: "ext-update-123",
-        description: null // Should be null since not provided in update
+        success: true
       });
     });
 
@@ -129,9 +130,12 @@ describe("CRUD operations with id_mapping option", () => {
       const getRes = await request(app).get(`/items/ext-patch-123`);
       expect(getRes.status).toBe(200);
       expect(getRes.body).toMatchObject({
-        name: "Original Name",
-        external_id: "ext-patch-123",
-        description: "Updated description"
+        success: true,
+        record: {
+          name: "Original Name",
+          external_id: "ext-patch-123",
+          description: "Updated description"
+        }
       });
     });
 
@@ -222,14 +226,14 @@ describe("CRUD operations with id_mapping option", () => {
       // Read
       const getRes = await request(app).get(`/items/${externalId}`);
       expect(getRes.status).toBe(200);
-      expect(getRes.body.external_id).toBe(externalId);
+      expect(getRes.body.record.external_id).toBe(externalId);
 
       // Update
       const updateRes = await request(app)
         .put(`/items/${externalId}`)
         .send({ name: "Updated via PUT", external_id: externalId });
       expect(updateRes.status).toBe(200);
-      expect(updateRes.body.name).toBe("Updated via PUT");
+      expect(updateRes.body).toMatchObject({ success: true });
 
       // Patch
       const patchRes = await request(app)
@@ -240,7 +244,7 @@ describe("CRUD operations with id_mapping option", () => {
       // Verify patch
       const getAfterPatchRes = await request(app).get(`/items/${externalId}`);
       expect(getAfterPatchRes.status).toBe(200);
-      expect(getAfterPatchRes.body.description).toBe("Patched description");
+      expect(getAfterPatchRes.body.record.description).toBe("Patched description");
 
       // Delete
       const deleteRes = await request(app).delete(`/items/${externalId}`);

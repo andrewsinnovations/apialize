@@ -155,7 +155,7 @@ describe("multi-user ownership with default numeric id (bearer auth)", () => {
     // User A can read own record
     const getA1 = await request(app).get(`/records/${a1}`).set(authA);
     expect(getA1.status).toBe(200);
-    expect(getA1.body.data).toBe("A1");
+    expect(getA1.body.record.data).toBe("A1");
 
     // User B cannot read User A's record -> 404 (filtered out by ownership)
     const getA1ByB = await request(app).get(`/records/${a1}`).set(authB);
@@ -168,7 +168,7 @@ describe("multi-user ownership with default numeric id (bearer auth)", () => {
       .send({ data: "A1-updated" });
     expect(patchA1.status).toBe(200);
     const verifyA1 = await request(app).get(`/records/${a1}`).set(authA);
-    expect(verifyA1.body.data).toBe("A1-updated");
+    expect(verifyA1.body.record.data).toBe("A1-updated");
 
     // Patch other user's record (User B tries to patch A1) -> 404
     const patchA1ByB = await request(app)
@@ -183,7 +183,7 @@ describe("multi-user ownership with default numeric id (bearer auth)", () => {
       .set(authB)
       .send({ data: "B1-replaced" });
     expect(putB1.status).toBe(200);
-    expect(putB1.body.data).toBe("B1-replaced");
+    expect(putB1.body).toMatchObject({ success: true });
 
     // PUT other user's record -> 404
     const putA2ByB = await request(app)

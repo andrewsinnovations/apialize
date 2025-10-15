@@ -16,13 +16,18 @@ function update(model, options = {}, modelOptions = {}) {
     apializeContext,
     ...inline,
     asyncHandler(async (req, res) => {
+      const id = req.params.id;
+      const provided =
+        (req.apialize && (req.apialize.body || req.apialize.values)) ||
+        req.body ||
+        {};
       const ownershipWhere =
         (req.apialize.options && req.apialize.options.where) || {};
       
       // Merge model options for findOne query
       const findOptions = { 
         ...modelOptions, 
-        where: { ...ownershipWhere, [id_mapping]: req.params.id } 
+        where: { ...ownershipWhere, [id_mapping]: id } 
       };
       const existing = await model.findOne(findOptions);
       if (!existing) return defaultNotFound(res);
@@ -32,14 +37,14 @@ function update(model, options = {}, modelOptions = {}) {
       );
       const nextValues = {};
       for (const attr of allAttrs) {
-        if (Object.prototype.hasOwnProperty.call(req.body, attr)) {
-          nextValues[attr] = req.body[attr];
+        if (Object.prototype.hasOwnProperty.call(provided, attr)) {
+          nextValues[attr] = provided[attr];
         } else {
           const def = existing.constructor.rawAttributes[attr].defaultValue;
           nextValues[attr] = typeof def !== "undefined" ? def : null;
         }
       }
-      nextValues[id_mapping] = req.params.id;
+      nextValues[id_mapping] = id;
       existing.set(nextValues);
       if (ownershipWhere && Object.keys(ownershipWhere).length) {
         for (const [k, v] of Object.entries(ownershipWhere)) {
@@ -52,10 +57,7 @@ function update(model, options = {}, modelOptions = {}) {
         fields: Object.keys(nextValues) 
       };
       await existing.save(saveOptions);
-      const plain = existing.get
-        ? existing.get({ plain: true })
-        : { ...existing };
-      res.json(plain);
+      res.json({success: true});
     }),
   );
   router.apialize = {};

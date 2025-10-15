@@ -1,16 +1,15 @@
 # apialize
 
-Turn a Sequelize‑like model into a production ready REST(ish) CRUD API in a few lines.
+Turn a Sequelize‑like model into a production‑ready REST(ish) CRUD API in a few lines.
 
-> Drop‐in Express routers for list / read / create / update / patch / destroy with:
->
-> - Pluggable middleware (auth, ownership, validation)
-> - Simple primary identifier assumption (`id` column)
-> - Per-model default pagination + ordering (`page_size`, `orderby`, `orderdir`)
-> - Automatic equality filtering from query string (`?field=value`)
-> - Consistent response shapes + 404 handling
+Drop‑in Express routers for list / read / create / update / patch / destroy with:
+- Pluggable middleware (auth, ownership, validation)
+- Simple primary identifier assumption (`id` column, configurable)
+- Per‑model default pagination + ordering (`page_size`, `orderby`, `orderdir`)
+- Automatic equality filtering from query string (`?field=value`)
+- Consistent response shapes + 404 handling
 
-No heavy abstractions, no magic: you keep full control of Express and your models. Works with Sequelize or any model object that implements the required methods.
+No heavy abstractions: you keep full control of Express and your models. Works with Sequelize or any model object that implements the required methods.
 
 ---
 
@@ -18,16 +17,11 @@ No heavy abstractions, no magic: you keep full control of Express and your model
 
 1. Installation
 2. Quick start
-3. Exported helpers
-4. Options (`middleware`, per‑route composition)
-5. Middleware patterns (auth, ownership, validation, dynamic filters)
-6. Filtering + pagination via query string
-7. Full vs partial updates (PUT vs PATCH)
-8. Multi‑user ownership example
-9. Shaping `req.apialize` (advanced)
-10. Response formats & errors
-11. FAQ / Tips
-12. Pagination
+3. API reference (helpers, options)
+4. Response formats
+5. Filtering, pagination, ordering
+6. Middleware and `req.apialize`
+7. Related models with `single(..., { related: [...] })`
 
 ## 1. Installation
 
@@ -73,13 +67,13 @@ You instantly get:
 | GET    | /things     | `list`    | List + count (with optional filters)             |
 | GET    | /things/:id | `single`  | Fetch one (404 if not found)                     |
 | POST   | /things     | `create`  | Create (201) returns `{ success: true, id }`     |
-| PUT    | /things/:id | `update`  | Full replace (omitted fields nulled / defaulted) |
+| PUT    | /things/:id | `update`  | Full replace (unspecified fields null/default)   |
 | PATCH  | /things/:id | `patch`   | Partial update (only provided fields)            |
 | DELETE | /things/:id | `destroy` | Delete (404 if nothing affected)                 |
 
 ---
 
-## 3. Exported helpers
+## 3. API reference
 
 All helpers return an `express.Router` you mount under a base path:
 
@@ -112,21 +106,21 @@ app.use("/widgets", crud(Widget));
 
 `crud(model, options)` is sugar that internally mounts every operation with shared configuration + shared/global middleware.
 
-### Helper Signatures
+### Helper signatures
 
-```
-list(model, ...middleware)
-single(model, [options], ...middleware)
-create(model, ...middleware)
-update(model, [options], ...middleware)
-patch(model, [options], ...middleware)
-destroy(model, [options], ...middleware)
-crud(model, [options]) // options only supports { middleware, routes }
-```
+Each helper accepts `(model, options = {}, modelOptions = {})` unless otherwise stated. `options.middleware` is an array of Express middleware. `modelOptions` are passed through to Sequelize calls (`attributes`, `include`, etc.).
 
-For `single()`, `update()`, `patch()`, and `destroy()` operations that work with individual records, the options object supports:
-- `middleware`: array of middleware functions (same as other helpers)
-- `id_mapping`: string specifying which field the URL `:id` parameter maps to (default: `'id'`)
+- `list(model, options?, modelOptions?)`
+- `single(model, options?, modelOptions?)`
+- `create(model, options?, modelOptions?)`
+- `update(model, options?, modelOptions?)`
+- `patch(model, options?, modelOptions?)`
+- `destroy(model, options?, modelOptions?)`
+- `crud(model, options?)` // composition helper
+
+For `single()`, `update()`, `patch()`, and `destroy()` the `options` object supports:
+- `middleware`: array of middleware functions
+- `id_mapping`: string mapping URL `:id` to a field (default `'id'`)
 
 Passing an empty object `{}` as the second argument is ignored (backwards compatibility). Any function argument is treated as middleware.
 
@@ -152,9 +146,9 @@ const opts = {
 app.use("/widgets", crud(Widget, opts));
 ```
 
-### Identifier
+### Identifier mapping
 
-apialize assumes your public identifier is an `id` column. For operations that work with individual records (`single`, `update`, `patch`, `destroy`), you can customize which field the URL parameter maps to using the `id_mapping` option:
+apialize assumes your public identifier is an `id` column. For record operations (`single`, `update`, `patch`, `destroy`), customize which field the URL parameter maps to using `id_mapping`:
 
 ```js
 // Default behavior - maps :id parameter to 'id' field
@@ -183,63 +177,24 @@ Pagination & ordering precedence (within `list()`):
 
 ---
 
-## 5. Middleware patterns
+## 4. Response formats
 
-You can attach middleware at three levels:
+Success responses:
 
-1. Global (via `crud` `middleware` option)
-2. Per operation (via `crud` `routes.<op>` arrays)
-3. Inline for a single helper (`list(Model, auth, audit)`)
+- `list` → `{ success: true, meta: { page, page_size, total_pages, count[, order] }, data: [...] }`
+  - `meta.order` is included only when `metaShowOrdering: true` is set in list options.
+- `single` → `{ success: true, record: { ... } }`
+- `create` → `201 { success: true, id }`
+- `update` → `{ success: true }`
+- `patch` → `{ success: true, id }`
+- `destroy` → `{ success: true, id }`
 
-All middleware run **after** an internal context initializer (`apializeContext`) which ensures `req.apialize` exists.
-
-### `req.apialize` structure
-
-`apializeContext` builds:
-
-```js
-req.apialize = {
-  options: {
-    where: {
-      /* merged filters */
-    },
-  },
-  values: {
-    /* merged body values for create/updates */
-  },
-};
-```
-
-Ownership / authorization middleware can safely merge additional filters:
-
-```js
-function ownership(req, _res, next) {
-  const userId = req.user.id;
-  req.apialize.options.where.user_id = userId; // restrict every op to a user id by setting into where clause
-  if (["POST", "PUT", "PATCH"].includes(req.method)) {
-    req.apialize.values.user_id = userId; // force value
-  }
-  next();
-}
-```
-
-Validation example:
-
-```js
-function requireName(req, res, next) {
-	if (['POST','PUT'].includes(req.method) && !req.body.name) {
-		return res.status(422).json({ error: 'name required' });
-	}
-	next();
-
-app.use('/things', create(Thing, requireName));
-```
-
-Access denial: just send a response (e.g. 403) and skip `next()`.
+Not found: `404 { success: false, error: "Not Found" }`.
+Bad request (invalid filter/order column or type): `400 { success: false, error: "Bad request" }`.
 
 ---
 
-## 6. Filtering + pagination + ordering via query string
+## 5. Filtering, pagination, ordering
 
 Every ordinary query parameter becomes a simple equality in `where` (unless already set by earlier middleware). Reserved keys are NOT turned into filters:
 
@@ -297,195 +252,97 @@ Add your own sorting / advanced operator grammar (e.g. parse `api:sort=-created_
 
 ---
 
-## 7. Full vs partial updates
+## 6. Middleware and `req.apialize`
 
-`PUT /:id` (`update`) performs a **full replacement**:
+You can attach middleware at three levels:
 
-- Any attribute defined on the model but missing from the request body is set to `null` (or `defaultValue` if defined) except the id.
-- Ensures clients must send the complete new object.
+1. Global (via `crud` `middleware` option)
+2. Per operation (via `crud` `routes.<op>` arrays)
+3. Inline for a single helper (`list(Model, auth, audit)`)
 
-`PATCH /:id` (`patch`) performs a **merge**:
+All middleware run after an internal context initializer (`apializeContext`) which ensures `req.apialize` exists and merges query/body.
 
-- Only provided, valid attributes are updated.
-- If you send nothing, it still verifies existence (404 if missing) and returns success.
-
----
-
-## 8. Multi‑user ownership example
-
-Scenario: external UUID id, user ownership, bearer auth. Users can only see their own records; others resolve as 404.
-
-````js
-const { crud } = require('apialize');
-const { v4: uuid } = require('uuid');
-
-// Sequelize model: Record(id int PK auto, external_id string unique, user_id string, data string)
-Record.beforeCreate(r => { if (!r.external_id) r.external_id = uuid(); });
-
-async function authOwnership(req, res, next) {
-	const header = req.get('Authorization') || '';
-	const m = header.match(/^Bearer (.+)$/i);
-	if (!m) return res.status(401).json({ error: 'Unauthorized' });
-	const token = m[1];
-	const session = await Session.findOne({ where: { token } });
-	if (!session) return res.status(401).json({ error: 'Unauthorized' });
-	const userId = session.user_id;
-	// Restrict future queries
-	req.apialize.options.where.user_id = userId;
-	if (['POST','PUT','PATCH'].includes(req.method)) {
-		req.apialize.values.user_id = userId;
-	}
-	next();
-}
-
-app.use('/records', crud(Record, { middleware: [authOwnership] }));
----
-
-## 9. Shaping / Extending `req.apialize` (advanced)
-
-`apializeContext` merges:
-* `req.body` into `req.apialize.values`
-* query params into `req.apialize.options.where` (if that field not already defined)
-
-You can pre‑populate `req.apialize` in earlier middleware (e.g., attach `options.where` for ownership) **before** apialize routes run. The internal middleware preserves and merges rather than overwriting.
-
-Custom addition example (pagination):
+`req.apialize` structure:
 
 ```js
-function pagination(req, _res, next) {
-	const { limit, offset } = req.query;
-	if (limit) req.apialize.options.limit = Math.min(parseInt(limit, 10), 100);
-	if (offset) req.apialize.options.offset = parseInt(offset, 10) || 0;
-	// Remove so they are not treated as equality where filters (optional):
-	delete req.apialize.options.where.limit;
-	delete req.apialize.options.where.offset;
-	next();
-}
-app.use('/things', list(Thing, pagination));
-````
-
----
-
-## 10. Response formats & errors
-
-| Operation | Success (200/201) shape                                                              | Notes                                                              |
-| --------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
-| list      | `{ success: true, meta:{ page, page_size, total_pages, count, order }, data:[...] }` | Rows include normalized `id`; `meta.order` lists applied ordering. |
-| single    | Object representation (NOT wrapped)                                                  | Returns 404 `{ success:false, error:'Not Found' }` if missing.     |
-| create    | `{ success: true, id }` (201)                                                        | `id` normalized.                                                   |
-| update    | Full plain object (replaced)                                                         | Includes all attributes except internal id alias removal.          |
-| patch     | `{ success: true, id }`                                                              | Does not return modified fields; fetch separately if needed.       |
-| destroy   | `{ success: true, id }`                                                              | 404 if nothing deleted.                                            |
-
-Other errors: unhandled exceptions bubble to your global error handler; add one after mounting routers.
-
-### 403 vs 404 for ownership
-
-Ownership logic should generally return 404 (to avoid leaking existence) by filtering via `where`. If you need explicit forbidden semantics, send `res.status(403).json({...})` from middleware.
-
----
-
-## 11. FAQ / Tips
-
-**Q: Can I disable one of the routes with `crud`?**  
-Use individual helpers instead of `crud`, or mount `crud` then override (`app._router` surgery) — simpler: just compose only those you need manually.
-
-**Q: How do I add pagination / sorting?**  
-Middleware: parse query params, move them onto `req.apialize.options.limit / offset / order` and delete from `where` if inserted.
-
-**Q: How do I return extra metadata (e.g., timing)?**  
-Wrap the final handler with your own middleware placed after the apialize route (or replace `res.json`).
-
-**Q: Can I use this without Sequelize?**  
-Yes. Provide an object with the listed methods. For `update` / `destroy` you must mimic Sequelize return semantics (`update` returns `[affectedCount]`, `destroy` returns affected count). Instances should offer `.get({ plain: true })` or be plain objects.
-
-**Q: How do I use external IDs or UUIDs for record operations?**  
-Use the `id_mapping` option in the record-level helpers (`single`, `update`, `patch`, `destroy`) to map the URL parameter to a different field:
-
-```js
-// Model has: id (PK), external_id (UUID), name
-app.use("/items", create(Item));
-app.use("/items", single(Item, { id_mapping: 'external_id' }));
-app.use("/items", update(Item, { id_mapping: 'external_id' }));
-app.use("/items", patch(Item, { id_mapping: 'external_id' }));
-app.use("/items", destroy(Item, { id_mapping: 'external_id' }));
-
-// Now all operations work with external_id:
-// GET /items/550e8400-e29b-41d4-a716-446655440000 
-// PUT /items/550e8400-e29b-41d4-a716-446655440000 
-// PATCH /items/550e8400-e29b-41d4-a716-446655440000
-// DELETE /items/550e8400-e29b-41d4-a716-446655440000
+req.apialize = {
+  options: { where: {/* merged filters */}, limit, offset, order },
+  values: {/* merged body values for create/updates */},
+};
 ```
 
-**Q: Why does PATCH return only `{ success, id }`?**  
-Keeps payload small; avoids second fetch. If you need the updated object, chain a `single` fetch client side or modify the handler (copy `patch` and customize).
-
-**Q: How do I prevent certain fields from being updated?**  
-Strip them inside middleware before they reach `req.apialize.values`, or mutate `provided` keys in a forked helper.
-
-**Q: How do I add field validation?**  
-Attach middleware to `create` / `update` / `patch` that inspects `req.body` or `req.apialize.values` and returns 422 errors.
-
-**Q: Can I transform outputs (e.g., hide internal columns)?**  
-Write a response shaping middleware after routes, or fork the helper and adjust the mapping step where rows are plainified.
-
----
-
-### Minimal example with auth + validation
+Ownership / authorization middleware can safely merge additional filters and values:
 
 ```js
-const { crud } = require("apialize");
-
-function auth(req, res, next) {
-  if (!req.get("Authorization"))
-    return res.status(401).json({ error: "Unauthorized" });
-  next();
-}
-
-function validate(req, res, next) {
-  if (["POST", "PUT"].includes(req.method) && !req.body.name) {
-    return res.status(422).json({ error: "name required" });
+function ownership(req, _res, next) {
+  const userId = req.user.id;
+  req.apialize.options.where.user_id = userId; // restrict
+  if (["POST","PUT","PATCH"].includes(req.method)) {
+    req.apialize.values.user_id = userId; // enforce
   }
   next();
 }
-
-app.use(
-  "/widgets",
-  crud(Widget, {
-    middleware: [auth],
-    routes: { create: [validate], update: [validate] },
-  }),
-);
 ```
+
+Update semantics:
+- `PUT` (update) performs a full replace: for any attribute not provided, the value is set to the model's `defaultValue` if defined, otherwise `null` (identifier is preserved).
+- `PATCH` updates only provided, valid attributes. If body is empty, it verifies existence and returns success.
 
 ---
 
-## 12. Pagination
+## 7. Related models with `single(..., { related: [...] })`
 
-Pagination behaviour documented above (see Filtering + pagination). This section kept for compatibility with earlier anchors.
+### Related model endpoints via `single()`
 
-## Contributing
+`single(model, { related: [...] })` can mount child endpoints under a parent resource, e.g., `/users/:id/posts`.
 
-PRs very welcome (additional filter operators, pagination helpers, docs). Keep helpers tiny and composable.
+Config per related item:
 
-### Project Structure Note
-
-From v0.1.x the monolithic `src/index.js` implementation was refactored into small focused modules:
-
+```js
+single(User, {
+  related: [
+    {
+      model: Post,                 // required
+      path: 'articles',            // optional, overrides path derived from model name
+      foreignKey: 'user_id',       // optional, default: `${parentModelName.toLowerCase()}_id`
+      operations: ['list','get','post','put','patch','delete'], // subset allowed
+      options: {                   // base options forwarded into child helpers
+        // same knobs as list/create/update/patch/destroy options
+        middleware: [ownership],
+        allowFiltering: true,      // list option example
+        defaultPageSize: 25,       // list option example
+        id_mapping: 'id',          // default child id mapping
+        modelOptions: { attributes: { exclude: ['secret'] } } // Sequelize options
+      },
+      perOperation: {              // optional: per-op overrides
+        list: { allowFiltering: false }, // e.g. lock down filters only for list
+        get:  { modelOptions: { attributes: ['id','title'] } },
+        post: { middleware: [validatePostBody] },
+        put:  { id_mapping: 'id' },
+        patch:{},
+        delete: { /* middleware, id_mapping, modelOptions... */ }
+      }
+    }
+  ]
+})
 ```
-src/
-	utils.js      // shared helpers (apializeContext, asyncHandler, etc.)
-	list.js       // GET collection
-	single.js     // GET one
-	create.js     // POST create
-	update.js     // PUT full replace
-	patch.js      // PATCH partial update
-	destroy.js    // DELETE
-	crud.js       // composition helper that mounts all of the above
-	index.js      // barrel re-export for public API (require('apialize'))
-```
 
-The published API (`require('apialize')`) is unchanged; this layout simply improves maintainability and makes it easier to test or fork individual operations.
+Behavior:
+- Path: derived from related model name → snake_case + plural (e.g., `RelatedThing` → `related_things`), unless `path` is set.
+- Parent filtering: list/get only return rows with `foreignKey = :id` of the parent.
+- Writes: POST/PUT/PATCH automatically set the foreign key to the parent id; clients don’t need to send it.
+- Responses follow the same shapes as base helpers (`list`, `single`, `create`, `update`, `patch`, `destroy`).
+ - Per‑operation overrides: `perOperation.{list|get|post|put|patch|delete}` can override `middleware`, `id_mapping`, and `modelOptions` (and list options) for that specific operation.
+
+Examples:
+- `GET /users/:id/posts` → list posts for a user
+- `POST /users/:id/posts` → create a post for a user (FK auto‑injected)
+- `GET /users/:id/posts/:postId` → fetch one
+- `PUT /users/:id/posts/:postId` → update one
+- `PATCH /users/:id/posts/:postId` → patch one
+- `DELETE /users/:id/posts/:postId` → delete one
+
+---
 
 ## License
 

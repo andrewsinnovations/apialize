@@ -46,7 +46,7 @@ describe("crud() integration (default id only)", () => {
     expect(list.body.data[0].name).toBe("Alpha");
     const single = await request(app).get(`/things/${id}`);
     expect(single.status).toBe(200);
-    expect(single.body).toMatchObject({ id, name: "Alpha" });
+    expect(single.body).toMatchObject({ success: true, record: { id, name: "Alpha" } });
   });
 
   test("Thing update + delete cycle", async () => {
@@ -56,13 +56,13 @@ describe("crud() integration (default id only)", () => {
     const id = create.body.id;
     const put = await request(app).put(`/things/${id}`).send({ name: "New" });
     expect(put.status).toBe(200);
-    expect(put.body).toMatchObject({ id, name: "New", desc: null });
+    expect(put.body).toMatchObject({ success: true });
     const patch = await request(app)
       .patch(`/things/${id}`)
       .send({ desc: "patched" });
     expect(patch.status).toBe(200);
     const single = await request(app).get(`/things/${id}`);
-    expect(single.body.desc).toBe("patched");
+    expect(single.body.record.desc).toBe("patched");
     const del = await request(app).delete(`/things/${id}`);
     expect(del.status).toBe(200);
     const after = await request(app).get(`/things/${id}`);

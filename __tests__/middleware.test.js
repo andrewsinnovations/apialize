@@ -79,7 +79,7 @@ describe("middleware access control for odd numbers (Sequelize)", () => {
   test("single returns odd number", async () => {
     const res = await request(app).get("/numbers/7");
     expect(res.status).toBe(200);
-    expect(res.body.value).toBe(7);
+    expect(res.body.record.value).toBe(7);
   });
 
   test("single rejects even number", async () => {

@@ -52,7 +52,7 @@ describe("apialize individual operations (Sequelize raw model)", () => {
     app.use("/items", single(Item));
     const created = await request(app).post("/items").send({ name: "A" });
     const res = await request(app).get(`/items/${created.body.id}`);
-    expect(res.body.name).toBe("A");
+    expect(res.body.record.name).toBe("A");
   });
 
   test("create() creates a record", async () => {
@@ -67,7 +67,7 @@ describe("apialize individual operations (Sequelize raw model)", () => {
 
     const getRes = await request(app).get(`/items/${createRes.body.id}`);
     expect(getRes.status).toBe(200);
-    expect(getRes.body).toMatchObject({ id: createRes.body.id, name: "A" });
+    expect(getRes.body).toMatchObject({ success: true, record: { id: createRes.body.id, name: "A" } });
   });
 
   test("update() replaces a record", async () => {
@@ -85,11 +85,8 @@ describe("apialize individual operations (Sequelize raw model)", () => {
       .send({ name: "New" });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
-      id: created.body.id,
-      name: "New",
-      desc: null,
+      success: true
     });
-    expect(Object.keys(res.body).sort()).toEqual(["desc", "id", "name"]);
 
     // Second PUT providing all attributes should properly set them
     const res2 = await request(app)
@@ -97,11 +94,11 @@ describe("apialize individual operations (Sequelize raw model)", () => {
       .send({ name: "Newest", desc: "restored" });
     expect(res2.status).toBe(200);
     expect(res2.body).toMatchObject({
-      id: created.body.id,
-      name: "Newest",
-      desc: "restored",
+      success: true
     });
-    expect(Object.keys(res2.body).sort()).toEqual(["desc", "id", "name"]);
+    expect(res2.body).toMatchObject({
+      success: true
+    });
   });
 
   test("patch() merges a record", async () => {
@@ -125,9 +122,12 @@ describe("apialize individual operations (Sequelize raw model)", () => {
     const getRes = await request(app).get(`/items/${created.body.id}`);
     expect(getRes.status).toBe(200);
     expect(getRes.body).toMatchObject({
-      id: created.body.id,
-      name: "A",
-      desc: "y",
+      success: true,
+      record: {
+        id: created.body.id,
+        name: "A",
+        desc: "y",
+      }
     });
   });
 
