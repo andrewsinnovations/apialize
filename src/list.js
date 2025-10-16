@@ -195,7 +195,9 @@ function buildResponse(result, page, pageSize, appliedFilters, metaShowFilters, 
     ? rows.map((row) => {
         if (!row || typeof row !== 'object') return row;
         if (idMapping && idMapping !== 'id' && Object.prototype.hasOwnProperty.call(row, idMapping)) {
-          return { ...row, id: row[idMapping] };
+          const next = { ...row, id: row[idMapping] };
+          delete next[idMapping];
+          return next;
         }
         return row;
       })
