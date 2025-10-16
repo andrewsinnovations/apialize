@@ -8,6 +8,7 @@ const LIST_DEFAULTS = {
   allowFiltering: true, // allow non "api:" query params to become where filters
   allowOrdering: true, // allow api:orderby / api:orderdir query params
   allowMultiColumnFiltering: true, // allow api:filterfields + api:filter for OR text match across columns
+  filter_fields: [], // list of fields to apply case-insensitive contains when api:filter is provided
   metaShowFilters: false, // include applied filters in meta.filters
   metaShowOrdering: false, // include applied ordering in meta.order
   defaultPageSize: 100, // default page size when not specified in query or model config
@@ -189,21 +190,14 @@ function setupFiltering(req, res, model, query, allowFiltering) {
 }
 
 // Handle multi-column text search filtering using api:filterfields and api:filter
-function setupMultiColumnFilter(req, res, model, query, allowMultiColumnFiltering) {
-  if (!allowMultiColumnFiltering) return true; // nothing to do
+function setupMultiColumnFilter(req, res, model, query, allowMultiColumnFiltering, configuredFields) {
+  if (!allowMultiColumnFiltering) return true; // feature disabled
 
-  const rawFields = (query["api:filterfields"] || "").toString().trim();
   const rawValue = (query["api:filter"] || "").toString();
+  const fields = Array.isArray(configuredFields) ? configuredFields.filter(Boolean) : [];
 
-  if (!rawFields) return true; // no fields specified
-  if (!rawValue) return true; // empty value means no additional filtering
-
-  const fields = rawFields
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  if (!fields.length) return true;
+  if (!fields.length) return true; // no configured fields -> nothing to apply
+  if (!rawValue) return true; // empty value -> no additional filtering
 
   // Validate fields exist and are string-like
   for (const f of fields) {
@@ -302,6 +296,7 @@ function list(model, options = {}, modelOptions = {}) {
     allowFiltering,
     allowOrdering,
     allowMultiColumnFiltering,
+    filter_fields,
     metaShowFilters,
     metaShowOrdering,
     defaultPageSize,
@@ -351,6 +346,7 @@ function list(model, options = {}, modelOptions = {}) {
         model,
         q,
         allowMultiColumnFiltering,
+        filter_fields && filter_fields.length ? filter_fields : (modelCfg.filter_fields || []),
       );
       if (!multiOk) return; // Response already sent
 
