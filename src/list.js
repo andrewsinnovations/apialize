@@ -82,7 +82,7 @@ function setupPagination(req, query, modelCfg, defaultPageSize) {
 }
 
 // Handle ordering logic
-function setupOrdering(req, res, model, query, modelCfg, allowOrdering, defaultOrderBy, defaultOrderDir) {
+function setupOrdering(req, res, model, query, modelCfg, allowOrdering, defaultOrderBy, defaultOrderDir, idMapping) {
   let rawOrderBy, globalDir;
   
   if (allowOrdering) {
@@ -135,7 +135,8 @@ function setupOrdering(req, res, model, query, modelCfg, allowOrdering, defaultO
   
   // Default ordering if none specified
   if (!req.apialize.options.order) {
-    req.apialize.options.order = [[defaultOrderBy, defaultOrderDir]];
+    const effectiveDefaultOrderBy = defaultOrderBy === 'id' && idMapping ? idMapping : defaultOrderBy;
+    req.apialize.options.order = [[effectiveDefaultOrderBy, defaultOrderDir]];
   }
   
   return true; // Indicate success
@@ -185,10 +186,20 @@ function setupFiltering(req, res, model, query, allowFiltering) {
 }
 
 // Process query results and build response
-function buildResponse(result, page, pageSize, appliedFilters, metaShowFilters, metaShowOrdering, allowFiltering, req) {
+function buildResponse(result, page, pageSize, appliedFilters, metaShowFilters, metaShowOrdering, allowFiltering, req, idMapping) {
   const rows = Array.isArray(result.rows)
     ? result.rows.map((r) => (r && r.get ? r.get({ plain: true }) : r))
     : result.rows;
+  // Normalize id according to idMapping if provided
+  const normalizedRows = Array.isArray(rows)
+    ? rows.map((row) => {
+        if (!row || typeof row !== 'object') return row;
+        if (idMapping && idMapping !== 'id' && Object.prototype.hasOwnProperty.call(row, idMapping)) {
+          return { ...row, id: row[idMapping] };
+        }
+        return row;
+      })
+    : rows;
   const totalPages = Math.max(1, Math.ceil(result.count / pageSize));
 
   let orderOut;
@@ -216,7 +227,7 @@ function buildResponse(result, page, pageSize, appliedFilters, metaShowFilters, 
   return {
     success: true,
     meta,
-    data: rows,
+    data: normalizedRows,
   };
 }
 
@@ -235,7 +246,9 @@ function list(model, options = {}, modelOptions = {}) {
     defaultPageSize,
     defaultOrderBy,
     defaultOrderDir,
+    id_mapping,
   } = { ...LIST_DEFAULTS, ...options };
+  const idMapping = id_mapping || 'id';
 
   const inline = middleware.filter((fn) => typeof fn === "function");
   const router = express.Router({ mergeParams: true });
@@ -261,8 +274,8 @@ function list(model, options = {}, modelOptions = {}) {
 
       // Setup ordering (returns false if validation fails)
       const orderingValid = setupOrdering(
-        req, res, model, q, modelCfg, 
-        allowOrdering, defaultOrderBy, defaultOrderDir
+        req, res, model, q, modelCfg,
+        allowOrdering, defaultOrderBy, defaultOrderDir, idMapping
       );
       if (!orderingValid) return; // Response already sent
 
@@ -276,7 +289,7 @@ function list(model, options = {}, modelOptions = {}) {
       // Build and send response
       const response = buildResponse(
         result, page, pageSize, appliedFilters,
-        metaShowFilters, metaShowOrdering, allowFiltering, req
+        metaShowFilters, metaShowOrdering, allowFiltering, req, idMapping
       );
       
       res.json(response);

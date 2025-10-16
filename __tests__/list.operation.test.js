@@ -260,4 +260,26 @@ describe("list operation: comprehensive options coverage", () => {
     expect(resFilter.body.data[0].id).toBe("b-uuid");
     expect("external_id" in resFilter.body.data[0]).toBe(false);
   });
+
+  test("list id_mapping: default order by id uses mapped field and rows expose mapped id", async () => {
+    const ctx = await buildAppAndModel({
+      listOptions: { id_mapping: "external_id" },
+    });
+    sequelize = ctx.sequelize;
+    const { Item, app } = ctx;
+    await seed(Item, [
+      { external_id: "b", name: "Bee", category: "A", score: 2 },
+      { external_id: "a", name: "Aye", category: "A", score: 1 },
+      { external_id: "c", name: "Cee", category: "B", score: 3 },
+    ]);
+
+    // With no api:orderby, list should order by external_id ASC because id_mapping is external_id
+    const res = await request(app).get("/items");
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    // Names should be ordered by external_id: a, b, c
+    expect(res.body.data.map(r => r.name)).toEqual(["Aye", "Bee", "Cee"]);
+    // id field should be normalized to external_id values
+    expect(res.body.data.map(r => r.id)).toEqual(["a", "b", "c"]);
+  });
 });
