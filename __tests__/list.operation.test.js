@@ -282,4 +282,52 @@ describe("list operation: comprehensive options coverage", () => {
     // id field should be normalized to external_id values
     expect(res.body.data.map(r => r.id)).toEqual(["a", "b", "c"]);
   });
+
+  test("multi-column filter: case-insensitive OR across fields", async () => {
+    const ctx = await buildAppAndModel();
+    sequelize = ctx.sequelize;
+    const { Item, app } = ctx;
+
+    await seed(Item, [
+      { external_id: "u1", name: "Alpha", category: "Zed", score: 1 },
+      { external_id: "u2", name: "Bravo", category: "ALpine", score: 2 },
+      { external_id: "u3", name: "Charlie", category: "Bee", score: 3 },
+    ]);
+
+    // filter 'al' should match name: Alpha and category: ALpine (case-insensitive)
+    const res = await request(app).get("/items?api:filter=al&api:filterfields=name,category");
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.meta.count).toBe(2);
+    expect(names(res)).toEqual(["Alpha", "Bravo"]);
+  });
+
+  test("multi-column filter can be disabled via option", async () => {
+    const ctx = await buildAppAndModel({ listOptions: { allowMultiColumnFiltering: false } });
+    sequelize = ctx.sequelize;
+    const { Item, app } = ctx;
+
+    await seed(Item, [
+      { external_id: "u1", name: "Alpha", category: "Zed", score: 1 },
+      { external_id: "u2", name: "Bravo", category: "ALpine", score: 2 },
+      { external_id: "u3", name: "Charlie", category: "Bee", score: 3 },
+    ]);
+
+    const res = await request(app).get("/items?api:filter=al&api:filterfields=name,category");
+    expect(res.status).toBe(200);
+    // With filtering disabled, all rows are returned (no other filters applied)
+    expect(res.body.meta.count).toBe(3);
+    expect(names(res)).toEqual(["Alpha", "Bravo", "Charlie"]);
+  });
+
+  test("multi-column filter: invalid field returns 400", async () => {
+    const ctx = await buildAppAndModel();
+    sequelize = ctx.sequelize;
+    const { Item, app } = ctx;
+    await seed(Item, [{ external_id: "u1", name: "Alpha", category: "Zed", score: 1 }]);
+
+    const res = await request(app).get("/items?api:filter=al&api:filterfields=name,notARealColumn");
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ success: false, error: "Bad request" });
+  });
 });

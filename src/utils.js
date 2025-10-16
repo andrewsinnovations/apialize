@@ -11,7 +11,9 @@ function apializeContext(req, res, next) {
         k === "api:page" ||
         k === "api:pagesize" ||
         k === "api:orderby" ||
-        k === "api:orderdir"
+        k === "api:orderdir" ||
+        k === "api:filter" ||
+        k === "api:filterfields"
       )
         continue;
       if (typeof mergedWhere[k] === "undefined") mergedWhere[k] = v;

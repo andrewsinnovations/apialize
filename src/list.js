@@ -1,10 +1,13 @@
 const { express, apializeContext, ensureFn, asyncHandler } = require("./utils");
+const Sequelize = require("sequelize");
+const { Op } = Sequelize;
 
 // Default configuration for list operation
 const LIST_DEFAULTS = {
   middleware: [],
   allowFiltering: true, // allow non "api:" query params to become where filters
   allowOrdering: true, // allow api:orderby / api:orderdir query params
+  allowMultiColumnFiltering: true, // allow api:filterfields + api:filter for OR text match across columns
   metaShowFilters: false, // include applied filters in meta.filters
   metaShowOrdering: false, // include applied ordering in meta.order
   defaultPageSize: 100, // default page size when not specified in query or model config
@@ -185,6 +188,61 @@ function setupFiltering(req, res, model, query, allowFiltering) {
   return appliedFilters;
 }
 
+// Handle multi-column text search filtering using api:filterfields and api:filter
+function setupMultiColumnFilter(req, res, model, query, allowMultiColumnFiltering) {
+  if (!allowMultiColumnFiltering) return true; // nothing to do
+
+  const rawFields = (query["api:filterfields"] || "").toString().trim();
+  const rawValue = (query["api:filter"] || "").toString();
+
+  if (!rawFields) return true; // no fields specified
+  if (!rawValue) return true; // empty value means no additional filtering
+
+  const fields = rawFields
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (!fields.length) return true;
+
+  // Validate fields exist and are string-like
+  for (const f of fields) {
+    if (!validateColumnExists(model, f)) {
+      console.warn(
+        `[Apialize] Bad request: Invalid filter field '${f}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`,
+      );
+      res.status(400).json({ success: false, error: "Bad request" });
+      return false;
+    }
+    const attr = getModelAttributes(model)[f];
+    const typeName = attr && attr.type ? attr.type.constructor.name.toLowerCase() : "";
+    const isStringLike = ["string", "text", "char", "varchar"].includes(typeName);
+    if (!isStringLike) {
+      console.warn(
+        `[Apialize] Bad request: Filter field '${f}' is not a text column on model '${model.name}'. Query: ${req.originalUrl}`,
+      );
+      res.status(400).json({ success: false, error: "Bad request" });
+      return false;
+    }
+  }
+
+  const valueLower = rawValue.toLowerCase();
+  const ors = fields.map((f) =>
+    Sequelize.where(Sequelize.fn("LOWER", Sequelize.col(f)), { [Op.like]: `%${valueLower}%` }),
+  );
+
+  const existingWhere = req.apialize.options.where || {};
+  if (Object.keys(existingWhere).length) {
+    req.apialize.options.where = {
+      [Op.and]: [existingWhere, { [Op.or]: ors }],
+    };
+  } else {
+    req.apialize.options.where = { [Op.or]: ors };
+  }
+
+  return true;
+}
+
 // Process query results and build response
 function buildResponse(result, page, pageSize, appliedFilters, metaShowFilters, metaShowOrdering, allowFiltering, req, idMapping) {
   const rows = Array.isArray(result.rows)
@@ -243,6 +301,7 @@ function list(model, options = {}, modelOptions = {}) {
     middleware,
     allowFiltering,
     allowOrdering,
+    allowMultiColumnFiltering,
     metaShowFilters,
     metaShowOrdering,
     defaultPageSize,
@@ -284,6 +343,16 @@ function list(model, options = {}, modelOptions = {}) {
       // Setup filtering (returns false if validation fails)
       const appliedFilters = setupFiltering(req, res, model, q, allowFiltering);
       if (appliedFilters === false) return; // Response already sent
+
+      // Setup multi-column text filtering (returns false if validation fails)
+      const multiOk = setupMultiColumnFilter(
+        req,
+        res,
+        model,
+        q,
+        allowMultiColumnFiltering,
+      );
+      if (!multiOk) return; // Response already sent
 
       // Execute query
       const result = await model.findAndCountAll(req.apialize.options);
