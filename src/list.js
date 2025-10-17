@@ -28,6 +28,32 @@ function validateColumnExists(model, columnName) {
   return attributes.hasOwnProperty(columnName);
 }
 
+// Resolve a dotted path like "Alias.field" (or deeper: "A.B.field") against includes
+// Returns { foundModel, attribute, aliasPath } or null if not found
+function resolveIncludedAttribute(rootModel, includes, dottedPath) {
+  if (!dottedPath || typeof dottedPath !== 'string' || !dottedPath.includes('.')) return null;
+  if (!Array.isArray(includes) || !includes.length) return null;
+
+  const parts = dottedPath.split('.');
+  const attrName = parts.pop();
+  let currIncludes = includes;
+  let currModel = rootModel;
+  const aliasChain = [];
+
+  for (const alias of parts) {
+    if (!Array.isArray(currIncludes)) return null;
+    const match = currIncludes.find((inc) => inc && inc.as === alias);
+    if (!match || !match.model) return null;
+    aliasChain.push(alias);
+    currModel = match.model;
+    currIncludes = match.include || [];
+  }
+
+  const attrs = getModelAttributes(currModel);
+  if (!attrs.hasOwnProperty(attrName)) return null;
+  return { foundModel: currModel, attribute: attrs[attrName], aliasPath: `${aliasChain.join('.')}.${attrName}` };
+}
+
 // Helper function to validate data type compatibility
 function validateDataType(model, columnName, value) {
   const attributes = getModelAttributes(model);
@@ -152,31 +178,45 @@ function setupFiltering(req, res, model, query, allowFiltering) {
   
   if (!allowFiltering) return appliedFilters;
   
+  const includes = req.apialize.options && req.apialize.options.include ? req.apialize.options.include : [];
+
   for (const [key, value] of Object.entries(query)) {
     if (key.startsWith("api:")) continue;
     if (value === undefined) continue;
     
-    // Validate column exists on model
-    if (!validateColumnExists(model, key)) {
-      console.warn(`[Apialize] Bad request: Invalid filter column '${key}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`);
-      res.status(400).json({
-        success: false,
-        error: "Bad request",
-      });
+    let targetModel = model;
+    let outKey = key;
+    let attribute;
+
+    if (key.includes('.')) {
+      const resolved = resolveIncludedAttribute(model, includes, key);
+      if (!resolved) {
+        console.warn(`[Apialize] Bad request: Invalid filter column '${key}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`);
+        res.status(400).json({ success: false, error: "Bad request" });
+        return false;
+      }
+      targetModel = resolved.foundModel;
+      attribute = resolved.attribute;
+      outKey = `$${resolved.aliasPath}$`;
+    } else {
+      // Validate column exists on root model
+      if (!validateColumnExists(model, key)) {
+        console.warn(`[Apialize] Bad request: Invalid filter column '${key}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`);
+        res.status(400).json({ success: false, error: "Bad request" });
+        return false; // Indicate validation failed
+      }
+      attribute = getModelAttributes(model)[key];
+    }
+
+    // Validate data type compatibility against the target model/attribute
+    const okType = attribute && attribute.type ? validateDataType({ rawAttributes: { tmp: attribute } }, 'tmp', value) : true;
+    if (!okType) {
+      console.warn(`[Apialize] Bad request: Invalid filter value '${value}' is not compatible with column '${key}' data type on model '${targetModel && targetModel.name ? targetModel.name : 'Model'}'. Query: ${req.originalUrl}`);
+      res.status(400).json({ success: false, error: "Bad request" });
       return false; // Indicate validation failed
     }
-    
-    // Validate data type compatibility
-    if (!validateDataType(model, key, value)) {
-      console.warn(`[Apialize] Bad request: Invalid filter value '${value}' is not compatible with column '${key}' data type on model '${model.name}'. Query: ${req.originalUrl}`);
-      res.status(400).json({
-        success: false,
-        error: "Bad request",
-      });
-      return false; // Indicate validation failed
-    }
-    
-    appliedFilters[key] = value;
+
+    appliedFilters[outKey] = value;
   }
   
   if (Object.keys(appliedFilters).length) {
@@ -199,31 +239,43 @@ function setupMultiColumnFilter(req, res, model, query, allowMultiColumnFilterin
   if (!fields.length) return true; // no configured fields -> nothing to apply
   if (!rawValue) return true; // empty value -> no additional filtering
 
-  // Validate fields exist and are string-like
+  const includes = req.apialize.options && req.apialize.options.include ? req.apialize.options.include : [];
+  const valueLower = rawValue.toLowerCase();
+  const ors = [];
   for (const f of fields) {
-    if (!validateColumnExists(model, f)) {
-      console.warn(
-        `[Apialize] Bad request: Invalid filter field '${f}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`,
-      );
-      res.status(400).json({ success: false, error: "Bad request" });
-      return false;
+    let colExpr = null;
+    let attr;
+    if (f.includes('.')) {
+      const resolved = resolveIncludedAttribute(model, includes, f);
+      if (!resolved) {
+        console.warn(`[Apialize] Bad request: Invalid filter field '${f}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`);
+        res.status(400).json({ success: false, error: "Bad request" });
+        return false;
+      }
+      attr = resolved.attribute;
+      // For function wrapping (LOWER), reference the table alias column directly
+      // e.g., Sequelize.col('Parent.parent_name') instead of using $...$ syntax
+      colExpr = Sequelize.col(resolved.aliasPath);
+    } else {
+      if (!validateColumnExists(model, f)) {
+        console.warn(`[Apialize] Bad request: Invalid filter field '${f}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`);
+        res.status(400).json({ success: false, error: "Bad request" });
+        return false;
+      }
+      attr = getModelAttributes(model)[f];
+      colExpr = Sequelize.col(f);
     }
-    const attr = getModelAttributes(model)[f];
+
     const typeName = attr && attr.type ? attr.type.constructor.name.toLowerCase() : "";
     const isStringLike = ["string", "text", "char", "varchar"].includes(typeName);
     if (!isStringLike) {
-      console.warn(
-        `[Apialize] Bad request: Filter field '${f}' is not a text column on model '${model.name}'. Query: ${req.originalUrl}`,
-      );
+      console.warn(`[Apialize] Bad request: Filter field '${f}' is not a text column on model '${model.name}'. Query: ${req.originalUrl}`);
       res.status(400).json({ success: false, error: "Bad request" });
       return false;
     }
-  }
 
-  const valueLower = rawValue.toLowerCase();
-  const ors = fields.map((f) =>
-    Sequelize.where(Sequelize.fn("LOWER", Sequelize.col(f)), { [Op.like]: `%${valueLower}%` }),
-  );
+    ors.push(Sequelize.where(Sequelize.fn("LOWER", colExpr), { [Op.like]: `%${valueLower}%` }));
+  }
 
   const existingWhere = req.apialize.options.where || {};
   if (Object.keys(existingWhere).length) {

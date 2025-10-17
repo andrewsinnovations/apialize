@@ -13,7 +13,7 @@ async function build({ destroyOptions = {}, modelOptions = {} } = {}) {
       external_id: { type: DataTypes.STRING(64), allowNull: false, unique: true },
       name: { type: DataTypes.STRING(100), allowNull: false },
       user_id: { type: DataTypes.INTEGER, allowNull: true },
-      tenant_id: { type: DataTypes.INTEGER, allowNull: true },
+      parent_id: { type: DataTypes.INTEGER, allowNull: true },
     },
     { tableName: "destroy_items", timestamps: false }
   );
@@ -81,25 +81,25 @@ describe("destroy operation: comprehensive options coverage", () => {
     expect(ok.status).toBe(200);
   });
 
-  test("middleware can enforce tenant scoping via req.apialize.options.where", async () => {
+  test("middleware can enforce parent scoping via req.apialize.options.where", async () => {
     const scope = (req, _res, next) => {
       req.apialize = req.apialize || {};
       req.apialize.options = req.apialize.options || {};
-      req.apialize.options.where = { ...(req.apialize.options.where || {}), tenant_id: 50 };
+      req.apialize.options.where = { ...(req.apialize.options.where || {}), parent_id: 50 };
       next();
     };
 
     const { sequelize: s, app } = await build({ destroyOptions: { middleware: [scope] } });
     sequelize = s;
 
-    const t1 = await request(app).post("/items").send({ external_id: "t1", name: "T1", tenant_id: 50 });
-    await request(app).post("/items").send({ external_id: "t2", name: "T2", tenant_id: 999 });
+    const t1 = await request(app).post("/items").send({ external_id: "t1", name: "T1", parent_id: 50 });
+    await request(app).post("/items").send({ external_id: "t2", name: "T2", parent_id: 999 });
 
     const ok = await request(app).delete(`/items/${t1.body.id}`);
     expect(ok.status).toBe(200);
 
     const miss = await request(app).delete(`/items/${t1.body.id}`);
-    expect(miss.status).toBe(404); // already deleted under tenant scope
+    expect(miss.status).toBe(404); // already deleted under parent scope
   });
 
   test("404 when record not found (default and custom mapping)", async () => {

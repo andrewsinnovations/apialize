@@ -17,7 +17,7 @@ async function build({ mountSingle = true, mountCreate = true, updateOptions = {
       flag: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       category: { type: DataTypes.STRING(32), allowNull: true, defaultValue: "uncat" },
       user_id: { type: DataTypes.INTEGER, allowNull: true },
-      tenant_id: { type: DataTypes.INTEGER, allowNull: true },
+      parent_id: { type: DataTypes.INTEGER, allowNull: true },
     },
     { tableName: "update_items", timestamps: false }
   );
@@ -64,7 +64,7 @@ describe("update operation: comprehensive options coverage", () => {
       flag: false, // will be reset to default (true) by PUT when unspecified
       category: "catA",
       user_id: 1,
-      tenant_id: 10,
+      parent_id: 10,
     });
     expect(created.status).toBe(201);
     const id = created.body.id;
@@ -146,29 +146,29 @@ describe("update operation: comprehensive options coverage", () => {
     expect(rec.name).toBe("Scoped");
   });
 
-  test("middleware can enforce tenant scoping via req.apialize.options.where (preserve scoped fields)", async () => {
-    const tenantMiddleware = (req, _res, next) => {
+  test("middleware can enforce parent scoping via req.apialize.options.where (preserve scoped fields)", async () => {
+    const parentMiddleware = (req, _res, next) => {
       req.apialize = req.apialize || {};
       req.apialize.options = req.apialize.options || {};
-      req.apialize.options.where = { ...(req.apialize.options.where || {}), tenant_id: 123 };
+      req.apialize.options.where = { ...(req.apialize.options.where || {}), parent_id: 123 };
       next();
     };
 
-    const ctx = await build({ updateOptions: { middleware: [tenantMiddleware] } });
+    const ctx = await build({ updateOptions: { middleware: [parentMiddleware] } });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
-    const t1 = await request(app).post("/items").send({ external_id: "t1", name: "T1", tenant_id: 123 });
-    const t2 = await request(app).post("/items").send({ external_id: "t2", name: "T2", tenant_id: 999 });
+    const t1 = await request(app).post("/items").send({ external_id: "t1", name: "T1", parent_id: 123 });
+    const t2 = await request(app).post("/items").send({ external_id: "t2", name: "T2", parent_id: 999 });
     expect(t1.status).toBe(201);
     expect(t2.status).toBe(201);
 
-    // Correct tenant updates
-  const ok = await request(app).put(`/items/${t1.body.id}`).send({ name: "T1-upd", tenant_id: 123, external_id: "t1" });
+    // Correct parent updates
+  const ok = await request(app).put(`/items/${t1.body.id}`).send({ name: "T1-upd", parent_id: 123, external_id: "t1" });
     expect(ok.status).toBe(200);
 
-    // Wrong tenant -> 404
-  const miss = await request(app).put(`/items/${t2.body.id}`).send({ name: "T2-upd", tenant_id: 123, external_id: "t2" });
+    // Wrong parent -> 404
+  const miss = await request(app).put(`/items/${t2.body.id}`).send({ name: "T2-upd", parent_id: 123, external_id: "t2" });
     expect(miss.status).toBe(404);
   });
 

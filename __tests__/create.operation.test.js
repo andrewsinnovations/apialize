@@ -13,7 +13,7 @@ async function build({ createOptions = {}, modelOptions = {}, listModelOptions =
       external_id: { type: DataTypes.STRING(64), allowNull: false, unique: true },
       name: { type: DataTypes.STRING(100), allowNull: false },
       desc: { type: DataTypes.STRING(255), allowNull: true },
-      tenant_id: { type: DataTypes.INTEGER, allowNull: true },
+      parent_id: { type: DataTypes.INTEGER, allowNull: true },
     },
     { tableName: "create_items", timestamps: false }
   );
@@ -44,20 +44,20 @@ describe("create operation: comprehensive options coverage", () => {
 
     const { sequelize: s, app } = await build({
       createOptions: { middleware: [prependDesc] },
-      modelOptions: { fields: ["external_id", "name", "desc", "tenant_id"] },
+      modelOptions: { fields: ["external_id", "name", "desc", "parent_id"] },
       listModelOptions: { attributes: ["id", "external_id", "name", "desc"] },
     });
     sequelize = s;
 
-    const res = await request(app).post("/items").send({ external_id: "c1", name: "A", desc: "x", tenant_id: 99 });
+    const res = await request(app).post("/items").send({ external_id: "c1", name: "A", desc: "x", parent_id: 99 });
     expect(res.status).toBe(201);
     expect(typeof res.body.id === "number" || /^[0-9]+$/.test(String(res.body.id))).toBe(true);
 
     const listRes = await request(app).get("/items");
     expect(listRes.status).toBe(200);
     expect(listRes.body.data[0].desc).toBe("mdw-x");
-  // tenant_id omitted due to list modelOptions.attributes
-    expect(listRes.body.data[0]).not.toHaveProperty("tenant_id");
+  // parent_id omitted due to list modelOptions.attributes
+    expect(listRes.body.data[0]).not.toHaveProperty("parent_id");
   });
 
   test("custom id_mapping external_id returns external id", async () => {
@@ -69,10 +69,10 @@ describe("create operation: comprehensive options coverage", () => {
     expect(res.body).toMatchObject({ success: true, id: "uuid-xyz" });
   });
 
-  test("middleware can enforce tenant scoping on create via options merger", async () => {
+  test("middleware can enforce parent scoping on create via options merger", async () => {
     const scope = (req, _res, next) => {
       req.apialize = req.apialize || {};
-      req.apialize.options = { ...(req.apialize.options || {}), where: { tenant_id: 7 } };
+      req.apialize.options = { ...(req.apialize.options || {}), where: { parent_id: 7 } };
       next();
     };
 

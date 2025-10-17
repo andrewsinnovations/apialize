@@ -12,7 +12,7 @@ async function build({ singleOptions = {}, modelOptions = {}, relatedConfig = nu
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       external_id: { type: DataTypes.STRING(64), allowNull: false, unique: true },
       name: { type: DataTypes.STRING(100), allowNull: false },
-      tenant_id: { type: DataTypes.INTEGER, allowNull: true },
+      parent_id: { type: DataTypes.INTEGER, allowNull: true },
     },
     { tableName: "single_users", timestamps: false }
   );
@@ -80,12 +80,12 @@ describe("single operation: comprehensive options coverage", () => {
     const { sequelize: s, app } = await build();
     sequelize = s;
 
-    const created = await request(app).post("/users").send({ external_id: "scoped", name: "Scoped", tenant_id: 1 });
+    const created = await request(app).post("/users").send({ external_id: "scoped", name: "Scoped", parent_id: 1 });
 
-    const miss = await request(app).get(`/users/${created.body.id}?tenant_id=2`);
+    const miss = await request(app).get(`/users/${created.body.id}?parent_id=2`);
     expect(miss.status).toBe(404);
 
-    const ok = await request(app).get(`/users/${created.body.id}?tenant_id=1`);
+    const ok = await request(app).get(`/users/${created.body.id}?parent_id=1`);
     expect(ok.status).toBe(200);
   });
 
@@ -93,14 +93,14 @@ describe("single operation: comprehensive options coverage", () => {
     const scope = (req, _res, next) => {
       req.apialize = req.apialize || {};
       req.apialize.options = req.apialize.options || {};
-      req.apialize.options.where = { ...(req.apialize.options.where || {}), tenant_id: 5 };
+      req.apialize.options.where = { ...(req.apialize.options.where || {}), parent_id: 5 };
       next();
     };
     const { sequelize: s, app } = await build({ singleOptions: { middleware: [scope] } });
     sequelize = s;
 
-    const u1 = await request(app).post("/users").send({ external_id: "t5-1", name: "A", tenant_id: 5 });
-    await request(app).post("/users").send({ external_id: "t9-1", name: "B", tenant_id: 9 });
+    const u1 = await request(app).post("/users").send({ external_id: "t5-1", name: "A", parent_id: 5 });
+    await request(app).post("/users").send({ external_id: "t9-1", name: "B", parent_id: 9 });
 
     const ok = await request(app).get(`/users/${u1.body.id}`);
     expect(ok.status).toBe(200);

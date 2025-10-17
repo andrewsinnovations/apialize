@@ -15,7 +15,7 @@ async function build({ mountSingle = true, mountCreate = true, patchOptions = {}
       desc: { type: DataTypes.STRING(255), allowNull: true },
       flag: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       user_id: { type: DataTypes.INTEGER, allowNull: true },
-      tenant_id: { type: DataTypes.INTEGER, allowNull: true },
+      parent_id: { type: DataTypes.INTEGER, allowNull: true },
     },
     { tableName: "patch_items", timestamps: false }
   );
@@ -114,11 +114,11 @@ describe("patch operation: comprehensive options coverage", () => {
     expect(rec.name).toBe("yes");
   });
 
-  test("middleware can enforce tenant scoping and modify values", async () => {
+  test("middleware can enforce parent scoping and modify values", async () => {
     const scope = (req, _res, next) => {
       req.apialize = req.apialize || {};
       req.apialize.options = req.apialize.options || {};
-      req.apialize.options.where = { ...(req.apialize.options.where || {}), tenant_id: 8 };
+      req.apialize.options.where = { ...(req.apialize.options.where || {}), parent_id: 8 };
       next();
     };
     const override = (req, _res, next) => {
@@ -131,14 +131,14 @@ describe("patch operation: comprehensive options coverage", () => {
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
-    const t1 = await request(app).post("/items").send({ external_id: "t1", name: "A", tenant_id: 8 });
-    await request(app).post("/items").send({ external_id: "t2", name: "B", tenant_id: 9 });
+    const t1 = await request(app).post("/items").send({ external_id: "t1", name: "A", parent_id: 8 });
+    await request(app).post("/items").send({ external_id: "t2", name: "B", parent_id: 9 });
 
     const ok = await request(app).patch(`/items/${t1.body.id}`).send({ name: "A+" });
     expect(ok.status).toBe(200);
 
   const miss = await request(app).patch(`/items/${t1.body.id}`).send({ name: "A++" });
-  expect(miss.status).toBe(200); // Still scoped to tenant 8 by middleware; same record
+  expect(miss.status).toBe(200); // Still scoped to parent 8 by middleware; same record
 
     const rec = await getRecord(Item, { id: t1.body.id });
   expect(rec.name).toBe("A++");

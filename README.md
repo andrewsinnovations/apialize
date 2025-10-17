@@ -473,7 +473,7 @@ Notes:
 
 - The bulk DELETE route is mounted only when `delete` operations are enabled for that related item and `allow_bulk_delete` is not set to `false`.
 - The result `ids` array is derived using the configured `id_mapping` for `delete`; if none is set, `'id'` is used.
-- Any scoping middleware you add (e.g., tenant or ownership filters) will also apply to the bulk DELETE via `req.apialize.options.where`.
+- Any scoping middleware you add (e.g., parent or ownership filters) will also apply to the bulk DELETE via `req.apialize.options.where`.
 
 ## License
 

@@ -347,4 +347,108 @@ describe("list operation: comprehensive options coverage", () => {
     expect(res.body.meta.count).toBe(2);
     expect(names(res)).toEqual(["Alpha", "Bravo"]);
   });
+
+  test("filtering on included model attribute via dotted path", async () => {
+    // Build a fresh schema with an associated Parent model
+    const sequelizeLocal = new Sequelize("sqlite::memory:", { logging: false });
+    sequelize = sequelizeLocal; // for afterEach cleanup
+    const Parent = sequelizeLocal.define(
+      "Parent",
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        parent_name: { type: DataTypes.STRING(100), allowNull: false },
+      },
+      { tableName: "parents", timestamps: false }
+    );
+    const Item2 = sequelizeLocal.define(
+      "Item",
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        name: { type: DataTypes.STRING(100), allowNull: false },
+        parent_id: { type: DataTypes.INTEGER, allowNull: false },
+      },
+      { tableName: "list_items_included", timestamps: false }
+    );
+
+    Item2.belongsTo(Parent, { as: "Parent", foreignKey: "parent_id" });
+
+    await sequelizeLocal.sync({ force: true });
+
+    const t1 = await Parent.create({ parent_name: "Acme" });
+    const t2 = await Parent.create({ parent_name: "Globex" });
+
+    await Item2.bulkCreate([
+      { name: "Alpha", parent_id: t1.id },
+      { name: "Bravo", parent_id: t2.id },
+      { name: "Charlie", parent_id: t1.id },
+    ]);
+
+    const app = express();
+    app.use(bodyParser.json());
+    app.use(
+      "/items",
+      list(
+        Item2,
+        {},
+        { include: [{ model: Parent, as: "Parent" }] },
+      ),
+    );
+
+    // Filter on include attribute using dotted path
+    const res = await request(app).get("/items?Parent.parent_name=Acme");
+    expect(res.status).toBe(200);
+    expect(res.body.meta.count).toBe(2);
+    expect(res.body.data.map((r) => r.name)).toEqual(["Alpha", "Charlie"]);
+  });
+
+  test("multi-column search can include include fields via config", async () => {
+    const sequelizeLocal = new Sequelize("sqlite::memory:", { logging: false });
+    sequelize = sequelizeLocal; // for cleanup
+    const Parent = sequelizeLocal.define(
+      "Parent",
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        parent_name: { type: DataTypes.STRING(100), allowNull: false },
+      },
+      { tableName: "parents2", timestamps: false }
+    );
+    const Item3 = sequelizeLocal.define(
+      "Item",
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        name: { type: DataTypes.STRING(100), allowNull: false },
+        parent_id: { type: DataTypes.INTEGER, allowNull: false },
+      },
+      { tableName: "list_items_included2", timestamps: false }
+    );
+
+    Item3.belongsTo(Parent, { as: "Parent", foreignKey: "parent_id" });
+    await sequelizeLocal.sync({ force: true });
+
+    const t1 = await Parent.create({ parent_name: "Acme" });
+    const t2 = await Parent.create({ parent_name: "Globex" });
+    await Item3.bulkCreate([
+      { name: "Omega", parent_id: t1.id },
+      { name: "Alpha", parent_id: t2.id },
+      { name: "Beta", parent_id: t2.id },
+    ]);
+
+    const app = express();
+    app.use(bodyParser.json());
+    // Configure multi-column filter across name and Parent.parent_name
+    app.use(
+      "/items",
+      list(
+        Item3,
+        { filter_fields: ["name", "Parent.parent_name"] },
+        { include: [{ model: Parent, as: "Parent" }] },
+      ),
+    );
+
+    // Search for 'ac' should match parent_name: Acme on first row, not the others
+    const res = await request(app).get("/items?api:filter=ac");
+    expect(res.status).toBe(200);
+    expect(res.body.meta.count).toBe(1);
+    expect(res.body.data.map((r) => r.name)).toEqual(["Omega"]);
+  });
 });
