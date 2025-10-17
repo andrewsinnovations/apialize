@@ -106,13 +106,8 @@ describe("single() with id_mapping option", () => {
       // Fetch the record using external_id mapping
       const getRes = await request(app).get(`/items/ext-789`);
       expect(getRes.status).toBe(200);
-      expect(getRes.body).toMatchObject({
-        success: true,
-        record: {
-          name: "Test Item",
-          external_id: "ext-789"
-        }
-      });
+      expect(getRes.body).toMatchObject({ success: true, record: { name: "Test Item", id: "ext-789" } });
+      expect(Object.prototype.hasOwnProperty.call(getRes.body.record, 'external_id')).toBe(false);
     });
 
     test("should return 404 when record not found with custom mapping", async () => {
@@ -144,13 +139,8 @@ describe("single() with id_mapping option", () => {
       // Fetch the record using external_id mapping with middleware
       const getRes = await request(app).get(`/items/ext-middleware-test`);
       expect(getRes.status).toBe(200);
-      expect(getRes.body).toMatchObject({
-        success: true,
-        record: {
-          name: "Test Item",
-          external_id: "ext-middleware-test"
-        }
-      });
+      expect(getRes.body).toMatchObject({ success: true, record: { name: "Test Item", id: "ext-middleware-test" } });
+      expect(Object.prototype.hasOwnProperty.call(getRes.body.record, 'external_id')).toBe(false);
     });
   });
 
@@ -169,13 +159,8 @@ describe("single() with id_mapping option", () => {
       // Fetch the record using numeric external_id
       const getRes = await request(app).get(`/items/12345`);
       expect(getRes.status).toBe(200);
-      expect(getRes.body).toMatchObject({
-        success: true,
-        record: {
-          name: "Numeric External ID",
-          external_id: "12345"
-        }
-      });
+      expect(getRes.body).toMatchObject({ success: true, record: { name: "Numeric External ID", id: "12345" } });
+      expect(Object.prototype.hasOwnProperty.call(getRes.body.record, 'external_id')).toBe(false);
     });
 
     test("should handle special characters in external_id", async () => {
@@ -194,13 +179,8 @@ describe("single() with id_mapping option", () => {
       // Fetch the record using external_id with special characters
       const getRes = await request(app).get(`/items/${specialId}`);
       expect(getRes.status).toBe(200);
-      expect(getRes.body).toMatchObject({
-        success: true,
-        record: {
-          name: "Special ID",
-          external_id: specialId
-        }
-      });
+      expect(getRes.body).toMatchObject({ success: true, record: { name: "Special ID", id: specialId } });
+      expect(Object.prototype.hasOwnProperty.call(getRes.body.record, 'external_id')).toBe(false);
     });
   });
 

@@ -73,7 +73,8 @@ describe("single operation: comprehensive options coverage", () => {
     await request(app).post("/users").send({ external_id: "ux", name: "Bob" });
     const res = await request(app).get(`/users/ux`);
     expect(res.status).toBe(200);
-    expect(res.body.record).toMatchObject({ external_id: "ux", name: "Bob" });
+    expect(res.body.record).toMatchObject({ id: "ux", name: "Bob" });
+    expect(Object.prototype.hasOwnProperty.call(res.body.record, "external_id")).toBe(false);
   });
 
   test("ownership filtering via query filters: 404 when not in scope", async () => {

@@ -272,6 +272,13 @@ function single(model, options = {}, modelOptions = {}) {
       let payload = result;
       if (payload && typeof payload === "object")
         payload = payload.get ? payload.get({ plain: true }) : { ...payload };
+      // Normalize id according to id_mapping: if mapping is not 'id', move mapped field into id and remove original field
+      if (id_mapping && id_mapping !== 'id' && payload && typeof payload === 'object') {
+        if (Object.prototype.hasOwnProperty.call(payload, id_mapping)) {
+          payload = { ...payload, id: payload[id_mapping] };
+          delete payload[id_mapping];
+        }
+      }
       res.json({success: true, record: payload});
     }),
   );
