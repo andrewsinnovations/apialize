@@ -21,7 +21,7 @@ describe("single() recursion with three levels (users -> posts -> comments)", ()
         name: { type: DataTypes.STRING(100), allowNull: false },
         email: { type: DataTypes.STRING(100), allowNull: false, unique: true },
       },
-      { tableName: "users", timestamps: false }
+      { tableName: "users", timestamps: false },
     );
 
     Post = sequelize.define(
@@ -32,7 +32,7 @@ describe("single() recursion with three levels (users -> posts -> comments)", ()
         content: { type: DataTypes.TEXT, allowNull: true },
         user_id: { type: DataTypes.INTEGER, allowNull: false },
       },
-      { tableName: "posts", timestamps: false }
+      { tableName: "posts", timestamps: false },
     );
 
     Comment = sequelize.define(
@@ -43,7 +43,7 @@ describe("single() recursion with three levels (users -> posts -> comments)", ()
         post_id: { type: DataTypes.INTEGER, allowNull: false },
         user_id: { type: DataTypes.INTEGER, allowNull: false },
       },
-      { tableName: "comments", timestamps: false }
+      { tableName: "comments", timestamps: false },
     );
 
     await sequelize.sync({ force: true });
@@ -65,12 +65,10 @@ describe("single() recursion with three levels (users -> posts -> comments)", ()
           {
             model: Post,
             // Recursively attach comments under each post
-            related: [
-              { model: Comment }
-            ],
+            related: [{ model: Comment }],
           },
         ],
-      })
+      }),
     );
 
     // Convenience endpoints for creating top-level resources
@@ -106,7 +104,10 @@ describe("single() recursion with three levels (users -> posts -> comments)", ()
     const listPosts = await request(app).get(`/users/${userId}/posts`);
     expect(listPosts.status).toBe(200);
     expect(listPosts.body.success).toBe(true);
-    expect(listPosts.body.data.map(r => r.title).sort()).toEqual(["Hello","World"]);
+    expect(listPosts.body.data.map((r) => r.title).sort()).toEqual([
+      "Hello",
+      "World",
+    ]);
 
     // Create comments under the first post via nested related POST
     const c1 = await request(app)
@@ -119,19 +120,28 @@ describe("single() recursion with three levels (users -> posts -> comments)", ()
     expect(c2.status).toBe(201);
 
     // List comments for first post
-    const listComments1 = await request(app).get(`/users/${userId}/posts/${post1Id}/comments`);
+    const listComments1 = await request(app).get(
+      `/users/${userId}/posts/${post1Id}/comments`,
+    );
     expect(listComments1.status).toBe(200);
     expect(listComments1.body.success).toBe(true);
-    expect(listComments1.body.data.map(r => r.text).sort()).toEqual(["Agreed","Nice!"]);
+    expect(listComments1.body.data.map((r) => r.text).sort()).toEqual([
+      "Agreed",
+      "Nice!",
+    ]);
 
     // Ensure comments do not appear under the second post
-    const listComments2 = await request(app).get(`/users/${userId}/posts/${post2Id}/comments`);
+    const listComments2 = await request(app).get(
+      `/users/${userId}/posts/${post2Id}/comments`,
+    );
     expect(listComments2.status).toBe(200);
     expect(listComments2.body.data).toHaveLength(0);
 
     // GET single comment via nested route
     const commentId = c1.body.id;
-    const getComment = await request(app).get(`/users/${userId}/posts/${post1Id}/comments/${commentId}`);
+    const getComment = await request(app).get(
+      `/users/${userId}/posts/${post1Id}/comments/${commentId}`,
+    );
     expect(getComment.status).toBe(200);
     expect(getComment.body.success).toBe(true);
     expect(getComment.body.record.text).toBe("Nice!");
@@ -144,7 +154,9 @@ describe("single() recursion with three levels (users -> posts -> comments)", ()
     expect(putComment.body.success).toBe(true);
 
     // Verify the update took effect
-    const getAfterPut = await request(app).get(`/users/${userId}/posts/${post1Id}/comments/${commentId}`);
+    const getAfterPut = await request(app).get(
+      `/users/${userId}/posts/${post1Id}/comments/${commentId}`,
+    );
     expect(getAfterPut.status).toBe(200);
     expect(getAfterPut.body.success).toBe(true);
     expect(getAfterPut.body.record.text).toBe("Updated comment");
@@ -157,24 +169,30 @@ describe("single() recursion with three levels (users -> posts -> comments)", ()
       .send({ text: "Patched comment" });
     expect(patchComment.status).toBe(200);
     expect(patchComment.body.success).toBe(true);
-  expect(patchComment.body.id).toBe(String(commentId));
+    expect(patchComment.body.id).toBe(String(commentId));
 
     // Verify the patch took effect
-    const getAfterPatch = await request(app).get(`/users/${userId}/posts/${post1Id}/comments/${commentId}`);
+    const getAfterPatch = await request(app).get(
+      `/users/${userId}/posts/${post1Id}/comments/${commentId}`,
+    );
     expect(getAfterPatch.status).toBe(200);
     expect(getAfterPatch.body.record.text).toBe("Patched comment");
 
     // DELETE third-level comment
-    const delComment = await request(app)
-      .delete(`/users/${userId}/posts/${post1Id}/comments/${commentId}`);
+    const delComment = await request(app).delete(
+      `/users/${userId}/posts/${post1Id}/comments/${commentId}`,
+    );
     expect(delComment.status).toBe(200);
     expect(delComment.body.success).toBe(true);
-  expect(delComment.body.id).toBe(String(commentId));
+    expect(delComment.body.id).toBe(String(commentId));
 
     // Ensure it's gone from the list
-    const listCommentsAfterDelete = await request(app)
-      .get(`/users/${userId}/posts/${post1Id}/comments`);
+    const listCommentsAfterDelete = await request(app).get(
+      `/users/${userId}/posts/${post1Id}/comments`,
+    );
     expect(listCommentsAfterDelete.status).toBe(200);
-    expect(listCommentsAfterDelete.body.data.map(r => r.text).sort()).toEqual(["Agreed"]);
+    expect(listCommentsAfterDelete.body.data.map((r) => r.text).sort()).toEqual(
+      ["Agreed"],
+    );
   });
 });

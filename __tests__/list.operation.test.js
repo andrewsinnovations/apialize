@@ -5,7 +5,11 @@ const { Sequelize, DataTypes } = require("sequelize");
 const { list } = require("../src");
 
 // Helper to build app with given list options and modelOptions
-async function buildAppAndModel({ listOptions = {}, modelOptions = {}, modelApialize = {} } = {}) {
+async function buildAppAndModel({
+  listOptions = {},
+  modelOptions = {},
+  modelApialize = {},
+} = {}) {
   const sequelize = new Sequelize("sqlite::memory:", { logging: false });
   const Item = sequelize.define(
     "Item",
@@ -15,9 +19,13 @@ async function buildAppAndModel({ listOptions = {}, modelOptions = {}, modelApia
       name: { type: DataTypes.STRING(100), allowNull: false },
       category: { type: DataTypes.STRING(50), allowNull: false },
       score: { type: DataTypes.INTEGER, allowNull: false },
-      created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: DataTypes.NOW },
+      created_at: {
+        type: DataTypes.DATE,
+        allowNull: false,
+        defaultValue: DataTypes.NOW,
+      },
     },
-    { tableName: "list_items", timestamps: false }
+    { tableName: "list_items", timestamps: false },
   );
 
   // Attach apialize model config for default ordering/page size when referenced by list
@@ -74,7 +82,9 @@ describe("list operation: comprehensive options coverage", () => {
   });
 
   test("filtering by simple columns (category)", async () => {
-    const ctx = await buildAppAndModel({ listOptions: { metaShowFilters: true } });
+    const ctx = await buildAppAndModel({
+      listOptions: { metaShowFilters: true },
+    });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
@@ -93,7 +103,9 @@ describe("list operation: comprehensive options coverage", () => {
   });
 
   test("ordering by one and multiple fields with global direction", async () => {
-    const ctx = await buildAppAndModel({ listOptions: { metaShowOrdering: true } });
+    const ctx = await buildAppAndModel({
+      listOptions: { metaShowOrdering: true },
+    });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
@@ -110,17 +122,24 @@ describe("list operation: comprehensive options coverage", () => {
     expect(res1.body.meta.order).toEqual([["name", "DESC"]]);
 
     // Multiple fields with global ASC direction: category asc, then name asc
-    const res2 = await request(app).get("/items?api:orderby=category,name&api:orderdir=ASC");
+    const res2 = await request(app).get(
+      "/items?api:orderby=category,name&api:orderdir=ASC",
+    );
     expect(res2.status).toBe(200);
     expect(names(res2)).toEqual(["Alpha", "Zeta", "Alpha"]); // A: Alpha, Zeta; then B: Alpha
-    expect(res2.body.meta.order).toEqual([["category", "ASC"], ["name", "ASC"]]);
+    expect(res2.body.meta.order).toEqual([
+      ["category", "ASC"],
+      ["name", "ASC"],
+    ]);
   });
 
   test("invalid ordering column returns 400", async () => {
     const ctx = await buildAppAndModel();
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
-    await seed(Item, [{ external_id: "u1", name: "A", category: "A", score: 1 }]);
+    await seed(Item, [
+      { external_id: "u1", name: "A", category: "A", score: 1 },
+    ]);
 
     const res = await request(app).get("/items?api:orderby=invalidField");
     expect(res.status).toBe(400);
@@ -131,7 +150,9 @@ describe("list operation: comprehensive options coverage", () => {
     const ctx = await buildAppAndModel();
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
-    await seed(Item, [{ external_id: "u1", name: "A", category: "A", score: 1 }]);
+    await seed(Item, [
+      { external_id: "u1", name: "A", category: "A", score: 1 },
+    ]);
 
     const res = await request(app).get("/items?notARealColumn=foo");
     expect(res.status).toBe(400);
@@ -179,25 +200,31 @@ describe("list operation: comprehensive options coverage", () => {
     expect(page2.body.meta.page).toBe(2);
     expect(names(page2)).toEqual(["N3", "N4"]);
 
-  // Explicit pagesize overrides model config
-  const page2size3 = await request(app).get("/items?api:page=2&api:pagesize=3");
-  expect(page2size3.status).toBe(200);
-  expect(page2size3.body.meta.page).toBe(2);
-  expect(page2size3.body.meta.page_size).toBe(3);
-  expect(page2size3.body.meta.total_pages).toBe(2); // ceil(5/3) = 2
-  expect(names(page2size3)).toEqual(["N4", "N5"]);
+    // Explicit pagesize overrides model config
+    const page2size3 = await request(app).get(
+      "/items?api:page=2&api:pagesize=3",
+    );
+    expect(page2size3.status).toBe(200);
+    expect(page2size3.body.meta.page).toBe(2);
+    expect(page2size3.body.meta.page_size).toBe(3);
+    expect(page2size3.body.meta.total_pages).toBe(2); // ceil(5/3) = 2
+    expect(names(page2size3)).toEqual(["N4", "N5"]);
 
-  // Out-of-range page returns empty data but preserves meta
-  const page3size3 = await request(app).get("/items?api:page=3&api:pagesize=3");
-  expect(page3size3.status).toBe(200);
-  expect(page3size3.body.meta.page).toBe(3);
-  expect(page3size3.body.meta.total_pages).toBe(2);
-  expect(names(page3size3)).toEqual([]);
+    // Out-of-range page returns empty data but preserves meta
+    const page3size3 = await request(app).get(
+      "/items?api:page=3&api:pagesize=3",
+    );
+    expect(page3size3.status).toBe(200);
+    expect(page3size3.body.meta.page).toBe(3);
+    expect(page3size3.body.meta.total_pages).toBe(2);
+    expect(names(page3size3)).toEqual([]);
   });
 
   test("disabling filtering and ordering via options", async () => {
     // allowFiltering: false should ignore query filters
-    const ctx1 = await buildAppAndModel({ listOptions: { allowFiltering: false } });
+    const ctx1 = await buildAppAndModel({
+      listOptions: { allowFiltering: false },
+    });
     sequelize = ctx1.sequelize;
     const { Item: Item1, app: app1 } = ctx1;
     await seed(Item1, [
@@ -212,7 +239,10 @@ describe("list operation: comprehensive options coverage", () => {
     await sequelize.close();
 
     // allowOrdering: false should ignore query orderby and use model config or default order
-    const ctx2 = await buildAppAndModel({ modelApialize: { orderby: "name", orderdir: "DESC" }, listOptions: { allowOrdering: false } });
+    const ctx2 = await buildAppAndModel({
+      modelApialize: { orderby: "name", orderdir: "DESC" },
+      listOptions: { allowOrdering: false },
+    });
     sequelize = ctx2.sequelize;
     const { Item: Item2, app: app2 } = ctx2;
     await seed(Item2, [
@@ -228,10 +258,12 @@ describe("list operation: comprehensive options coverage", () => {
   });
 
   test("listing by external id uses external_id as id and supports filtering", async () => {
-    const ctx = await buildAppAndModel({ 
+    const ctx = await buildAppAndModel({
       listOptions: { defaultOrderBy: "external_id", metaShowOrdering: true },
       // Alias external_id to id so clients consume uuid as the id field
-      modelOptions: { attributes: [["external_id", "id"], "name", "category", "score"] },
+      modelOptions: {
+        attributes: [["external_id", "id"], "name", "category", "score"],
+      },
     });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
@@ -241,16 +273,16 @@ describe("list operation: comprehensive options coverage", () => {
       { external_id: "c-uuid", name: "Cee", category: "B", score: 3 },
     ]);
 
-  // With no api:orderby, list should use defaultOrderBy external_id ASC
+    // With no api:orderby, list should use defaultOrderBy external_id ASC
     const res = await request(app).get("/items");
     expect(res.status).toBe(200);
     expect(names(res)).toEqual(["Aye", "Bee", "Cee"]);
     expect(res.body.meta.order).toEqual([["external_id", "ASC"]]);
-  // Confirm id is the external_id for all records, and external_id is not separately present
-  const rows = res.body.data;
-  const expectedIds = ["a-uuid", "b-uuid", "c-uuid"];
-  expect(rows.map(r => r.id)).toEqual(expectedIds);
-  expect(rows.every(r => typeof r.external_id === "undefined")).toBe(true);
+    // Confirm id is the external_id for all records, and external_id is not separately present
+    const rows = res.body.data;
+    const expectedIds = ["a-uuid", "b-uuid", "c-uuid"];
+    expect(rows.map((r) => r.id)).toEqual(expectedIds);
+    expect(rows.every((r) => typeof r.external_id === "undefined")).toBe(true);
 
     // Filter by external_id still works even when it's aliased to id in output
     const resFilter = await request(app).get("/items?external_id=b-uuid");
@@ -278,13 +310,15 @@ describe("list operation: comprehensive options coverage", () => {
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     // Names should be ordered by external_id: a, b, c
-    expect(res.body.data.map(r => r.name)).toEqual(["Aye", "Bee", "Cee"]);
+    expect(res.body.data.map((r) => r.name)).toEqual(["Aye", "Bee", "Cee"]);
     // id field should be normalized to external_id values
-    expect(res.body.data.map(r => r.id)).toEqual(["a", "b", "c"]);
+    expect(res.body.data.map((r) => r.id)).toEqual(["a", "b", "c"]);
   });
 
   test("multi-column filter: case-insensitive OR across fields (configured in list options)", async () => {
-    const ctx = await buildAppAndModel({ listOptions: { filter_fields: ["name", "category"] } });
+    const ctx = await buildAppAndModel({
+      listOptions: { filter_fields: ["name", "category"] },
+    });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
@@ -303,7 +337,12 @@ describe("list operation: comprehensive options coverage", () => {
   });
 
   test("multi-column filter can be disabled via option", async () => {
-    const ctx = await buildAppAndModel({ listOptions: { allowMultiColumnFiltering: false, filter_fields: ["name", "category"] } });
+    const ctx = await buildAppAndModel({
+      listOptions: {
+        allowMultiColumnFiltering: false,
+        filter_fields: ["name", "category"],
+      },
+    });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
@@ -321,10 +360,14 @@ describe("list operation: comprehensive options coverage", () => {
   });
 
   test("multi-column filter: invalid configured field returns 400", async () => {
-    const ctx = await buildAppAndModel({ listOptions: { filter_fields: ["name", "notARealColumn"] } });
+    const ctx = await buildAppAndModel({
+      listOptions: { filter_fields: ["name", "notARealColumn"] },
+    });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
-    await seed(Item, [{ external_id: "u1", name: "Alpha", category: "Zed", score: 1 }]);
+    await seed(Item, [
+      { external_id: "u1", name: "Alpha", category: "Zed", score: 1 },
+    ]);
 
     const res = await request(app).get("/items?api:filter=al");
     expect(res.status).toBe(400);
@@ -332,7 +375,9 @@ describe("list operation: comprehensive options coverage", () => {
   });
 
   test("multi-column filter: fields from model.apialize config", async () => {
-    const ctx = await buildAppAndModel({ modelApialize: { filter_fields: ["name", "category"] } });
+    const ctx = await buildAppAndModel({
+      modelApialize: { filter_fields: ["name", "category"] },
+    });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
@@ -358,7 +403,7 @@ describe("list operation: comprehensive options coverage", () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         parent_name: { type: DataTypes.STRING(100), allowNull: false },
       },
-      { tableName: "parents", timestamps: false }
+      { tableName: "parents", timestamps: false },
     );
     const Item2 = sequelizeLocal.define(
       "Item",
@@ -367,7 +412,7 @@ describe("list operation: comprehensive options coverage", () => {
         name: { type: DataTypes.STRING(100), allowNull: false },
         parent_id: { type: DataTypes.INTEGER, allowNull: false },
       },
-      { tableName: "list_items_included", timestamps: false }
+      { tableName: "list_items_included", timestamps: false },
     );
 
     Item2.belongsTo(Parent, { as: "Parent", foreignKey: "parent_id" });
@@ -387,11 +432,7 @@ describe("list operation: comprehensive options coverage", () => {
     app.use(bodyParser.json());
     app.use(
       "/items",
-      list(
-        Item2,
-        {},
-        { include: [{ model: Parent, as: "Parent" }] },
-      ),
+      list(Item2, {}, { include: [{ model: Parent, as: "Parent" }] }),
     );
 
     // Filter on include attribute using dotted path
@@ -410,7 +451,7 @@ describe("list operation: comprehensive options coverage", () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         parent_name: { type: DataTypes.STRING(100), allowNull: false },
       },
-      { tableName: "parents2", timestamps: false }
+      { tableName: "parents2", timestamps: false },
     );
     const Item3 = sequelizeLocal.define(
       "Item",
@@ -419,7 +460,7 @@ describe("list operation: comprehensive options coverage", () => {
         name: { type: DataTypes.STRING(100), allowNull: false },
         parent_id: { type: DataTypes.INTEGER, allowNull: false },
       },
-      { tableName: "list_items_included2", timestamps: false }
+      { tableName: "list_items_included2", timestamps: false },
     );
 
     Item3.belongsTo(Parent, { as: "Parent", foreignKey: "parent_id" });
@@ -450,5 +491,46 @@ describe("list operation: comprehensive options coverage", () => {
     expect(res.status).toBe(200);
     expect(res.body.meta.count).toBe(1);
     expect(res.body.data.map((r) => r.name)).toEqual(["Omega"]);
+  });
+
+  test("pre/post hooks receive context with transaction and can mutate payload", async () => {
+    const ctx = await buildAppAndModel();
+    sequelize = ctx.sequelize;
+    const { Item, app } = ctx;
+
+    await seed(Item, [
+      { external_id: "u1", name: "A", category: "A", score: 1 },
+      { external_id: "u2", name: "B", category: "B", score: 2 },
+    ]);
+
+    const calls = { pre: 0, post: 0 };
+    const app2 = express();
+    app2.use(express.json());
+    app2.use(
+      "/items",
+      list(Item, {
+        pre: async (context) => {
+          calls.pre++;
+          // Ensure transaction exists and is a Sequelize transaction-like object
+          expect(context.transaction).toBeTruthy();
+          expect(typeof context.transaction.commit).toBe("function");
+          // Stash something to ensure it's stored
+          return { tag: "from-pre" };
+        },
+        post: async (context) => {
+          calls.post++;
+          // Ensure pre result is available
+          expect(context.preResult).toEqual({ tag: "from-pre" });
+          // Mutate payload meta
+          context.payload.meta.hook = "post";
+        },
+      }),
+    );
+
+    const res = await request(app2).get("/items");
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.meta.hook).toBe("post");
+    expect(calls).toEqual({ pre: 1, post: 1 });
   });
 });

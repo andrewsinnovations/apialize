@@ -4,17 +4,25 @@ const request = require("supertest");
 const { Sequelize, DataTypes } = require("sequelize");
 const { single, create, list } = require("../src");
 
-async function build({ singleOptions = {}, modelOptions = {}, relatedConfig = null } = {}) {
+async function build({
+  singleOptions = {},
+  modelOptions = {},
+  relatedConfig = null,
+} = {}) {
   const sequelize = new Sequelize("sqlite::memory:", { logging: false });
   const User = sequelize.define(
     "User",
     {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-      external_id: { type: DataTypes.STRING(64), allowNull: false, unique: true },
+      external_id: {
+        type: DataTypes.STRING(64),
+        allowNull: false,
+        unique: true,
+      },
       name: { type: DataTypes.STRING(100), allowNull: false },
       parent_id: { type: DataTypes.INTEGER, allowNull: true },
     },
-    { tableName: "single_users", timestamps: false }
+    { tableName: "single_users", timestamps: false },
   );
   const Post = sequelize.define(
     "Post",
@@ -23,7 +31,7 @@ async function build({ singleOptions = {}, modelOptions = {}, relatedConfig = nu
       user_id: { type: DataTypes.INTEGER, allowNull: false },
       title: { type: DataTypes.STRING(255), allowNull: false },
     },
-    { tableName: "single_posts", timestamps: false }
+    { tableName: "single_posts", timestamps: false },
   );
 
   // Attach relation-like info
@@ -36,7 +44,10 @@ async function build({ singleOptions = {}, modelOptions = {}, relatedConfig = nu
   app.use(bodyParser.json());
 
   const options = { ...singleOptions };
-  if (relatedConfig) options.related = [relatedConfig === true ? { model: Post } : relatedConfig];
+  if (relatedConfig)
+    options.related = [
+      relatedConfig === true ? { model: Post } : relatedConfig,
+    ];
 
   app.use("/users", create(User));
   app.use("/posts", list(Post));
@@ -56,10 +67,14 @@ describe("single operation: comprehensive options coverage", () => {
   });
 
   test("default id mapping returns one record; respects modelOptions attributes", async () => {
-    const { sequelize: s, app } = await build({ modelOptions: { attributes: ["id", "name"] } });
+    const { sequelize: s, app } = await build({
+      modelOptions: { attributes: ["id", "name"] },
+    });
     sequelize = s;
 
-    const created = await request(app).post("/users").send({ external_id: "u1", name: "Alice" });
+    const created = await request(app)
+      .post("/users")
+      .send({ external_id: "u1", name: "Alice" });
     const res = await request(app).get(`/users/${created.body.id}`);
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -67,23 +82,31 @@ describe("single operation: comprehensive options coverage", () => {
   });
 
   test("id_mapping: external_id reads via external id", async () => {
-    const { sequelize: s, app } = await build({ singleOptions: { id_mapping: "external_id" } });
+    const { sequelize: s, app } = await build({
+      singleOptions: { id_mapping: "external_id" },
+    });
     sequelize = s;
 
     await request(app).post("/users").send({ external_id: "ux", name: "Bob" });
     const res = await request(app).get(`/users/ux`);
     expect(res.status).toBe(200);
     expect(res.body.record).toMatchObject({ id: "ux", name: "Bob" });
-    expect(Object.prototype.hasOwnProperty.call(res.body.record, "external_id")).toBe(false);
+    expect(
+      Object.prototype.hasOwnProperty.call(res.body.record, "external_id"),
+    ).toBe(false);
   });
 
   test("ownership filtering via query filters: 404 when not in scope", async () => {
     const { sequelize: s, app } = await build();
     sequelize = s;
 
-    const created = await request(app).post("/users").send({ external_id: "scoped", name: "Scoped", parent_id: 1 });
+    const created = await request(app)
+      .post("/users")
+      .send({ external_id: "scoped", name: "Scoped", parent_id: 1 });
 
-    const miss = await request(app).get(`/users/${created.body.id}?parent_id=2`);
+    const miss = await request(app).get(
+      `/users/${created.body.id}?parent_id=2`,
+    );
     expect(miss.status).toBe(404);
 
     const ok = await request(app).get(`/users/${created.body.id}?parent_id=1`);
@@ -94,14 +117,23 @@ describe("single operation: comprehensive options coverage", () => {
     const scope = (req, _res, next) => {
       req.apialize = req.apialize || {};
       req.apialize.options = req.apialize.options || {};
-      req.apialize.options.where = { ...(req.apialize.options.where || {}), parent_id: 5 };
+      req.apialize.options.where = {
+        ...(req.apialize.options.where || {}),
+        parent_id: 5,
+      };
       next();
     };
-    const { sequelize: s, app } = await build({ singleOptions: { middleware: [scope] } });
+    const { sequelize: s, app } = await build({
+      singleOptions: { middleware: [scope] },
+    });
     sequelize = s;
 
-    const u1 = await request(app).post("/users").send({ external_id: "t5-1", name: "A", parent_id: 5 });
-    await request(app).post("/users").send({ external_id: "t9-1", name: "B", parent_id: 9 });
+    const u1 = await request(app)
+      .post("/users")
+      .send({ external_id: "t5-1", name: "A", parent_id: 5 });
+    await request(app)
+      .post("/users")
+      .send({ external_id: "t9-1", name: "B", parent_id: 9 });
 
     const ok = await request(app).get(`/users/${u1.body.id}`);
     expect(ok.status).toBe(200);
@@ -111,10 +143,17 @@ describe("single operation: comprehensive options coverage", () => {
   });
 
   test("related recursion mounted via single() nested router works for get/list & write ops scoping", async () => {
-    const { sequelize: s, User, Post: P2, app } = await build({ relatedConfig: true });
+    const {
+      sequelize: s,
+      User,
+      Post: P2,
+      app,
+    } = await build({ relatedConfig: true });
     sequelize = s;
 
-    const u = await request(app).post("/users").send({ external_id: "usr1", name: "U1" });
+    const u = await request(app)
+      .post("/users")
+      .send({ external_id: "usr1", name: "U1" });
     // Seed a post directly
     await P2.create({ user_id: u.body.id, title: "P1" });
 
@@ -124,8 +163,10 @@ describe("single operation: comprehensive options coverage", () => {
     expect(listRes.body.meta.count).toBe(1);
 
     // GET child via nested single
-  const post = await P2.findOne({ where: { user_id: u.body.id } });
-    const getChild = await request(app).get(`/users/${u.body.id}/posts/${post.id}`);
+    const post = await P2.findOne({ where: { user_id: u.body.id } });
+    const getChild = await request(app).get(
+      `/users/${u.body.id}/posts/${post.id}`,
+    );
     expect(getChild.status).toBe(200);
     expect(getChild.body.record).toMatchObject({ id: post.id, title: "P1" });
   });

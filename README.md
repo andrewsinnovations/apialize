@@ -3,6 +3,7 @@
 Turn a Sequelize‑like model into a production‑ready REST(ish) CRUD API in a few lines.
 
 Drop‑in Express routers for list / read / create / update / patch / destroy with:
+
 - Pluggable middleware (auth, ownership, validation)
 - Simple primary identifier assumption (`id` column, configurable)
 - Per‑model default pagination + ordering (`page_size`, `orderby`, `orderdir`)
@@ -21,7 +22,8 @@ No heavy abstractions: you keep full control of Express and your models. Works w
 4. Response formats
 5. Filtering, pagination, ordering
 6. Middleware and `req.apialize`
-7. Related models with `single(..., { related: [...] })`
+7. List pre/post hooks and context
+8. Related models with `single(..., { related: [...] })`
 
 ## 1. Installation
 
@@ -62,14 +64,14 @@ app.listen(3000, () => console.log("API on :3000"));
 
 You instantly get:
 
-| Method | Path        | Helper    | Description                                      |
-| ------ | ----------- | --------- | ------------------------------------------------ |
-| GET    | /things     | `list`    | List + count (with optional filters)             |
-| GET    | /things/:id | `single`  | Fetch one (404 if not found)                     |
-| POST   | /things     | `create`  | Create (201) returns `{ success: true, id }`     |
-| PUT    | /things/:id | `update`  | Full replace (unspecified fields null/default)   |
-| PATCH  | /things/:id | `patch`   | Partial update (only provided fields)            |
-| DELETE | /things/:id | `destroy` | Delete (404 if nothing affected)                 |
+| Method | Path        | Helper    | Description                                    |
+| ------ | ----------- | --------- | ---------------------------------------------- |
+| GET    | /things     | `list`    | List + count (with optional filters)           |
+| GET    | /things/:id | `single`  | Fetch one (404 if not found)                   |
+| POST   | /things     | `create`  | Create (201) returns `{ success: true, id }`   |
+| PUT    | /things/:id | `update`  | Full replace (unspecified fields null/default) |
+| PATCH  | /things/:id | `patch`   | Partial update (only provided fields)          |
+| DELETE | /things/:id | `destroy` | Delete (404 if nothing affected)               |
 
 ---
 
@@ -119,6 +121,7 @@ Each helper accepts `(model, options = {}, modelOptions = {})` unless otherwise 
 - `crud(model, options?)` // composition helper
 
 For `single()`, `update()`, `patch()`, and `destroy()` the `options` object supports:
+
 - `middleware`: array of middleware functions
 - `id_mapping`: string mapping URL param to a field (default `'id'`)
 - `param_name` (single only): change the name of the URL parameter used by `single()` for the record id (default `'id'`)
@@ -129,10 +132,10 @@ Passing an empty object `{}` as the second argument is ignored (backwards compat
 
 Helper options are deliberately minimal. `crud()` accepts:
 
-| Option        | Type   | Default | Description                                                                 |
-| ------------- | ------ | ------- | --------------------------------------------------------------------------- |
+| Option       | Type   | Default | Description                                                                |
+| ------------ | ------ | ------- | -------------------------------------------------------------------------- |
 | `middleware` | array  | `[]`    | Global middleware applied (in order) to every operation.                   |
-| `routes`      | object | `{}`    | Per‑operation extra middleware: `{ list: [fnA], create: [fnB, fnC] }` etc. |
+| `routes`     | object | `{}`    | Per‑operation extra middleware: `{ list: [fnA], create: [fnB, fnC] }` etc. |
 
 Example:
 
@@ -159,14 +162,14 @@ app.use("/items", patch(Item));
 app.use("/items", destroy(Item));
 
 // Custom mapping - maps :id parameter to 'external_id' field
-app.use("/items", single(Item, { id_mapping: 'external_id' }));
-app.use("/items", update(Item, { id_mapping: 'external_id' }));
-app.use("/items", patch(Item, { id_mapping: 'external_id' }));
-app.use("/items", destroy(Item, { id_mapping: 'external_id' }));
+app.use("/items", single(Item, { id_mapping: "external_id" }));
+app.use("/items", update(Item, { id_mapping: "external_id" }));
+app.use("/items", patch(Item, { id_mapping: "external_id" }));
+app.use("/items", destroy(Item, { id_mapping: "external_id" }));
 
 // Example: GET /items/abc-123 will query WHERE external_id = 'abc-123'
 //          PUT /items/abc-123 will update WHERE external_id = 'abc-123'
-//          PATCH /items/abc-123 will update WHERE external_id = 'abc-123'  
+//          PATCH /items/abc-123 will update WHERE external_id = 'abc-123'
 //          DELETE /items/abc-123 will delete WHERE external_id = 'abc-123'
 ```
 
@@ -267,8 +270,17 @@ All middleware run after an internal context initializer (`apializeContext`) whi
 
 ```js
 req.apialize = {
-  options: { where: {/* merged filters */}, limit, offset, order },
-  values: {/* merged body values for create/updates */},
+  options: {
+    where: {
+      /* merged filters */
+    },
+    limit,
+    offset,
+    order,
+  },
+  values: {
+    /* merged body values for create/updates */
+  },
 };
 ```
 
@@ -278,7 +290,7 @@ Ownership / authorization middleware can safely merge additional filters and val
 function ownership(req, _res, next) {
   const userId = req.user.id;
   req.apialize.options.where.user_id = userId; // restrict
-  if (["POST","PUT","PATCH"].includes(req.method)) {
+  if (["POST", "PUT", "PATCH"].includes(req.method)) {
     req.apialize.values.user_id = userId; // enforce
   }
   next();
@@ -286,12 +298,125 @@ function ownership(req, _res, next) {
 ```
 
 Update semantics:
+
 - `PUT` (update) performs a full replace: for any attribute not provided, the value is set to the model's `defaultValue` if defined, otherwise `null` (identifier is preserved).
 - `PATCH` updates only provided, valid attributes. If body is empty, it verifies existence and returns success.
 
 ---
 
-## 7. Related models with `single(..., { related: [...] })`
+## 7. Hooks and context (List, Create, Update, Patch, Destroy)
+
+All write/read helpers now support optional pre/post processing hooks and provide a context object you can use to coordinate work and transactions.
+
+Options on `list|create|update|patch|destroy (model, options)`: add `pre` and/or `post` functions.
+
+- `pre(context)`: runs before the query executes. You can mutate `context` and optionally return a value; the return value is stored on `context.preResult`.
+- `post(context)`: runs after the list query and response payload are constructed. You can mutate `context.payload` before it is sent as the HTTP response.
+
+Transaction lifecycle:
+
+- Starts a database transaction via `model.sequelize.transaction()` and stores it as `context.transaction`.
+- The internal query (list findAndCountAll or update find/save) runs within that transaction.
+- After `post()` finishes, the transaction is committed. If any error occurs during hooks or querying, the transaction is rolled back and the error is propagated to Express.
+
+Context shape (selected keys):
+
+```
+{
+  req, res,            // Express objects
+  request,             // alias to req for convenience in hooks
+  model,               // Sequelize-like model
+  options,             // list options passed in
+  modelOptions,        // modelOptions passed in
+  apialize,            // req.apialize reference
+  page, pageSize,      // pagination (list)
+  appliedFilters,      // filters derived from query (list)
+  idMapping,           // effective id mapping
+  transaction,         // Sequelize transaction (if available)
+  preResult,           // result from pre() if returned
+  existing,            // (update) the loaded record before save
+  nextValues,          // (update) values to be saved
+  payload,             // response payload (can be mutated in post())
+}
+```
+
+Examples:
+
+```js
+app.use(
+  "/items",
+  list(Item, {
+    pre: async (ctx) => {
+      // add a custom filter or do side-effects
+      ctx.apialize.options.where.tenant_id = ctx.req.user.tenant_id;
+      return { startedAt: Date.now() };
+    },
+    post: async (ctx) => {
+      // enrich the payload
+      ctx.payload.meta.generated_by = "apialize";
+      ctx.payload.meta.duration_ms = Date.now() - ctx.preResult.startedAt;
+    },
+  }),
+);
+
+// Update with hooks
+app.use(
+  "/items",
+  update(Item, {
+    pre: async (ctx) => {
+      // e.g., enforce ownership or tweak ctx.apialize.values before PUT semantics apply
+      ctx.apialize.options.where.user_id = ctx.req.user.id;
+    },
+    post: async (ctx) => {
+      // Add audit info to response
+      ctx.payload.meta = { updated: true };
+    },
+  }),
+);
+
+// Create with hooks
+app.use(
+  "/items",
+  create(Item, {
+    pre: async (ctx) => {
+      ctx.apialize.values.user_id = ctx.req.user.id;
+    },
+    post: async (ctx) => {
+      ctx.payload.meta = { created: true };
+    },
+  }),
+);
+
+// Patch with hooks
+app.use(
+  "/items",
+  patch(Item, {
+    pre: async (ctx) => {
+      // e.g., sanitize fields
+    },
+    post: async (ctx) => {
+      ctx.payload.patched = true;
+    },
+  }),
+);
+
+// Destroy with hooks
+app.use(
+  "/items",
+  destroy(Item, {
+    pre: async (ctx) => {
+      // e.g., check permissions or enqueue audit
+    },
+    post: async (ctx) => {
+      ctx.payload.deleted = true;
+    },
+  }),
+);
+```
+
+Note: The final HTTP response body is taken from `context.payload` so your `post()` hook can modify it.
+
+## 8. Related models with `single(..., { related: [...] })`
 
 ### Related model endpoints via `single()`
 
@@ -303,39 +428,45 @@ Config per related item:
 single(User, {
   related: [
     {
-      model: Post,                 // required
-      path: 'articles',            // optional, overrides path derived from model name
-      foreignKey: 'user_id',       // optional, default: `${parentModelName.toLowerCase()}_id`
-      operations: ['list','get','post','put','patch','delete'], // subset allowed
-      options: {                   // base options forwarded into child helpers
+      model: Post, // required
+      path: "articles", // optional, overrides path derived from model name
+      foreignKey: "user_id", // optional, default: `${parentModelName.toLowerCase()}_id`
+      operations: ["list", "get", "post", "put", "patch", "delete"], // subset allowed
+      options: {
+        // base options forwarded into child helpers
         // same knobs as list/create/update/patch/destroy options
         middleware: [ownership],
-        allowFiltering: true,      // list option example
-        defaultPageSize: 25,       // list option example
-        id_mapping: 'id',          // default child id mapping
-        modelOptions: { attributes: { exclude: ['secret'] } } // Sequelize options
+        allowFiltering: true, // list option example
+        defaultPageSize: 25, // list option example
+        id_mapping: "id", // default child id mapping
+        modelOptions: { attributes: { exclude: ["secret"] } }, // Sequelize options
       },
-      perOperation: {              // optional: per-op overrides
+      perOperation: {
+        // optional: per-op overrides
         list: { allowFiltering: false }, // e.g. lock down filters only for list
-        get:  { modelOptions: { attributes: ['id','title'] } },
+        get: { modelOptions: { attributes: ["id", "title"] } },
         post: { middleware: [validatePostBody] },
-        put:  { id_mapping: 'id' },
-        patch:{},
-        delete: { /* middleware, id_mapping, modelOptions... */ }
-      }
-    }
-  ]
-})
+        put: { id_mapping: "id" },
+        patch: {},
+        delete: {
+          /* middleware, id_mapping, modelOptions... */
+        },
+      },
+    },
+  ],
+});
 ```
 
 Behavior:
+
 - Path: derived from related model name → snake_case + plural (e.g., `RelatedThing` → `related_things`), unless `path` is set.
 - Parent filtering: list/get only return rows with `foreignKey = :id` of the parent.
 - Writes: POST/PUT/PATCH automatically set the foreign key to the parent id; clients don’t need to send it.
 - Responses follow the same shapes as base helpers (`list`, `single`, `create`, `update`, `patch`, `destroy`).
- - Per‑operation overrides: `perOperation.{list|get|post|put|patch|delete}` can override `middleware`, `id_mapping`, and `modelOptions` (and list options) for that specific operation.
+- Per‑operation overrides: `perOperation.{list|get|post|put|patch|delete}` can override `middleware`, `id_mapping`, and `modelOptions` (and list options) for that specific operation.
 
 Examples:
+
 - `GET /users/:id/posts` → list posts for a user
 - `POST /users/:id/posts` → create a post for a user (FK auto‑injected)
 - `GET /users/:id/posts/:postId` → fetch one
@@ -350,6 +481,7 @@ Examples:
 You can nest related definitions at any depth by attaching a `related` array on a child related item. The child `get` operation is implemented using the same core `single()` helper under the hood, so all of its behavior (middleware, `id_mapping`, `modelOptions`, and further `related` nesting) applies consistently.
 
 Key points:
+
 - Recursion: define `related` on any child to continue nesting (e.g., users → posts → comments → ...).
 - Parent scoping: every nested level is automatically filtered by the parent through its foreign key; writes inject the correct parent foreign key automatically.
 - Identifier mapping: each level can customize `id_mapping` independently.
@@ -360,43 +492,50 @@ Example: users → posts → comments, with external identifiers and attribute e
 ```js
 app.use(
   "/users",
-  single(User, {
-    // Expose users by external_id and hide internal id in responses
-    id_mapping: "external_id",
-    middleware: [auth],
-    related: [
-      {
-        model: Post,
-        path: "posts", // optional; defaults from model name
-        foreignKey: "user_id", // optional; defaults to `${parent}_id`
-        options: {
-          id_mapping: "external_id",
-          modelOptions: { attributes: { exclude: ["id"] } },
-        },
-        // Nest comments under each post
-        related: [
-          {
-            model: Comment,
-            options: {
-              id_mapping: "uuid",
-              modelOptions: { attributes: { exclude: ["id", "post_id"] } },
+  single(
+    User,
+    {
+      // Expose users by external_id and hide internal id in responses
+      id_mapping: "external_id",
+      middleware: [auth],
+      related: [
+        {
+          model: Post,
+          path: "posts", // optional; defaults from model name
+          foreignKey: "user_id", // optional; defaults to `${parent}_id`
+          options: {
+            id_mapping: "external_id",
+            modelOptions: { attributes: { exclude: ["id"] } },
+          },
+          // Nest comments under each post
+          related: [
+            {
+              model: Comment,
+              options: {
+                id_mapping: "uuid",
+                modelOptions: { attributes: { exclude: ["id", "post_id"] } },
+              },
+            },
+          ],
+          perOperation: {
+            list: { defaultPageSize: 25 },
+            get: {
+              modelOptions: { attributes: ["external_id", "title", "content"] },
             },
           },
-        ],
-        perOperation: {
-          list: { defaultPageSize: 25 },
-          get:  { modelOptions: { attributes: ["external_id", "title", "content"] } },
         },
-      },
-    ],
-  }, {
-    // Sequelize options for the top-level single() query
-    attributes: { exclude: ["id"] },
-  })
+      ],
+    },
+    {
+      // Sequelize options for the top-level single() query
+      attributes: { exclude: ["id"] },
+    },
+  ),
 );
 ```
 
 This mounts endpoints like:
+
 - `GET /users/:id/posts` and `GET /users/:id/posts/:post` (id mapping applied per level)
 - `POST /users/:id/posts` (FK injected)
 - `GET /users/:id/posts/:post/comments` and `GET /users/:id/posts/:post/comments/:comment`
@@ -435,7 +574,7 @@ single(User, {
           perOperation: {
             delete: {
               // Show comment_key in responses instead of internal id
-              id_mapping: 'comment_key',
+              id_mapping: "comment_key",
               // Optional: disable collection DELETE route entirely
               // allow_bulk_delete: false,
             },

@@ -25,7 +25,7 @@ describe("bulk delete on related collections", () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(100), allowNull: false },
       },
-      { tableName: "bd_users", timestamps: false }
+      { tableName: "bd_users", timestamps: false },
     );
 
     Post = sequelize.define(
@@ -35,18 +35,22 @@ describe("bulk delete on related collections", () => {
         title: { type: DataTypes.STRING(200), allowNull: false },
         user_id: { type: DataTypes.INTEGER, allowNull: false },
       },
-      { tableName: "bd_posts", timestamps: false }
+      { tableName: "bd_posts", timestamps: false },
     );
 
     Comment = sequelize.define(
       "Comment",
       {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-        comment_key: { type: DataTypes.STRING(64), allowNull: false, unique: true },
+        comment_key: {
+          type: DataTypes.STRING(64),
+          allowNull: false,
+          unique: true,
+        },
         text: { type: DataTypes.STRING(255), allowNull: false },
         post_id: { type: DataTypes.INTEGER, allowNull: false },
       },
-      { tableName: "bd_comments", timestamps: false }
+      { tableName: "bd_comments", timestamps: false },
     );
 
     await sequelize.sync({ force: true });
@@ -79,7 +83,7 @@ describe("bulk delete on related collections", () => {
             ],
           },
         ],
-      })
+      }),
     );
   });
 
@@ -90,60 +94,94 @@ describe("bulk delete on related collections", () => {
   test("dry run returns ids (no confirm)", async () => {
     const u = await request(app).post("/users").send({ name: "U" });
     const userId = u.body.id;
-    const p = await request(app).post(`/users/${userId}/posts`).send({ title: "T" });
+    const p = await request(app)
+      .post(`/users/${userId}/posts`)
+      .send({ title: "T" });
     const postId = p.body.id;
 
     // create 3 comments
-    const c1 = await request(app).post(`/users/${userId}/posts/${postId}/comments`).send({ text: "A", comment_key: "k1" });
-    const c2 = await request(app).post(`/users/${userId}/posts/${postId}/comments`).send({ text: "B", comment_key: "k2" });
-    const c3 = await request(app).post(`/users/${userId}/posts/${postId}/comments`).send({ text: "C", comment_key: "k3" });
+    const c1 = await request(app)
+      .post(`/users/${userId}/posts/${postId}/comments`)
+      .send({ text: "A", comment_key: "k1" });
+    const c2 = await request(app)
+      .post(`/users/${userId}/posts/${postId}/comments`)
+      .send({ text: "B", comment_key: "k2" });
+    const c3 = await request(app)
+      .post(`/users/${userId}/posts/${postId}/comments`)
+      .send({ text: "C", comment_key: "k3" });
     expect(c1.status).toBe(201);
     expect(c2.status).toBe(201);
     expect(c3.status).toBe(201);
 
-    const dry = await request(app).delete(`/users/${userId}/posts/${postId}/comments`);
+    const dry = await request(app).delete(
+      `/users/${userId}/posts/${postId}/comments`,
+    );
     expect(dry.status).toBe(200);
     expect(dry.body).toMatchObject({ success: true, confirm_required: true });
     // ids reflect id_mapping override (comment_key) as strings
     expect(dry.body.ids.sort()).toEqual(["k1", "k2", "k3"]);
 
     // Ensure records still exist
-    const list = await request(app).get(`/users/${userId}/posts/${postId}/comments`);
+    const list = await request(app).get(
+      `/users/${userId}/posts/${postId}/comments`,
+    );
     expect(list.body.data).toHaveLength(3);
   });
 
   test("confirmed bulk delete removes records and returns ids + count", async () => {
     const u = await request(app).post("/users").send({ name: "U2" });
     const userId = u.body.id;
-    const p = await request(app).post(`/users/${userId}/posts`).send({ title: "T2" });
+    const p = await request(app)
+      .post(`/users/${userId}/posts`)
+      .send({ title: "T2" });
     const postId = p.body.id;
 
-    await request(app).post(`/users/${userId}/posts/${postId}/comments`).send({ text: "A", comment_key: "d1" });
-    await request(app).post(`/users/${userId}/posts/${postId}/comments`).send({ text: "B", comment_key: "d2" });
+    await request(app)
+      .post(`/users/${userId}/posts/${postId}/comments`)
+      .send({ text: "A", comment_key: "d1" });
+    await request(app)
+      .post(`/users/${userId}/posts/${postId}/comments`)
+      .send({ text: "B", comment_key: "d2" });
 
-  const ok = await request(app).delete(`/users/${userId}/posts/${postId}/comments?confirm=true`);
+    const ok = await request(app).delete(
+      `/users/${userId}/posts/${postId}/comments?confirm=true`,
+    );
     expect(ok.status).toBe(200);
     expect(ok.body.success).toBe(true);
     expect(ok.body.ids.sort()).toEqual(["d1", "d2"]);
     expect(ok.body.deleted).toBe(2);
 
-    const list = await request(app).get(`/users/${userId}/posts/${postId}/comments`);
+    const list = await request(app).get(
+      `/users/${userId}/posts/${postId}/comments`,
+    );
     expect(list.body.data).toHaveLength(0);
   });
 
   test("scoping: other parent's records are untouched", async () => {
     const u1 = await request(app).post("/users").send({ name: "A" });
     const u2 = await request(app).post("/users").send({ name: "B" });
-    const p1 = await request(app).post(`/users/${u1.body.id}/posts`).send({ title: "X" });
-    const p2 = await request(app).post(`/users/${u2.body.id}/posts`).send({ title: "Y" });
+    const p1 = await request(app)
+      .post(`/users/${u1.body.id}/posts`)
+      .send({ title: "X" });
+    const p2 = await request(app)
+      .post(`/users/${u2.body.id}/posts`)
+      .send({ title: "Y" });
 
-    await request(app).post(`/users/${u1.body.id}/posts/${p1.body.id}/comments`).send({ text: "1", comment_key: "x1" });
-    await request(app).post(`/users/${u2.body.id}/posts/${p2.body.id}/comments`).send({ text: "2", comment_key: "y1" });
+    await request(app)
+      .post(`/users/${u1.body.id}/posts/${p1.body.id}/comments`)
+      .send({ text: "1", comment_key: "x1" });
+    await request(app)
+      .post(`/users/${u2.body.id}/posts/${p2.body.id}/comments`)
+      .send({ text: "2", comment_key: "y1" });
 
-  const ok = await request(app).delete(`/users/${u1.body.id}/posts/${p1.body.id}/comments?confirm=true`);
+    const ok = await request(app).delete(
+      `/users/${u1.body.id}/posts/${p1.body.id}/comments?confirm=true`,
+    );
     expect(ok.status).toBe(200);
 
-    const remains = await request(app).get(`/users/${u2.body.id}/posts/${p2.body.id}/comments`);
-    expect(remains.body.data.map(r => r.comment_key)).toEqual(["y1"]);
+    const remains = await request(app).get(
+      `/users/${u2.body.id}/posts/${p2.body.id}/comments`,
+    );
+    expect(remains.body.data.map((r) => r.comment_key)).toEqual(["y1"]);
   });
 });

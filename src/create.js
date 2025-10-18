@@ -1,8 +1,17 @@
 const { express, apializeContext, ensureFn, asyncHandler } = require("./utils");
+const {
+  withTransactionAndHooks,
+  optionsWithTransaction,
+} = require("./operationUtils");
 
 function create(model, options = {}, modelOptions = {}) {
   ensureFn(model, "create");
-  const { middleware = [], id_mapping = 'id' } = options;
+  const {
+    middleware = [],
+    id_mapping = "id",
+    pre = null,
+    post = null,
+  } = options;
   const inline = middleware.filter((fn) => typeof fn === "function");
   const router = express.Router({ mergeParams: true });
   router.post(
@@ -10,24 +19,45 @@ function create(model, options = {}, modelOptions = {}) {
     apializeContext,
     ...inline,
     asyncHandler(async (req, res) => {
-      // Merge model options with request options
-      const createOptions = { ...modelOptions, ...req.apialize.options };
-      const created = await model.create(
-        req.apialize.values,
-        createOptions,
+      const payload = await withTransactionAndHooks(
+        {
+          model,
+          options: { ...options, pre, post },
+          req,
+          res,
+          modelOptions,
+          idMapping: id_mapping,
+        },
+        async (context) => {
+          const createOptions = optionsWithTransaction(
+            { ...modelOptions, ...req.apialize.options },
+            context.transaction,
+          );
+          const created = await model.create(
+            req.apialize.values,
+            createOptions,
+          );
+          context.created = created;
+          let idValue;
+          if (created && typeof created.get === "function") {
+            idValue = created.get(id_mapping);
+          }
+          if (typeof idValue === "undefined") {
+            idValue =
+              (created && created[id_mapping]) ??
+              (created?.dataValues && created.dataValues[id_mapping]);
+          }
+          if (typeof idValue === "undefined") {
+            idValue = created?.id ?? created?.dataValues?.id;
+          }
+
+          context.payload = { success: true, id: idValue };
+          return context.payload;
+        },
       );
-      let idValue;
-      if (created && typeof created.get === 'function') {
-        idValue = created.get(id_mapping);
+      if (!res.headersSent) {
+        res.status(201).json(payload);
       }
-      if (typeof idValue === 'undefined') {
-        idValue = (created && created[id_mapping]) ?? (created?.dataValues && created.dataValues[id_mapping]);
-      }
-      if (typeof idValue === 'undefined') {
-        // Fallback to internal id for backward-compat if mapping not present
-        idValue = created?.id ?? created?.dataValues?.id;
-      }
-      res.status(201).json({ success: true, id: idValue });
     }),
   );
   router.apialize = {};

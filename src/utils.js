@@ -13,7 +13,7 @@ function apializeContext(req, res, next) {
         k === "api:orderby" ||
         k === "api:orderdir" ||
         k === "api:filter" ||
-        k.includes('.')
+        k.includes(".")
       )
         continue;
       if (typeof mergedWhere[k] === "undefined") mergedWhere[k] = v;

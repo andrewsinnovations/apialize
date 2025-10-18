@@ -10,12 +10,16 @@ async function build({ destroyOptions = {}, modelOptions = {} } = {}) {
     "Item",
     {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-      external_id: { type: DataTypes.STRING(64), allowNull: false, unique: true },
+      external_id: {
+        type: DataTypes.STRING(64),
+        allowNull: false,
+        unique: true,
+      },
       name: { type: DataTypes.STRING(100), allowNull: false },
       user_id: { type: DataTypes.INTEGER, allowNull: true },
       parent_id: { type: DataTypes.INTEGER, allowNull: true },
     },
-    { tableName: "destroy_items", timestamps: false }
+    { tableName: "destroy_items", timestamps: false },
   );
   await sequelize.sync({ force: true });
 
@@ -41,7 +45,9 @@ describe("destroy operation: comprehensive options coverage", () => {
     const { sequelize: s, app, Item } = await build();
     sequelize = s;
 
-    const created = await request(app).post("/items").send({ external_id: "d1", name: "A" });
+    const created = await request(app)
+      .post("/items")
+      .send({ external_id: "d1", name: "A" });
     const id = created.body.id;
 
     const del = await request(app).delete(`/items/${id}`);
@@ -53,7 +59,9 @@ describe("destroy operation: comprehensive options coverage", () => {
   });
 
   test("id_mapping: external_id deletes by external id", async () => {
-    const { sequelize: s, app } = await build({ destroyOptions: { id_mapping: "external_id" } });
+    const { sequelize: s, app } = await build({
+      destroyOptions: { id_mapping: "external_id" },
+    });
     sequelize = s;
 
     await request(app).post("/items").send({ external_id: "ex-d1", name: "A" });
@@ -69,8 +77,12 @@ describe("destroy operation: comprehensive options coverage", () => {
     const { sequelize: s, app } = await build();
     sequelize = s;
 
-    const a = await request(app).post("/items").send({ external_id: "a", name: "A", user_id: 1 });
-    const b = await request(app).post("/items").send({ external_id: "b", name: "B", user_id: 2 });
+    const a = await request(app)
+      .post("/items")
+      .send({ external_id: "a", name: "A", user_id: 1 });
+    const b = await request(app)
+      .post("/items")
+      .send({ external_id: "b", name: "B", user_id: 2 });
 
     // Wrong scope -> 404
     const miss = await request(app).delete(`/items/${b.body.id}?user_id=1`);
@@ -85,15 +97,24 @@ describe("destroy operation: comprehensive options coverage", () => {
     const scope = (req, _res, next) => {
       req.apialize = req.apialize || {};
       req.apialize.options = req.apialize.options || {};
-      req.apialize.options.where = { ...(req.apialize.options.where || {}), parent_id: 50 };
+      req.apialize.options.where = {
+        ...(req.apialize.options.where || {}),
+        parent_id: 50,
+      };
       next();
     };
 
-    const { sequelize: s, app } = await build({ destroyOptions: { middleware: [scope] } });
+    const { sequelize: s, app } = await build({
+      destroyOptions: { middleware: [scope] },
+    });
     sequelize = s;
 
-    const t1 = await request(app).post("/items").send({ external_id: "t1", name: "T1", parent_id: 50 });
-    await request(app).post("/items").send({ external_id: "t2", name: "T2", parent_id: 999 });
+    const t1 = await request(app)
+      .post("/items")
+      .send({ external_id: "t1", name: "T1", parent_id: 50 });
+    await request(app)
+      .post("/items")
+      .send({ external_id: "t2", name: "T2", parent_id: 999 });
 
     const ok = await request(app).delete(`/items/${t1.body.id}`);
     expect(ok.status).toBe(200);
@@ -109,12 +130,43 @@ describe("destroy operation: comprehensive options coverage", () => {
     const missDefault = await request(app).delete(`/items/9999`);
     expect(missDefault.status).toBe(404);
 
-    const { sequelize: s2, app: app2 } = await build({ destroyOptions: { id_mapping: "external_id" } });
-    await request(app2).post("/items").send({ external_id: "exists", name: "X" });
+    const { sequelize: s2, app: app2 } = await build({
+      destroyOptions: { id_mapping: "external_id" },
+    });
+    await request(app2)
+      .post("/items")
+      .send({ external_id: "exists", name: "X" });
     const del = await request(app2).delete(`/items/exists`);
     expect(del.status).toBe(200);
     const missCustom = await request(app2).delete(`/items/not-exists`);
     expect(missCustom.status).toBe(404);
     await s2.close();
+  });
+
+  test("pre/post hooks: transaction present and payload mutated (destroy)", async () => {
+    const { sequelize: s, app } = await build({
+      destroyOptions: {
+        pre: async (context) => {
+          expect(context.transaction).toBeTruthy();
+          expect(typeof context.transaction.commit).toBe("function");
+          return { ran: true };
+        },
+        post: async (context) => {
+          expect(context.preResult).toEqual({ ran: true });
+          context.payload.extra = "ok";
+        },
+      },
+    });
+    sequelize = s;
+
+    const created = await request(app)
+      .post("/items")
+      .send({ external_id: "d-hook", name: "X" });
+    const id = created.body.id;
+
+    const del = await request(app).delete(`/items/${id}`);
+    expect(del.status).toBe(200);
+    expect(del.body.success).toBe(true);
+    expect(del.body.extra).toBe("ok");
   });
 });

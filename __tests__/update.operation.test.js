@@ -5,28 +5,45 @@ const { Sequelize, DataTypes } = require("sequelize");
 const { create, single, update } = require("../src");
 
 // Build a fresh app + model per test to isolate middleware/params
-async function build({ mountSingle = true, mountCreate = true, updateOptions = {}, modelOptions = {} } = {}) {
+async function build({
+  mountSingle = true,
+  mountCreate = true,
+  updateOptions = {},
+  modelOptions = {},
+} = {}) {
   const sequelize = new Sequelize("sqlite::memory:", { logging: false });
   const Item = sequelize.define(
     "Item",
     {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-      external_id: { type: DataTypes.STRING(64), allowNull: false, unique: true },
+      external_id: {
+        type: DataTypes.STRING(64),
+        allowNull: false,
+        unique: true,
+      },
       name: { type: DataTypes.STRING(100), allowNull: false },
       desc: { type: DataTypes.STRING(255), allowNull: true },
       flag: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
-      category: { type: DataTypes.STRING(32), allowNull: true, defaultValue: "uncat" },
+      category: {
+        type: DataTypes.STRING(32),
+        allowNull: true,
+        defaultValue: "uncat",
+      },
       user_id: { type: DataTypes.INTEGER, allowNull: true },
       parent_id: { type: DataTypes.INTEGER, allowNull: true },
     },
-    { tableName: "update_items", timestamps: false }
+    { tableName: "update_items", timestamps: false },
   );
   await sequelize.sync({ force: true });
 
   const app = express();
   app.use(bodyParser.json());
   if (mountCreate) app.use("/items", create(Item));
-  if (mountSingle) app.use("/items", single(Item, { id_mapping: updateOptions.id_mapping || "id" }));
+  if (mountSingle)
+    app.use(
+      "/items",
+      single(Item, { id_mapping: updateOptions.id_mapping || "id" }),
+    );
   app.use("/items", update(Item, updateOptions, modelOptions));
 
   return { sequelize, Item, app };
@@ -69,8 +86,10 @@ describe("update operation: comprehensive options coverage", () => {
     expect(created.status).toBe(201);
     const id = created.body.id;
 
-  // PUT with only name provided would null external_id (NOT NULL). Include external_id to preserve it.
-  const put = await request(app).put(`/items/${id}`).send({ name: "Beta", external_id: "ex-1" });
+    // PUT with only name provided would null external_id (NOT NULL). Include external_id to preserve it.
+    const put = await request(app)
+      .put(`/items/${id}`)
+      .send({ name: "Beta", external_id: "ex-1" });
     expect(put.status).toBe(200);
     expect(put.body).toMatchObject({ success: true });
 
@@ -87,17 +106,21 @@ describe("update operation: comprehensive options coverage", () => {
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
-    const created = await request(app).post("/items").send({ external_id: "ex-2", name: "A" });
+    const created = await request(app)
+      .post("/items")
+      .send({ external_id: "ex-2", name: "A" });
     expect(created.status).toBe(201);
     const id = created.body.id;
 
-  // Try to change numeric id in body; it should be ignored/overridden. Preserve external_id to satisfy NOT NULL.
-  const put = await request(app).put(`/items/${id}`).send({ name: "B", id: 999, external_id: "ex-2" });
+    // Try to change numeric id in body; it should be ignored/overridden. Preserve external_id to satisfy NOT NULL.
+    const put = await request(app)
+      .put(`/items/${id}`)
+      .send({ name: "B", id: 999, external_id: "ex-2" });
     expect(put.status).toBe(200);
 
     const rec = await getRecord(Item, { id });
     expect(rec.id).toBe(id);
-  expect(rec.external_id).toBe("ex-2");
+    expect(rec.external_id).toBe("ex-2");
     expect(rec.name).toBe("B");
   });
 
@@ -106,7 +129,9 @@ describe("update operation: comprehensive options coverage", () => {
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
-    const created = await request(app).post("/items").send({ external_id: "ext-A", name: "A", desc: "x", category: "c" });
+    const created = await request(app)
+      .post("/items")
+      .send({ external_id: "ext-A", name: "A", desc: "x", category: "c" });
     expect(created.status).toBe(201);
 
     const put = await request(app)
@@ -127,8 +152,12 @@ describe("update operation: comprehensive options coverage", () => {
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
-    const r1 = await request(app).post("/items").send({ external_id: "o1", name: "N1", user_id: 1 });
-    const r2 = await request(app).post("/items").send({ external_id: "o2", name: "N2", user_id: 2 });
+    const r1 = await request(app)
+      .post("/items")
+      .send({ external_id: "o1", name: "N1", user_id: 1 });
+    const r2 = await request(app)
+      .post("/items")
+      .send({ external_id: "o2", name: "N2", user_id: 2 });
     expect(r1.status).toBe(201);
     expect(r2.status).toBe(201);
 
@@ -136,11 +165,15 @@ describe("update operation: comprehensive options coverage", () => {
     const id1 = r1.body.id;
 
     // Attempt to update record 2 while scoping to user_id=1 -> not found
-    const miss = await request(app).put(`/items/${id2}?user_id=1`).send({ name: "NOOP" });
+    const miss = await request(app)
+      .put(`/items/${id2}?user_id=1`)
+      .send({ name: "NOOP" });
     expect(miss.status).toBe(404);
 
     // Correct scope updates
-  const ok = await request(app).put(`/items/${id1}?user_id=1`).send({ name: "Scoped", user_id: "1", external_id: "o1" });
+    const ok = await request(app)
+      .put(`/items/${id1}?user_id=1`)
+      .send({ name: "Scoped", user_id: "1", external_id: "o1" });
     expect(ok.status).toBe(200);
     const rec = await getRecord(Item, { id: id1 });
     expect(rec.name).toBe("Scoped");
@@ -150,32 +183,48 @@ describe("update operation: comprehensive options coverage", () => {
     const parentMiddleware = (req, _res, next) => {
       req.apialize = req.apialize || {};
       req.apialize.options = req.apialize.options || {};
-      req.apialize.options.where = { ...(req.apialize.options.where || {}), parent_id: 123 };
+      req.apialize.options.where = {
+        ...(req.apialize.options.where || {}),
+        parent_id: 123,
+      };
       next();
     };
 
-    const ctx = await build({ updateOptions: { middleware: [parentMiddleware] } });
+    const ctx = await build({
+      updateOptions: { middleware: [parentMiddleware] },
+    });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
-    const t1 = await request(app).post("/items").send({ external_id: "t1", name: "T1", parent_id: 123 });
-    const t2 = await request(app).post("/items").send({ external_id: "t2", name: "T2", parent_id: 999 });
+    const t1 = await request(app)
+      .post("/items")
+      .send({ external_id: "t1", name: "T1", parent_id: 123 });
+    const t2 = await request(app)
+      .post("/items")
+      .send({ external_id: "t2", name: "T2", parent_id: 999 });
     expect(t1.status).toBe(201);
     expect(t2.status).toBe(201);
 
     // Correct parent updates
-  const ok = await request(app).put(`/items/${t1.body.id}`).send({ name: "T1-upd", parent_id: 123, external_id: "t1" });
+    const ok = await request(app)
+      .put(`/items/${t1.body.id}`)
+      .send({ name: "T1-upd", parent_id: 123, external_id: "t1" });
     expect(ok.status).toBe(200);
 
     // Wrong parent -> 404
-  const miss = await request(app).put(`/items/${t2.body.id}`).send({ name: "T2-upd", parent_id: 123, external_id: "t2" });
+    const miss = await request(app)
+      .put(`/items/${t2.body.id}`)
+      .send({ name: "T2-upd", parent_id: 123, external_id: "t2" });
     expect(miss.status).toBe(404);
   });
 
   test("middleware can modify values prior to update (category locked)", async () => {
     const lockCategory = (req, _res, next) => {
       req.apialize = req.apialize || {};
-      req.apialize.values = { ...(req.apialize.values || {}), category: "locked" };
+      req.apialize.values = {
+        ...(req.apialize.values || {}),
+        category: "locked",
+      };
       next();
     };
 
@@ -183,10 +232,14 @@ describe("update operation: comprehensive options coverage", () => {
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
-    const created = await request(app).post("/items").send({ external_id: "val-1", name: "A", category: "open" });
+    const created = await request(app)
+      .post("/items")
+      .send({ external_id: "val-1", name: "A", category: "open" });
     expect(created.status).toBe(201);
 
-  const put = await request(app).put(`/items/${created.body.id}`).send({ name: "B", category: "should-be-ignored", external_id: "val-1" });
+    const put = await request(app)
+      .put(`/items/${created.body.id}`)
+      .send({ name: "B", category: "should-be-ignored", external_id: "val-1" });
     expect(put.status).toBe(200);
 
     const rec = await getRecord(Item, { id: created.body.id });
@@ -208,7 +261,40 @@ describe("update operation: comprehensive options coverage", () => {
     sequelize = ctx.sequelize;
     const { app } = ctx;
 
-    const put = await request(app).put(`/items/missing-exid`).send({ name: "Nope" });
+    const put = await request(app)
+      .put(`/items/missing-exid`)
+      .send({ name: "Nope" });
     expect(put.status).toBe(404);
+  });
+
+  test("pre/post hooks: transaction present and payload mutated", async () => {
+    const ctx = await build({
+      updateOptions: {
+        pre: async (context) => {
+          expect(context.transaction).toBeTruthy();
+          expect(typeof context.transaction.commit).toBe("function");
+          return { ok: true };
+        },
+        post: async (context) => {
+          expect(context.preResult).toEqual({ ok: true });
+          context.payload.hook = "post";
+        },
+      },
+    });
+    sequelize = ctx.sequelize;
+    const { Item, app } = ctx;
+
+    const created = await request(app)
+      .post("/items")
+      .send({ external_id: "hook-1", name: "A" });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+
+    const put = await request(app)
+      .put(`/items/${id}`)
+      .send({ name: "B", external_id: "hook-1" });
+    expect(put.status).toBe(200);
+    expect(put.body.success).toBe(true);
+    expect(put.body.hook).toBe("post");
   });
 });

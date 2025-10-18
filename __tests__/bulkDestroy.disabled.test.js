@@ -20,7 +20,7 @@ describe("bulk delete can be disabled per related config", () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(100), allowNull: false },
       },
-      { tableName: "bd_off_users", timestamps: false }
+      { tableName: "bd_off_users", timestamps: false },
     );
 
     Post = sequelize.define(
@@ -30,7 +30,7 @@ describe("bulk delete can be disabled per related config", () => {
         title: { type: DataTypes.STRING(200), allowNull: false },
         user_id: { type: DataTypes.INTEGER, allowNull: false },
       },
-      { tableName: "bd_off_posts", timestamps: false }
+      { tableName: "bd_off_posts", timestamps: false },
     );
 
     Comment = sequelize.define(
@@ -41,7 +41,7 @@ describe("bulk delete can be disabled per related config", () => {
         text: { type: DataTypes.STRING(255), allowNull: false },
         post_id: { type: DataTypes.INTEGER, allowNull: false },
       },
-      { tableName: "bd_off_comments", timestamps: false }
+      { tableName: "bd_off_comments", timestamps: false },
     );
 
     await sequelize.sync({ force: true });
@@ -73,7 +73,7 @@ describe("bulk delete can be disabled per related config", () => {
             ],
           },
         ],
-      })
+      }),
     );
   });
 
@@ -83,15 +83,25 @@ describe("bulk delete can be disabled per related config", () => {
 
   test("DELETE collection returns 404 when disabled", async () => {
     const u = await request(app).post("/users").send({ name: "U" });
-    const p = await request(app).post(`/users/${u.body.id}/posts`).send({ title: "T" });
+    const p = await request(app)
+      .post(`/users/${u.body.id}/posts`)
+      .send({ title: "T" });
 
-    await request(app).post(`/users/${u.body.id}/posts/${p.body.id}/comments`).send({ text: "A", keyx: "k1" });
-    await request(app).post(`/users/${u.body.id}/posts/${p.body.id}/comments`).send({ text: "B", keyx: "k2" });
+    await request(app)
+      .post(`/users/${u.body.id}/posts/${p.body.id}/comments`)
+      .send({ text: "A", keyx: "k1" });
+    await request(app)
+      .post(`/users/${u.body.id}/posts/${p.body.id}/comments`)
+      .send({ text: "B", keyx: "k2" });
 
-    const dry = await request(app).delete(`/users/${u.body.id}/posts/${p.body.id}/comments`);
+    const dry = await request(app).delete(
+      `/users/${u.body.id}/posts/${p.body.id}/comments`,
+    );
     expect(dry.status).toBe(404);
 
-    const ok = await request(app).delete(`/users/${u.body.id}/posts/${p.body.id}/comments?confirm=true`);
+    const ok = await request(app).delete(
+      `/users/${u.body.id}/posts/${p.body.id}/comments?confirm=true`,
+    );
     expect(ok.status).toBe(404);
   });
 });
