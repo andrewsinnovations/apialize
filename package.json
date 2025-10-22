@@ -1,6 +1,6 @@
 {
   "name": "apialize",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Turn a database model into a production ready REST(ish) CRUD API in a few lines.",
   "main": "src/index.js",
   "license": "MIT",

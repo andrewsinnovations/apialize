@@ -405,7 +405,7 @@ function single(model, options = {}, modelOptions = {}) {
       const baseWhere =
         (req.apialize.options && req.apialize.options.where) || {};
       const fullWhere = { ...baseWhere, ...req.apialize.where };
-      await withTransactionAndHooks(
+      const payload = await withTransactionAndHooks(
         {
           model,
           options: { ...options, pre, post },
@@ -434,11 +434,15 @@ function single(model, options = {}, modelOptions = {}) {
           recordPayload = normalizeId(recordPayload, id_mapping);
 
           context.payload = { success: true, record: recordPayload };
-          res.json(context.payload);
-          context._responseSent = true;
+          // Do not send the response here; return the payload so post hooks can run.
           return context.payload;
         },
       );
+
+      // Send the response after hooks/transaction complete, unless already sent (e.g., 404 path)
+      if (!res.headersSent) {
+        res.json(payload);
+      }
     }),
   );
 
