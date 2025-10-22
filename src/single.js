@@ -402,9 +402,17 @@ function single(model, options = {}, modelOptions = {}) {
       if (!req.apialize.where) req.apialize.where = {};
       if (typeof req.apialize.where[id_mapping] === "undefined")
         req.apialize.where[id_mapping] = paramValue;
-      const baseWhere =
+      // Merge modelOptions with any apialize options (which may be mutated by middleware)
+      // Follow list() behavior: request-specific options should override base model options
+      req.apialize.options = { ...modelOptions, ...(req.apialize.options || {}) };
+
+      // Combine where clauses from modelOptions, existing req options, and the id-mapping constraint
+      const modelWhere = (modelOptions && modelOptions.where) || {};
+      const reqOptionsWhere =
         (req.apialize.options && req.apialize.options.where) || {};
-      const fullWhere = { ...baseWhere, ...req.apialize.where };
+      const fullWhere = { ...modelWhere, ...reqOptionsWhere, ...req.apialize.where };
+      // Persist merged where back to req.apialize.options so hooks/transactions see it
+      req.apialize.options.where = fullWhere;
       const payload = await withTransactionAndHooks(
         {
           model,
@@ -413,13 +421,10 @@ function single(model, options = {}, modelOptions = {}) {
           res,
           modelOptions,
           idMapping: id_mapping,
+          useReqOptionsTransaction: true,
         },
         async (context) => {
-          const queryOptions = optionsWithTransaction(
-            { ...modelOptions, where: fullWhere },
-            context.transaction,
-          );
-          const result = await model.findOne(queryOptions);
+          const result = await model.findOne(req.apialize.options);
           if (result == null) {
             return notFoundWithRollback(context);
           }
