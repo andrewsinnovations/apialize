@@ -182,7 +182,7 @@ describe("create operation: comprehensive options coverage", () => {
     const res = await request(app)
       .post("/items")
       .send({ external_id: "array-hooks-c1", name: "ArrayTest" });
-    
+
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
     expect(res.body.hook1).toBe("executed");

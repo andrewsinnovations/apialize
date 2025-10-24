@@ -63,9 +63,11 @@ describe("bulk delete can be disabled per related config", () => {
         related: [
           {
             model: Post,
+            operations: ["list", "post", "get"],
             related: [
               {
                 model: Comment,
+                operations: ["list", "post", "get", "delete"],
                 perOperation: {
                   delete: { allow_bulk_delete: false, id_mapping: "keyx" },
                 },

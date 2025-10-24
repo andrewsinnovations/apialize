@@ -38,7 +38,7 @@ function setupRelatedEndpoints(
       perOperation = {}, // new: per-op overrides { list, get, post, put, patch, delete }
       foreignKey,
       path,
-      operations = ["list", "get", "post", "put", "patch", "delete"], // Default: all operations
+      operations = ["list", "get"], // Default: read ops enabled; writes must be explicit
     } = relatedConfig;
 
     // Determine the path for the related endpoints (pluralized by default)
@@ -163,7 +163,7 @@ function setupRelatedEndpoints(
         allow_bulk_delete:
           typeof op.allow_bulk_delete === "boolean"
             ? op.allow_bulk_delete
-            : true,
+            : false,
       };
     };
 
@@ -323,12 +323,10 @@ function setupRelatedEndpoints(
             } catch (err) {
               // Surface error for debugging purposes
               console.error("[Apialize] Bulk delete error:", err);
-              return res
-                .status(500)
-                .json({
-                  success: false,
-                  error: String((err && err.message) || err),
-                });
+              return res.status(500).json({
+                success: false,
+                error: String((err && err.message) || err),
+              });
             }
           }),
         );
@@ -387,6 +385,7 @@ function single(model, options = {}, modelOptions = {}) {
     related = [],
     pre = null,
     post = null,
+    member_routes = [],
   } = options;
   const inline = middleware.filter((fn) => typeof fn === "function");
   const router = express.Router({ mergeParams: true });
@@ -404,13 +403,20 @@ function single(model, options = {}, modelOptions = {}) {
         req.apialize.where[id_mapping] = paramValue;
       // Merge modelOptions with any apialize options (which may be mutated by middleware)
       // Follow list() behavior: request-specific options should override base model options
-      req.apialize.options = { ...modelOptions, ...(req.apialize.options || {}) };
+      req.apialize.options = {
+        ...modelOptions,
+        ...(req.apialize.options || {}),
+      };
 
       // Combine where clauses from modelOptions, existing req options, and the id-mapping constraint
       const modelWhere = (modelOptions && modelOptions.where) || {};
       const reqOptionsWhere =
         (req.apialize.options && req.apialize.options.where) || {};
-      const fullWhere = { ...modelWhere, ...reqOptionsWhere, ...req.apialize.where };
+      const fullWhere = {
+        ...modelWhere,
+        ...reqOptionsWhere,
+        ...req.apialize.where,
+      };
       // Persist merged where back to req.apialize.options so hooks/transactions see it
       req.apialize.options.where = fullWhere;
       const payload = await withTransactionAndHooks(
@@ -450,6 +456,108 @@ function single(model, options = {}, modelOptions = {}) {
       }
     }),
   );
+
+  // Helper to load a single record (without sending a response) for member_routes
+  const loadSingleRecord = async (req, res, next) => {
+    const paramValue = req.params[param_name];
+    req.apialize = req.apialize || {};
+    req.apialize.id = paramValue;
+
+    // Ensure where and options are present/merged the same way as the GET route
+    req.apialize.where = req.apialize.where || {};
+    if (typeof req.apialize.where[id_mapping] === "undefined") {
+      req.apialize.where[id_mapping] = paramValue;
+    }
+    req.apialize.options = { ...modelOptions, ...(req.apialize.options || {}) };
+    const modelWhere = (modelOptions && modelOptions.where) || {};
+    const reqOptionsWhere =
+      (req.apialize.options && req.apialize.options.where) || {};
+    const fullWhere = {
+      ...modelWhere,
+      ...reqOptionsWhere,
+      ...req.apialize.where,
+    };
+    req.apialize.options.where = fullWhere;
+
+    try {
+      const result = await model.findOne(req.apialize.options);
+      if (result == null) return defaultNotFound(res);
+
+      let recordPayload = result;
+      if (recordPayload && typeof recordPayload === "object") {
+        recordPayload = recordPayload.get
+          ? recordPayload.get({ plain: true })
+          : { ...recordPayload };
+      }
+      recordPayload = normalizeId(recordPayload, id_mapping);
+
+      // Expose to downstream handlers
+      req.apialize.rawRecord = result; // ORM instance
+      req.apialize.record = recordPayload; // plain normalized
+      req.apialize.singlePayload = { success: true, record: recordPayload };
+      return next();
+    } catch (err) {
+      return next(err);
+    }
+  };
+
+  // Mount member (follow-up) routes under "/:param_name/<path>"
+  if (Array.isArray(member_routes) && member_routes.length > 0) {
+    const allowed = new Set(["get", "post", "put", "patch", "delete"]);
+    const ensureLeadingSlash = (p) =>
+      typeof p === "string" && p.length > 0
+        ? p.startsWith("/")
+          ? p
+          : `/${p}`
+        : null;
+
+    member_routes.forEach((route, idx) => {
+      if (
+        !route ||
+        typeof route !== "object" ||
+        typeof route.handler !== "function"
+      ) {
+        throw new Error(
+          `[Apialize] member_routes[${idx}] must be an object with a 'handler' function and a 'path' string`,
+        );
+      }
+      const method = String(route.method || "get").toLowerCase();
+      if (!allowed.has(method)) {
+        throw new Error(
+          `[Apialize] member_routes[${idx}].method must be one of ${Array.from(allowed).join(", ")}`,
+        );
+      }
+      const subPath = ensureLeadingSlash(route.path || "");
+      if (!subPath) {
+        throw new Error(
+          `[Apialize] member_routes[${idx}] requires a non-empty 'path' (e.g., 'stats' or '/stats')`,
+        );
+      }
+      const fullPath = `/:${param_name}${subPath}`;
+      const perRouteMw = Array.isArray(route.middleware)
+        ? route.middleware
+        : [];
+
+      // Chain: apializeContext -> inline middleware -> load record -> per-route middleware -> handler wrapper
+      router[method](
+        fullPath,
+        apializeContext,
+        ...inline,
+        asyncHandler(loadSingleRecord),
+        ...perRouteMw,
+        asyncHandler(async (req, res) => {
+          const out = await route.handler(req, res);
+          if (!res.headersSent) {
+            if (typeof out === "undefined") {
+              return res.json(req.apialize.singlePayload);
+            }
+            return res.json(out);
+          }
+          // If response already sent by handler, do nothing
+        }),
+      );
+    });
+  }
 
   // Create related model endpoints
   if (Array.isArray(related) && related.length > 0) {

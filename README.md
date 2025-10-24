@@ -24,8 +24,9 @@ No heavy abstractions: you keep full control of Express and your models. Works w
 6. Middleware and `req.apialize`
 7. Pre/Post Hooks and Query Control
 8. Related models with `single(..., { related: [...] })`
-9. Nested related routes (recursion)
-10. Bulk delete on related collections
+9. Member routes (follow-up routes on a single resource)
+10. Nested related routes (recursion)
+11. Bulk delete on related collections
 
 ## 1. Installation
 
@@ -96,11 +97,11 @@ const {
 Individual mounting (choose only what you need):
 
 ```js
-app.use("/widgets", create(Widget));  // POST /widgets
-app.use("/widgets", list(Widget));    // GET /widgets
-app.use("/widgets", single(Widget));  // GET /widgets/:id
-app.use("/widgets", update(Widget));  // PUT /widgets/:id
-app.use("/widgets", patch(Widget));   // PATCH /widgets/:id
+app.use("/widgets", create(Widget)); // POST /widgets
+app.use("/widgets", list(Widget)); // GET /widgets
+app.use("/widgets", single(Widget)); // GET /widgets/:id
+app.use("/widgets", update(Widget)); // PUT /widgets/:id
+app.use("/widgets", patch(Widget)); // PATCH /widgets/:id
 app.use("/widgets", destroy(Widget)); // DELETE /widgets/:id
 ```
 
@@ -110,7 +111,7 @@ Bundled mounting:
 app.use("/widgets", crud(Widget));
 // Exposes all endpoints:
 // GET /widgets          (list)
-// GET /widgets/:id      (single) 
+// GET /widgets/:id      (single)
 // POST /widgets         (create)
 // PUT /widgets/:id      (update)
 // PATCH /widgets/:id    (patch)
@@ -136,6 +137,7 @@ For `single()`, `update()`, `patch()`, and `destroy()` the `options` object supp
 - `middleware`: array of middleware functions
 - `id_mapping`: string mapping URL param to a field (default `'id'`)
 - `param_name` (single only): change the name of the URL parameter used by `single()` for the record id (default `'id'`)
+- `member_routes` (single only): array of follow-up routes that run after the single record is loaded. Each item is an object `{ path, handler, method = 'get', middleware = [] }`.
 
 Passing an empty object `{}` as the second argument is ignored (backwards compatibility). Any function argument is treated as middleware.
 
@@ -236,7 +238,10 @@ model.findAndCountAll({
   where: { type: "fruit" },
   limit: 25,
   offset: 25,
-  order: [["score","DESC"],["name","ASC"]]
+  order: [
+    ["score", "DESC"],
+    ["name", "ASC"],
+  ],
 });
 ```
 
@@ -323,37 +328,67 @@ All operations (`list`, `single`, `create`, `update`, `patch`, `destroy`) suppor
 ### Hook Configuration
 
 Hooks can be configured as either:
-- **Single function**: `pre: async (context) => { ... }`  
+
+- **Single function**: `pre: async (context) => { ... }`
 - **Array of functions**: `pre: [fn1, fn2, fn3]` (executed in order)
 
 ```js
 // Single function (simple)
-app.use("/items", list(Item, {
-  pre: async (ctx) => { /* single pre hook */ },
-  post: async (ctx) => { /* single post hook */ }
-}));
+app.use(
+  "/items",
+  list(Item, {
+    pre: async (ctx) => {
+      /* single pre hook */
+    },
+    post: async (ctx) => {
+      /* single post hook */
+    },
+  }),
+);
 
 // Array of functions (advanced)
-app.use("/items", list(Item, {
-  pre: [
-    async (ctx) => { /* first pre hook */ },
-    async (ctx) => { /* second pre hook */ },
-    async (ctx) => { /* third pre hook */ }
-  ],
-  post: [
-    async (ctx) => { /* first post hook */ },
-    async (ctx) => { /* second post hook */ }
-  ]
-}));
+app.use(
+  "/items",
+  list(Item, {
+    pre: [
+      async (ctx) => {
+        /* first pre hook */
+      },
+      async (ctx) => {
+        /* second pre hook */
+      },
+      async (ctx) => {
+        /* third pre hook */
+      },
+    ],
+    post: [
+      async (ctx) => {
+        /* first post hook */
+      },
+      async (ctx) => {
+        /* second post hook */
+      },
+    ],
+  }),
+);
 
 // Mixed configuration
-app.use("/items", update(Item, {
-  pre: async (ctx) => { /* single pre hook */ },
-  post: [
-    async (ctx) => { /* first post hook */ },
-    async (ctx) => { /* second post hook */ }
-  ]
-}));
+app.use(
+  "/items",
+  update(Item, {
+    pre: async (ctx) => {
+      /* single pre hook */
+    },
+    post: [
+      async (ctx) => {
+        /* first post hook */
+      },
+      async (ctx) => {
+        /* second post hook */
+      },
+    ],
+  }),
+);
 ```
 
 ### Hook Execution Flow
@@ -388,13 +423,13 @@ The context object provides access to request data, model, options, and more:
   request,               // Alias to req for convenience
   model,                 // Sequelize-like model
   options,               // Operation options passed in
-  modelOptions,          // Model options passed in  
+  modelOptions,          // Model options passed in
   apialize,              // Direct reference to req.apialize (for convenience)
   idMapping,             // Effective id mapping
   transaction,           // Sequelize transaction (if available)
   preResult,             // Result from last pre hook (undefined initially)
   payload,               // Response payload (available in post hooks)
-  
+
   // Operation-specific properties
   page, pageSize,        // (list) pagination info
   appliedFilters,        // (list) filters derived from query
@@ -410,69 +445,76 @@ Pre hooks can dynamically modify database queries by manipulating `ctx.apialize.
 #### Controlling WHERE Clauses
 
 ```js
-app.use("/items", list(Item, {
-  pre: [
-    async (ctx) => {
-      // Add tenant filtering
-      ctx.apialize.options.where.tenant_id = ctx.req.user.tenant_id;
-      return { step: 1 };
-    },
-    async (ctx) => {
-      // Add additional status filter with Sequelize operators
-      const { Op } = require('sequelize');
-      ctx.apialize.options.where.status = 'active';
-      ctx.apialize.options.where.price = { [Op.gt]: 0 };
-      return { step: 2 };
-    }
-  ]
-}));
+app.use(
+  "/items",
+  list(Item, {
+    pre: [
+      async (ctx) => {
+        // Add tenant filtering
+        ctx.apialize.options.where.tenant_id = ctx.req.user.tenant_id;
+        return { step: 1 };
+      },
+      async (ctx) => {
+        // Add additional status filter with Sequelize operators
+        const { Op } = require("sequelize");
+        ctx.apialize.options.where.status = "active";
+        ctx.apialize.options.where.price = { [Op.gt]: 0 };
+        return { step: 2 };
+      },
+    ],
+  }),
+);
 ```
 
 #### Controlling INCLUDE Clauses (Relations)
 
 ```js
-app.use("/items", single(Item, {
-  pre: [
-    async (ctx) => {
-      // Dynamically include related models based on user permissions
-      ctx.apialize.options.include = [
-        { model: Category, as: "category" }
-      ];
-      return { step: 1 };
-    },
-    async (ctx) => {
-      // Modify included model attributes based on user role
-      if (ctx.req.user.role !== 'admin') {
-        ctx.apialize.options.include[0].attributes = ['name', 'description'];
-      }
-      return { step: 2 };
-    }
-  ]
-}));
+app.use(
+  "/items",
+  single(Item, {
+    pre: [
+      async (ctx) => {
+        // Dynamically include related models based on user permissions
+        ctx.apialize.options.include = [{ model: Category, as: "category" }];
+        return { step: 1 };
+      },
+      async (ctx) => {
+        // Modify included model attributes based on user role
+        if (ctx.req.user.role !== "admin") {
+          ctx.apialize.options.include[0].attributes = ["name", "description"];
+        }
+        return { step: 2 };
+      },
+    ],
+  }),
+);
 ```
 
 #### Controlling ATTRIBUTES (Field Selection)
 
 ```js
-app.use("/items", single(Item, {
-  pre: [
-    async (ctx) => {
-      // Start with basic fields
-      ctx.apialize.options.attributes = ['id', 'name', 'external_id'];
-      return { step: 1 };
-    },
-    async (ctx) => {
-      // Add additional fields based on user permissions
-      if (ctx.req.user.role === 'admin') {
-        ctx.apialize.options.attributes.push('internal_notes', 'cost');
-      }
-      if (ctx.req.user.role === 'manager') {
-        ctx.apialize.options.attributes.push('status');
-      }
-      return { step: 2 };
-    }
-  ]
-}));
+app.use(
+  "/items",
+  single(Item, {
+    pre: [
+      async (ctx) => {
+        // Start with basic fields
+        ctx.apialize.options.attributes = ["id", "name", "external_id"];
+        return { step: 1 };
+      },
+      async (ctx) => {
+        // Add additional fields based on user permissions
+        if (ctx.req.user.role === "admin") {
+          ctx.apialize.options.attributes.push("internal_notes", "cost");
+        }
+        if (ctx.req.user.role === "manager") {
+          ctx.apialize.options.attributes.push("status");
+        }
+        return { step: 2 };
+      },
+    ],
+  }),
+);
 ```
 
 ### Response Control in Post Hooks
@@ -480,23 +522,26 @@ app.use("/items", single(Item, {
 Post hooks can modify the response payload before it's sent to the client:
 
 ```js
-app.use("/items", list(Item, {
-  pre: async (ctx) => {
-    return { startTime: Date.now() };
-  },
-  post: [
-    async (ctx) => {
-      // Add metadata to response
-      ctx.payload.meta.generated_by = "apialize";
-      ctx.payload.meta.query_time_ms = Date.now() - ctx.preResult.startTime;
+app.use(
+  "/items",
+  list(Item, {
+    pre: async (ctx) => {
+      return { startTime: Date.now() };
     },
-    async (ctx) => {
-      // Add user-specific data
-      ctx.payload.meta.user_id = ctx.req.user.id;
-      ctx.payload.meta.permissions = ctx.req.user.permissions;
-    }
-  ]
-}));
+    post: [
+      async (ctx) => {
+        // Add metadata to response
+        ctx.payload.meta.generated_by = "apialize";
+        ctx.payload.meta.query_time_ms = Date.now() - ctx.preResult.startTime;
+      },
+      async (ctx) => {
+        // Add user-specific data
+        ctx.payload.meta.user_id = ctx.req.user.id;
+        ctx.payload.meta.permissions = ctx.req.user.permissions;
+      },
+    ],
+  }),
+);
 ```
 
 ### Real-World Examples
@@ -504,121 +549,139 @@ app.use("/items", list(Item, {
 #### Multi-tenant Application
 
 ```js
-app.use("/items", crud(Item, {
-  routes: {
-    list: {
-      pre: async (ctx) => {
-        // Enforce tenant isolation
-        ctx.apialize.options.where.tenant_id = ctx.req.user.tenant_id;
-      }
+app.use(
+  "/items",
+  crud(Item, {
+    routes: {
+      list: {
+        pre: async (ctx) => {
+          // Enforce tenant isolation
+          ctx.apialize.options.where.tenant_id = ctx.req.user.tenant_id;
+        },
+      },
+      create: {
+        pre: async (ctx) => {
+          // Auto-inject tenant ID
+          ctx.apialize.values.tenant_id = ctx.req.user.tenant_id;
+          ctx.apialize.values.created_by = ctx.req.user.id;
+        },
+      },
     },
-    create: {
-      pre: async (ctx) => {
-        // Auto-inject tenant ID
-        ctx.apialize.values.tenant_id = ctx.req.user.tenant_id;
-        ctx.apialize.values.created_by = ctx.req.user.id;
-      }
-    }
-  }
-}));
+  }),
+);
 ```
 
 #### Role-based Field Access
 
 ```js
-app.use("/users", single(User, {
-  pre: [
-    async (ctx) => {
-      // Base fields for all users
-      const baseFields = ['id', 'name', 'email'];
-      ctx.apialize.options.attributes = [...baseFields];
-      return { role: ctx.req.user.role };
+app.use(
+  "/users",
+  single(User, {
+    pre: [
+      async (ctx) => {
+        // Base fields for all users
+        const baseFields = ["id", "name", "email"];
+        ctx.apialize.options.attributes = [...baseFields];
+        return { role: ctx.req.user.role };
+      },
+      async (ctx) => {
+        // Add fields based on role
+        if (ctx.preResult.role === "admin") {
+          ctx.apialize.options.attributes.push(
+            "internal_id",
+            "created_at",
+            "last_login",
+          );
+        } else if (ctx.preResult.role === "manager") {
+          ctx.apialize.options.attributes.push("department", "hire_date");
+        }
+      },
+    ],
+    post: async (ctx) => {
+      // Add computed fields
+      ctx.payload.record.display_name = ctx.payload.record.name.toUpperCase();
+      ctx.payload.record.can_edit =
+        ctx.req.user.id === ctx.payload.record.id ||
+        ctx.req.user.role === "admin";
     },
-    async (ctx) => {
-      // Add fields based on role
-      if (ctx.preResult.role === 'admin') {
-        ctx.apialize.options.attributes.push('internal_id', 'created_at', 'last_login');
-      } else if (ctx.preResult.role === 'manager') {
-        ctx.apialize.options.attributes.push('department', 'hire_date');
-      }
-    }
-  ],
-  post: async (ctx) => {
-    // Add computed fields
-    ctx.payload.record.display_name = ctx.payload.record.name.toUpperCase();
-    ctx.payload.record.can_edit = ctx.req.user.id === ctx.payload.record.id || ctx.req.user.role === 'admin';
-  }
-}));
+  }),
+);
 ```
 
 #### Audit and Logging
 
 ```js
-app.use("/sensitive-data", destroy(SensitiveData, {
-  pre: async (ctx) => {
-    // Log access attempt
-    await AuditLog.create({
-      user_id: ctx.req.user.id,
-      action: 'DELETE_ATTEMPT',
-      resource_id: ctx.req.params.id,
-      timestamp: new Date()
-    });
-    return { audit_id: result.id };
-  },
-  post: async (ctx) => {
-    // Log successful deletion
-    await AuditLog.create({
-      user_id: ctx.req.user.id,
-      action: 'DELETE_SUCCESS',
-      resource_id: ctx.req.params.id,
-      related_audit_id: ctx.preResult.audit_id,
-      timestamp: new Date()
-    });
-  }
-}));
+app.use(
+  "/sensitive-data",
+  destroy(SensitiveData, {
+    pre: async (ctx) => {
+      // Log access attempt
+      await AuditLog.create({
+        user_id: ctx.req.user.id,
+        action: "DELETE_ATTEMPT",
+        resource_id: ctx.req.params.id,
+        timestamp: new Date(),
+      });
+      return { audit_id: result.id };
+    },
+    post: async (ctx) => {
+      // Log successful deletion
+      await AuditLog.create({
+        user_id: ctx.req.user.id,
+        action: "DELETE_SUCCESS",
+        resource_id: ctx.req.params.id,
+        related_audit_id: ctx.preResult.audit_id,
+        timestamp: new Date(),
+      });
+    },
+  }),
+);
 ```
 
 #### Dynamic Include with Caching
 
 ```js
-app.use("/products", list(Product, {
-  pre: [
-    async (ctx) => {
-      // Check if client wants expanded data
-      const expand = ctx.req.query.expand;
-      if (expand) {
-        ctx.apialize.options.include = [];
-        
-        if (expand.includes('category')) {
-          ctx.apialize.options.include.push({
-            model: Category,
-            as: 'category',
-            attributes: ['name', 'slug']
-          });
+app.use(
+  "/products",
+  list(Product, {
+    pre: [
+      async (ctx) => {
+        // Check if client wants expanded data
+        const expand = ctx.req.query.expand;
+        if (expand) {
+          ctx.apialize.options.include = [];
+
+          if (expand.includes("category")) {
+            ctx.apialize.options.include.push({
+              model: Category,
+              as: "category",
+              attributes: ["name", "slug"],
+            });
+          }
+
+          if (expand.includes("reviews") && ctx.req.user.role !== "guest") {
+            ctx.apialize.options.include.push({
+              model: Review,
+              as: "reviews",
+              limit: 5,
+              order: [["created_at", "DESC"]],
+            });
+          }
         }
-        
-        if (expand.includes('reviews') && ctx.req.user.role !== 'guest') {
-          ctx.apialize.options.include.push({
-            model: Review,
-            as: 'reviews',
-            limit: 5,
-            order: [['created_at', 'DESC']]
-          });
-        }
+        return { expanded: expand };
+      },
+    ],
+    post: async (ctx) => {
+      // Add cache headers for expanded queries
+      if (ctx.preResult.expanded) {
+        ctx.res.set("Cache-Control", "public, max-age=300"); // 5 minutes
       }
-      return { expanded: expand };
-    }
-  ],
-  post: async (ctx) => {
-    // Add cache headers for expanded queries
-    if (ctx.preResult.expanded) {
-      ctx.res.set('Cache-Control', 'public, max-age=300'); // 5 minutes
-    }
-    
-    // Add expansion info to response
-    ctx.payload.meta.expanded = ctx.preResult.expanded || [];
-  }
-}));
+
+      // Add expansion info to response
+      ctx.payload.meta.expanded = ctx.preResult.expanded || [];
+    },
+  }),
+);
 ```
 
 ### Error Handling
@@ -626,19 +689,22 @@ app.use("/products", list(Product, {
 Hooks automatically participate in transaction rollback:
 
 ```js
-app.use("/items", update(Item, {
-  pre: async (ctx) => {
-    // Validation that can fail
-    if (!ctx.req.user.can_edit) {
-      throw new Error('Insufficient permissions');
-    }
-    // Transaction will be rolled back automatically
-  },
-  post: async (ctx) => {
-    // Any error here also triggers rollback
-    await notifyWebhook(ctx.payload);
-  }
-}));
+app.use(
+  "/items",
+  update(Item, {
+    pre: async (ctx) => {
+      // Validation that can fail
+      if (!ctx.req.user.can_edit) {
+        throw new Error("Insufficient permissions");
+      }
+      // Transaction will be rolled back automatically
+    },
+    post: async (ctx) => {
+      // Any error here also triggers rollback
+      await notifyWebhook(ctx.payload);
+    },
+  }),
+);
 
 // Destroy with hooks
 app.use(
@@ -673,7 +739,7 @@ single(User, {
       model: Post, // required
       path: "articles", // optional, overrides path derived from model name
       foreignKey: "user_id", // optional, default: `${parentModelName.toLowerCase()}_id`
-      operations: ["list", "get", "post", "put", "patch", "delete"], // subset allowed
+      operations: ["list", "get", "post", "put", "patch", "delete"], // choose explicitly (none enabled by default)
       options: {
         // base options forwarded into child helpers
         // same knobs as list/create/update/patch/destroy options
@@ -718,7 +784,126 @@ Examples:
 
 ---
 
-## 9. Nested related routes (recursion)
+## 9. Member routes (follow-up routes on a single resource)
+
+`single(model, { member_routes: [...] })` lets you add custom subroutes that operate on an already-loaded record. These routes mount under `/:id/<path>` (or your custom `param_name`).
+
+Key behaviors:
+
+- Consistent loading: The record is loaded using the same `id_mapping`, merged `where`, and inline middleware as the main `single` GET. If not found, a 404 is returned and your handler is not called.
+- Request context: After loading, you get:
+  - `req.apialize.rawRecord` – the ORM instance
+  - `req.apialize.record` – a plain object, normalized by `id_mapping`
+  - `req.apialize.singlePayload` – `{ success: true, record }`
+- Response rules:
+  - If your handler sends a response, nothing else happens.
+  - If your handler returns a value, it is sent as JSON.
+  - If your handler returns `undefined` and did not send a response, the default `{ success: true, record }` is returned.
+- Verbs: Supports `get`, `post`, `put`, `patch`, and `delete`.
+- Middleware: `single()` inline middleware runs first; you can also add per-route middleware.
+
+Config shape for each member route:
+
+```ts
+{
+  path: string;                 // required: e.g. "profile" or "/profile"
+  handler: (req, res) => any;   // required
+  method?: 'get'|'post'|'put'|'patch'|'delete'; // default 'get'
+  middleware?: Function[];      // optional additional Express middleware
+}
+```
+
+Examples:
+
+```js
+// GET /users/:id/profile
+app.use(
+  "/users",
+  single(User, {
+    member_routes: [
+      {
+        path: "profile",
+        method: "get",
+        async handler(req) {
+          const user = req.apialize.record;
+          return { success: true, userName: user.name };
+        },
+      },
+    ],
+  }),
+);
+
+// POST /orders/:id/cancel with extra middleware
+app.use(
+  "/orders",
+  single(Order, {
+    middleware: [requireAuth],
+    member_routes: [
+      {
+        path: "cancel",
+        method: "post",
+        middleware: [requireRole("manager")],
+        async handler(req) {
+          const order = req.apialize.rawRecord; // ORM instance
+          await order.update({ status: "canceled" });
+          // No return => responds with { success: true, record }
+        },
+      },
+    ],
+  }),
+);
+
+// Full verb coverage example in one go
+app.use(
+  "/users",
+  single(User, {
+    member_routes: [
+      { path: "get-verb", method: "get", handler: (req) => ({ ok: true }) },
+      {
+        path: "post-verb",
+        method: "post",
+        handler: (req) => ({ posted: req.body }),
+      },
+      {
+        path: "put-verb",
+        method: "put",
+        async handler(req) {
+          await req.apialize.rawRecord.update({ name: "put" });
+          return { name: "put" };
+        },
+      },
+      {
+        path: "patch-verb",
+        method: "patch",
+        async handler(req) {
+          await req.apialize.rawRecord.update({
+            name: req.apialize.rawRecord.get("name") + "~",
+          });
+          return { name: req.apialize.rawRecord.get("name") };
+        },
+      },
+      {
+        path: "delete-verb",
+        method: "delete",
+        async handler(req) {
+          await req.apialize.rawRecord.destroy();
+          return { deleted: true };
+        },
+      },
+    ],
+  }),
+);
+```
+
+Notes:
+
+- `path` is required for each member route; it mounts under the same base as `single()` using `param_name` (default `'id'`).
+- Use `req.apialize.record` for plain normalized data; use `req.apialize.rawRecord` for mutations and ORM methods.
+- Your existing `single()` middleware (auth/ownership/etc.) runs before the member route loader, ensuring consistent scoping.
+
+---
+
+## 10. Nested related routes (recursion)
 
 You can nest related definitions at any depth by attaching a `related` array on a child related item. The child `get` operation is implemented using the same core `single()` helper under the hood, so all of its behavior (middleware, `id_mapping`, `modelOptions`, and further `related` nesting) applies consistently.
 
@@ -787,7 +972,7 @@ Because nested `get` uses core `single()`, you get consistent 404 handling, resp
 
 ---
 
-## 10. Bulk delete on related collections
+## 11. Bulk delete on related collections
 
 apialize supports a collection-level DELETE for related resources mounted via `single(..., { related: [...] })`. This lets you remove all child records for a given parent (or nested parent) in one call — with a built-in dry-run safety.
 
@@ -801,7 +986,7 @@ Key behavior:
 - Confirm to execute: Pass `?confirm=true` to proceed with deletion.
 - Parent scoping: Deletions are always scoped to the current parent(s) based on the configured foreign key.
 - Identifier mapping: The identifiers in the response respect the per-operation `id_mapping` for `delete` if provided; otherwise they default to `'id'`.
-- Mount control: The bulk route is enabled by default when `delete` operations are allowed for the related resource; you can disable it via `perOperation.delete.allow_bulk_delete = false`.
+- Mount control: The bulk route is disabled by default; enable it by setting `perOperation.delete.allow_bulk_delete = true` on a related resource that also enables the `delete` operation.
 
 Config example (third level):
 
@@ -852,7 +1037,7 @@ Requests and responses:
 
 Notes:
 
-- The bulk DELETE route is mounted only when `delete` operations are enabled for that related item and `allow_bulk_delete` is not set to `false`.
+- The bulk DELETE route is mounted only when `delete` operations are enabled AND `allow_bulk_delete` is set to `true` (disabled by default).
 - The result `ids` array is derived using the configured `id_mapping` for `delete`; if none is set, `'id'` is used.
 - Any scoping middleware you add (e.g., parent or ownership filters) will also apply to the bulk DELETE via `req.apialize.options.where`.
 

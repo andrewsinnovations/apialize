@@ -46,7 +46,9 @@ async function build({
   const options = { ...singleOptions };
   if (relatedConfig)
     options.related = [
-      relatedConfig === true ? { model: Post } : relatedConfig,
+      relatedConfig === true
+        ? { model: Post, operations: ["list", "get"] }
+        : relatedConfig,
     ];
 
   app.use("/users", create(User));
@@ -173,7 +175,11 @@ describe("single operation: comprehensive options coverage", () => {
 
   test("array pre/post hooks: multiple functions execute in order (single)", async () => {
     const executionOrder = [];
-    const { sequelize: s, User, app } = await build({
+    const {
+      sequelize: s,
+      User,
+      app,
+    } = await build({
       singleOptions: {
         pre: [
           async (context) => {
@@ -216,7 +222,7 @@ describe("single operation: comprehensive options coverage", () => {
 
     // Then retrieve it with array hooks
     const retrieved = await request(app).get(`/users/${created.body.id}`);
-    
+
     expect(retrieved.status).toBe(200);
     expect(retrieved.body.success).toBe(true);
     expect(retrieved.body.hook1).toBe("executed");

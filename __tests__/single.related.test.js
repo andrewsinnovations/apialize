@@ -118,7 +118,7 @@ describe("single() with related models", () => {
       app.use(
         "/users",
         single(User, {
-          related: [{ model: Post }],
+          related: [{ model: Post, operations: ["list"] }],
         }),
       );
       app.use("/posts", create(Post));
@@ -146,13 +146,11 @@ describe("single() with related models", () => {
         .send({ name: "Jane Doe", email: "jane@example.com" });
       const user2Id = user2Res.body.id;
 
-      await request(app)
-        .post("/posts")
-        .send({
-          title: "Jane's Post",
-          content: "Jane's content",
-          user_id: user2Id,
-        });
+      await request(app).post("/posts").send({
+        title: "Jane's Post",
+        content: "Jane's content",
+        user_id: user2Id,
+      });
 
       // Test the related endpoint - should return only John's posts (note pluralized path)
       const postsRes = await request(app).get(`/users/${userId}/posts`);
@@ -172,7 +170,7 @@ describe("single() with related models", () => {
       app.use(
         "/users",
         single(User, {
-          related: [{ model: Post }],
+          related: [{ model: Post, operations: ["get"] }],
         }),
       );
       app.use("/posts", create(Post));
@@ -204,7 +202,7 @@ describe("single() with related models", () => {
       app.use(
         "/users",
         single(User, {
-          related: [{ model: Post }],
+          related: [{ model: Post, operations: ["get"] }],
         }),
       );
       app.use("/posts", create(Post));
@@ -221,13 +219,11 @@ describe("single() with related models", () => {
       const user2Id = user2Res.body.id;
 
       // Create post for user2
-      const postRes = await request(app)
-        .post("/posts")
-        .send({
-          title: "Jane's Post",
-          content: "Jane's content",
-          user_id: user2Id,
-        });
+      const postRes = await request(app).post("/posts").send({
+        title: "Jane's Post",
+        content: "Jane's content",
+        user_id: user2Id,
+      });
       const postId = postRes.body.id;
 
       // Try to access user2's post through user1's endpoint - should return 404 (note pluralized path)
@@ -245,7 +241,9 @@ describe("single() with related models", () => {
       app.use(
         "/users",
         single(User, {
-          related: [{ model: Post, foreignKey: "user_id" }],
+          related: [
+            { model: Post, foreignKey: "user_id", operations: ["list"] },
+          ],
         }),
       );
       app.use("/posts", create(Post));
@@ -273,7 +271,7 @@ describe("single() with related models", () => {
       app.use(
         "/users",
         single(User, {
-          related: [{ model: Post, path: "articles" }],
+          related: [{ model: Post, path: "articles", operations: ["list"] }],
         }),
       );
       app.use("/posts", create(Post));
@@ -308,6 +306,7 @@ describe("single() with related models", () => {
                 allowFiltering: false,
                 defaultPageSize: 5,
               },
+              operations: ["list"],
             },
           ],
         }),
@@ -348,7 +347,10 @@ describe("single() with related models", () => {
       app.use(
         "/users",
         single(User, {
-          related: [{ model: Post }, { model: Comment }],
+          related: [
+            { model: Post, operations: ["list"] },
+            { model: Comment, operations: ["list"] },
+          ],
         }),
       );
       app.use("/posts", create(Post));
@@ -390,7 +392,7 @@ describe("single() with related models", () => {
       app.use(
         "/posts",
         single(Post, {
-          related: [{ model: Comment }],
+          related: [{ model: Comment, operations: ["list"] }],
         }),
       );
       app.use("/comments", create(Comment));
@@ -457,7 +459,7 @@ describe("single() with related models", () => {
       app.use(
         "/users",
         single(User, {
-          related: [{ model: RelatedThing }],
+          related: [{ model: RelatedThing, operations: ["list"] }],
         }),
       );
       app.use("/related-things", create(RelatedThing));
@@ -483,13 +485,18 @@ describe("single() with related models", () => {
   });
 
   describe("full CRUD operations on related models", () => {
-    test("should support all CRUD operations by default", async () => {
+    test("should support all CRUD operations when configured explicitly", async () => {
       // Setup endpoints
       app.use("/users", create(User));
       app.use(
         "/users",
         single(User, {
-          related: [{ model: Post }],
+          related: [
+            {
+              model: Post,
+              operations: ["list", "post", "get", "put", "patch", "delete"],
+            },
+          ],
         }),
       );
 

@@ -216,7 +216,7 @@ describe("destroy operation: comprehensive options coverage", () => {
 
     // Then delete it with array hooks
     const deleted = await request(app).delete(`/items/${id}`);
-    
+
     expect(deleted.status).toBe(200);
     expect(deleted.body.success).toBe(true);
     expect(deleted.body.hook1).toBe("executed");

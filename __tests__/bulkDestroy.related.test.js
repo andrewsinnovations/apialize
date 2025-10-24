@@ -72,12 +72,17 @@ describe("bulk delete on related collections", () => {
         related: [
           {
             model: Post,
+            operations: ["list", "post", "get"],
             related: [
               {
                 model: Comment,
+                operations: ["list", "post", "get", "delete"],
                 // Per-op override to use custom id mapping for DELETE operations
                 perOperation: {
-                  delete: { id_mapping: "comment_key" },
+                  delete: {
+                    id_mapping: "comment_key",
+                    allow_bulk_delete: true,
+                  },
                 },
               },
             ],

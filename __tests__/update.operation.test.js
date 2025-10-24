@@ -346,7 +346,7 @@ describe("update operation: comprehensive options coverage", () => {
     const updated = await request(app)
       .put(`/items/${created.body.id}`)
       .send({ name: "ArrayUpdateTestUpdated", external_id: "array-hooks-u1" });
-    
+
     expect(updated.status).toBe(200);
     expect(updated.body.success).toBe(true);
     expect(updated.body.hook1).toBe("executed");

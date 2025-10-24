@@ -277,7 +277,7 @@ describe("patch operation: comprehensive options coverage", () => {
     const patched = await request(app)
       .patch(`/items/${id}`)
       .send({ name: "ArrayPatchTestPatched" });
-    
+
     expect(patched.status).toBe(200);
     expect(patched.body.success).toBe(true);
     expect(patched.body.hook1).toBe("executed");

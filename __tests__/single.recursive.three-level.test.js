@@ -64,8 +64,14 @@ describe("single() recursion with three levels (users -> posts -> comments)", ()
         related: [
           {
             model: Post,
+            operations: ["list", "post", "get"],
             // Recursively attach comments under each post
-            related: [{ model: Comment }],
+            related: [
+              {
+                model: Comment,
+                operations: ["list", "post", "get", "put", "patch", "delete"],
+              },
+            ],
           },
         ],
       }),
