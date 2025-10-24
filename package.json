@@ -11,8 +11,17 @@
     "express",
     "crud",
     "api",
-    "middleware"
+    "rest",
+    "middleware",
+    "router",
+    "pagination",
+    "filtering",
+    "hooks",
+    "express-router",
+    "crud-operations"
   ],
+  "author": "David Andrews <david@andrewsinnovations.com>",
+  "repository": "github:andrewsinnovations/apialize",
   "scripts": {
     "test": "jest --runInBand",
     "format": "prettier --write ."
