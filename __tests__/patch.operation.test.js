@@ -227,4 +227,61 @@ describe("patch operation: comprehensive options coverage", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.hook).toBe("post");
   });
+
+  test("array pre/post hooks: multiple functions execute in order (patch)", async () => {
+    const executionOrder = [];
+    const ctx = await build({
+      patchOptions: {
+        pre: [
+          async (context) => {
+            executionOrder.push("pre1");
+            expect(context.transaction).toBeTruthy();
+            return { step: 1 };
+          },
+          async (context) => {
+            executionOrder.push("pre2");
+            expect(context.transaction).toBeTruthy();
+            return { step: 2 };
+          },
+          async (context) => {
+            executionOrder.push("pre3");
+            expect(context.transaction).toBeTruthy();
+            return { step: 3, finalPre: true };
+          },
+        ],
+        post: [
+          async (context) => {
+            executionOrder.push("post1");
+            expect(context.preResult).toEqual({ step: 3, finalPre: true });
+            context.payload.hook1 = "executed";
+          },
+          async (context) => {
+            executionOrder.push("post2");
+            expect(context.payload.hook1).toBe("executed");
+            context.payload.hook2 = "also-executed";
+          },
+        ],
+      },
+    });
+    sequelize = ctx.sequelize;
+    const { Item, app } = ctx;
+
+    // First create an item
+    const created = await request(app)
+      .post("/items")
+      .send({ external_id: "array-hooks-p1", name: "ArrayPatchTest" });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+
+    // Then patch it with array hooks
+    const patched = await request(app)
+      .patch(`/items/${id}`)
+      .send({ name: "ArrayPatchTestPatched" });
+    
+    expect(patched.status).toBe(200);
+    expect(patched.body.success).toBe(true);
+    expect(patched.body.hook1).toBe("executed");
+    expect(patched.body.hook2).toBe("also-executed");
+    expect(executionOrder).toEqual(["pre1", "pre2", "pre3", "post1", "post2"]);
+  });
 });

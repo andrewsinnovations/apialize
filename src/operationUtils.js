@@ -91,14 +91,34 @@ async function withTransactionAndHooks(
   }
 
   try {
-    if (typeof options.pre === "function") {
-      context.preResult = await options.pre(context);
+    // Execute pre hooks
+    if (options.pre) {
+      if (typeof options.pre === "function") {
+        context.preResult = await options.pre(context);
+      } else if (Array.isArray(options.pre)) {
+        for (const preHook of options.pre) {
+          if (typeof preHook === "function") {
+            const result = await preHook(context);
+            // Store the result of the last pre hook
+            context.preResult = result;
+          }
+        }
+      }
     }
 
     const result = await run(context);
 
-    if (!context._responseSent && typeof options.post === "function") {
-      await options.post(context);
+    // Execute post hooks
+    if (!context._responseSent && options.post) {
+      if (typeof options.post === "function") {
+        await options.post(context);
+      } else if (Array.isArray(options.post)) {
+        for (const postHook of options.post) {
+          if (typeof postHook === "function") {
+            await postHook(context);
+          }
+        }
+      }
     }
 
     if (!context._rolledBack && t && typeof t.commit === "function") {

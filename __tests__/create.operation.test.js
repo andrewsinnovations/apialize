@@ -141,4 +141,52 @@ describe("create operation: comprehensive options coverage", () => {
     expect(res.body.success).toBe(true);
     expect(res.body.extra).toBe("ok");
   });
+
+  test("array pre/post hooks: multiple functions execute in order (create)", async () => {
+    const executionOrder = [];
+    const { sequelize: s, app } = await build({
+      createOptions: {
+        pre: [
+          async (ctx) => {
+            executionOrder.push("pre1");
+            expect(ctx.transaction).toBeTruthy();
+            return { step: 1 };
+          },
+          async (ctx) => {
+            executionOrder.push("pre2");
+            expect(ctx.transaction).toBeTruthy();
+            return { step: 2 };
+          },
+          async (ctx) => {
+            executionOrder.push("pre3");
+            expect(ctx.transaction).toBeTruthy();
+            return { step: 3, finalPre: true };
+          },
+        ],
+        post: [
+          async (ctx) => {
+            executionOrder.push("post1");
+            expect(ctx.preResult).toEqual({ step: 3, finalPre: true });
+            ctx.payload.hook1 = "executed";
+          },
+          async (ctx) => {
+            executionOrder.push("post2");
+            expect(ctx.payload.hook1).toBe("executed");
+            ctx.payload.hook2 = "also-executed";
+          },
+        ],
+      },
+    });
+    sequelize = s;
+
+    const res = await request(app)
+      .post("/items")
+      .send({ external_id: "array-hooks-c1", name: "ArrayTest" });
+    
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(res.body.hook1).toBe("executed");
+    expect(res.body.hook2).toBe("also-executed");
+    expect(executionOrder).toEqual(["pre1", "pre2", "pre3", "post1", "post2"]);
+  });
 });

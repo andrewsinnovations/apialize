@@ -170,4 +170,57 @@ describe("single operation: comprehensive options coverage", () => {
     expect(getChild.status).toBe(200);
     expect(getChild.body.record).toMatchObject({ id: post.id, title: "P1" });
   });
+
+  test("array pre/post hooks: multiple functions execute in order (single)", async () => {
+    const executionOrder = [];
+    const { sequelize: s, User, app } = await build({
+      singleOptions: {
+        pre: [
+          async (context) => {
+            executionOrder.push("pre1");
+            expect(context.transaction).toBeTruthy();
+            return { step: 1 };
+          },
+          async (context) => {
+            executionOrder.push("pre2");
+            expect(context.transaction).toBeTruthy();
+            return { step: 2 };
+          },
+          async (context) => {
+            executionOrder.push("pre3");
+            expect(context.transaction).toBeTruthy();
+            return { step: 3, finalPre: true };
+          },
+        ],
+        post: [
+          async (context) => {
+            executionOrder.push("post1");
+            expect(context.preResult).toEqual({ step: 3, finalPre: true });
+            context.payload.hook1 = "executed";
+          },
+          async (context) => {
+            executionOrder.push("post2");
+            expect(context.payload.hook1).toBe("executed");
+            context.payload.hook2 = "also-executed";
+          },
+        ],
+      },
+    });
+    sequelize = s;
+
+    // Create a user first
+    const created = await request(app)
+      .post("/users")
+      .send({ external_id: "array-hooks-s1", name: "ArraySingleTest" });
+    expect(created.status).toBe(201);
+
+    // Then retrieve it with array hooks
+    const retrieved = await request(app).get(`/users/${created.body.id}`);
+    
+    expect(retrieved.status).toBe(200);
+    expect(retrieved.body.success).toBe(true);
+    expect(retrieved.body.hook1).toBe("executed");
+    expect(retrieved.body.hook2).toBe("also-executed");
+    expect(executionOrder).toEqual(["pre1", "pre2", "pre3", "post1", "post2"]);
+  });
 });

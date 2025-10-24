@@ -169,4 +169,58 @@ describe("destroy operation: comprehensive options coverage", () => {
     expect(del.body.success).toBe(true);
     expect(del.body.extra).toBe("ok");
   });
+
+  test("array pre/post hooks: multiple functions execute in order (destroy)", async () => {
+    const executionOrder = [];
+    const { sequelize: s, app } = await build({
+      destroyOptions: {
+        pre: [
+          async (context) => {
+            executionOrder.push("pre1");
+            expect(context.transaction).toBeTruthy();
+            return { step: 1 };
+          },
+          async (context) => {
+            executionOrder.push("pre2");
+            expect(context.transaction).toBeTruthy();
+            return { step: 2 };
+          },
+          async (context) => {
+            executionOrder.push("pre3");
+            expect(context.transaction).toBeTruthy();
+            return { step: 3, finalPre: true };
+          },
+        ],
+        post: [
+          async (context) => {
+            executionOrder.push("post1");
+            expect(context.preResult).toEqual({ step: 3, finalPre: true });
+            context.payload.hook1 = "executed";
+          },
+          async (context) => {
+            executionOrder.push("post2");
+            expect(context.payload.hook1).toBe("executed");
+            context.payload.hook2 = "also-executed";
+          },
+        ],
+      },
+    });
+    sequelize = s;
+
+    // Create an item first
+    const created = await request(app)
+      .post("/items")
+      .send({ external_id: "array-hooks-d1", name: "ArrayDestroyTest" });
+    expect(created.status).toBe(201);
+    const id = created.body.id;
+
+    // Then delete it with array hooks
+    const deleted = await request(app).delete(`/items/${id}`);
+    
+    expect(deleted.status).toBe(200);
+    expect(deleted.body.success).toBe(true);
+    expect(deleted.body.hook1).toBe("executed");
+    expect(deleted.body.hook2).toBe("also-executed");
+    expect(executionOrder).toEqual(["pre1", "pre2", "pre3", "post1", "post2"]);
+  });
 });

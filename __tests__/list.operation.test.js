@@ -533,4 +533,60 @@ describe("list operation: comprehensive options coverage", () => {
     expect(res.body.meta.hook).toBe("post");
     expect(calls).toEqual({ pre: 1, post: 1 });
   });
+
+  test("array pre/post hooks: multiple functions execute in order (list)", async () => {
+    const { sequelize, Item } = await buildAppAndModel();
+
+    await seed(Item, [
+      { external_id: "arr1", name: "ArrayTest1", category: "A", score: 1 },
+      { external_id: "arr2", name: "ArrayTest2", category: "B", score: 2 },
+    ]);
+
+    const executionOrder = [];
+    const app3 = express();
+    app3.use(express.json());
+    app3.use(
+      "/items",
+      list(Item, {
+        pre: [
+          async (context) => {
+            executionOrder.push("pre1");
+            expect(context.transaction).toBeTruthy();
+            return { step: 1 };
+          },
+          async (context) => {
+            executionOrder.push("pre2");
+            expect(context.transaction).toBeTruthy();
+            return { step: 2 };
+          },
+          async (context) => {
+            executionOrder.push("pre3");
+            expect(context.transaction).toBeTruthy();
+            return { step: 3, finalPre: true };
+          },
+        ],
+        post: [
+          async (context) => {
+            executionOrder.push("post1");
+            expect(context.preResult).toEqual({ step: 3, finalPre: true });
+            context.payload.meta.hook1 = "executed";
+          },
+          async (context) => {
+            executionOrder.push("post2");
+            expect(context.payload.meta.hook1).toBe("executed");
+            context.payload.meta.hook2 = "also-executed";
+          },
+        ],
+      }),
+    );
+
+    const res = await request(app3).get("/items");
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.meta.hook1).toBe("executed");
+    expect(res.body.meta.hook2).toBe("also-executed");
+    expect(executionOrder).toEqual(["pre1", "pre2", "pre3", "post1", "post2"]);
+
+    await sequelize.close();
+  });
 });

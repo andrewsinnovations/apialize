@@ -297,4 +297,60 @@ describe("update operation: comprehensive options coverage", () => {
     expect(put.body.success).toBe(true);
     expect(put.body.hook).toBe("post");
   });
+
+  test("array pre/post hooks: multiple functions execute in order (update)", async () => {
+    const executionOrder = [];
+    const ctx = await build({
+      updateOptions: {
+        pre: [
+          async (context) => {
+            executionOrder.push("pre1");
+            expect(context.transaction).toBeTruthy();
+            return { step: 1 };
+          },
+          async (context) => {
+            executionOrder.push("pre2");
+            expect(context.transaction).toBeTruthy();
+            return { step: 2 };
+          },
+          async (context) => {
+            executionOrder.push("pre3");
+            expect(context.transaction).toBeTruthy();
+            return { step: 3, finalPre: true };
+          },
+        ],
+        post: [
+          async (context) => {
+            executionOrder.push("post1");
+            expect(context.preResult).toEqual({ step: 3, finalPre: true });
+            context.payload.hook1 = "executed";
+          },
+          async (context) => {
+            executionOrder.push("post2");
+            expect(context.payload.hook1).toBe("executed");
+            context.payload.hook2 = "also-executed";
+          },
+        ],
+      },
+    });
+    sequelize = ctx.sequelize;
+    const { Item, app } = ctx;
+
+    // First create an item
+    const created = await request(app)
+      .post("/items")
+      .send({ external_id: "array-hooks-u1", name: "ArrayUpdateTest" });
+    expect(created.status).toBe(201);
+
+    // Then update it with array hooks
+    const updated = await request(app)
+      .put(`/items/${created.body.id}`)
+      .send({ name: "ArrayUpdateTestUpdated", external_id: "array-hooks-u1" });
+    
+    expect(updated.status).toBe(200);
+    expect(updated.body.success).toBe(true);
+    expect(updated.body.hook1).toBe("executed");
+    expect(updated.body.hook2).toBe("also-executed");
+    expect(executionOrder).toEqual(["pre1", "pre2", "pre3", "post1", "post2"]);
+  });
 });
