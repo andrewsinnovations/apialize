@@ -1,13 +1,13 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const request = require("supertest");
-const { Sequelize, DataTypes } = require("sequelize");
-const { create, single, destroy } = require("../src");
+const express = require('express');
+const bodyParser = require('body-parser');
+const request = require('supertest');
+const { Sequelize, DataTypes } = require('sequelize');
+const { create, single, destroy } = require('../src');
 
 async function build({ destroyOptions = {}, modelOptions = {} } = {}) {
-  const sequelize = new Sequelize("sqlite::memory:", { logging: false });
+  const sequelize = new Sequelize('sqlite::memory:', { logging: false });
   const Item = sequelize.define(
-    "Item",
+    'Item',
     {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       external_id: {
@@ -19,19 +19,19 @@ async function build({ destroyOptions = {}, modelOptions = {} } = {}) {
       user_id: { type: DataTypes.INTEGER, allowNull: true },
       parent_id: { type: DataTypes.INTEGER, allowNull: true },
     },
-    { tableName: "destroy_items", timestamps: false },
+    { tableName: 'destroy_items', timestamps: false }
   );
   await sequelize.sync({ force: true });
 
   const app = express();
   app.use(bodyParser.json());
-  app.use("/items", create(Item));
-  app.use("/items", single(Item));
-  app.use("/items", destroy(Item, destroyOptions, modelOptions));
+  app.use('/items', create(Item));
+  app.use('/items', single(Item));
+  app.use('/items', destroy(Item, destroyOptions, modelOptions));
   return { sequelize, Item, app };
 }
 
-describe("destroy operation: comprehensive options coverage", () => {
+describe('destroy operation: comprehensive options coverage', () => {
   let sequelize;
 
   afterEach(async () => {
@@ -41,13 +41,13 @@ describe("destroy operation: comprehensive options coverage", () => {
     }
   });
 
-  test("default id mapping deletes by numeric id and returns success with id", async () => {
+  test('default id mapping deletes by numeric id and returns success with id', async () => {
     const { sequelize: s, app, Item } = await build();
     sequelize = s;
 
     const created = await request(app)
-      .post("/items")
-      .send({ external_id: "d1", name: "A" });
+      .post('/items')
+      .send({ external_id: 'd1', name: 'A' });
     const id = created.body.id;
 
     const del = await request(app).delete(`/items/${id}`);
@@ -58,31 +58,31 @@ describe("destroy operation: comprehensive options coverage", () => {
     expect(get404.status).toBe(404);
   });
 
-  test("id_mapping: external_id deletes by external id", async () => {
+  test('id_mapping: external_id deletes by external id', async () => {
     const { sequelize: s, app } = await build({
-      destroyOptions: { id_mapping: "external_id" },
+      destroyOptions: { id_mapping: 'external_id' },
     });
     sequelize = s;
 
-    await request(app).post("/items").send({ external_id: "ex-d1", name: "A" });
+    await request(app).post('/items').send({ external_id: 'ex-d1', name: 'A' });
     const del = await request(app).delete(`/items/ex-d1`);
     expect(del.status).toBe(200);
-    expect(del.body).toMatchObject({ success: true, id: "ex-d1" });
+    expect(del.body).toMatchObject({ success: true, id: 'ex-d1' });
 
     const get404 = await request(app).get(`/items/ex-d1`);
     expect(get404.status).toBe(404);
   });
 
-  test("ownership scoping via query filters prevents deleting foreign records", async () => {
+  test('ownership scoping via query filters prevents deleting foreign records', async () => {
     const { sequelize: s, app } = await build();
     sequelize = s;
 
     const a = await request(app)
-      .post("/items")
-      .send({ external_id: "a", name: "A", user_id: 1 });
+      .post('/items')
+      .send({ external_id: 'a', name: 'A', user_id: 1 });
     const b = await request(app)
-      .post("/items")
-      .send({ external_id: "b", name: "B", user_id: 2 });
+      .post('/items')
+      .send({ external_id: 'b', name: 'B', user_id: 2 });
 
     // Wrong scope -> 404
     const miss = await request(app).delete(`/items/${b.body.id}?user_id=1`);
@@ -93,7 +93,7 @@ describe("destroy operation: comprehensive options coverage", () => {
     expect(ok.status).toBe(200);
   });
 
-  test("middleware can enforce parent scoping via req.apialize.options.where", async () => {
+  test('middleware can enforce parent scoping via req.apialize.options.where', async () => {
     const scope = (req, _res, next) => {
       req.apialize = req.apialize || {};
       req.apialize.options = req.apialize.options || {};
@@ -110,11 +110,11 @@ describe("destroy operation: comprehensive options coverage", () => {
     sequelize = s;
 
     const t1 = await request(app)
-      .post("/items")
-      .send({ external_id: "t1", name: "T1", parent_id: 50 });
+      .post('/items')
+      .send({ external_id: 't1', name: 'T1', parent_id: 50 });
     await request(app)
-      .post("/items")
-      .send({ external_id: "t2", name: "T2", parent_id: 999 });
+      .post('/items')
+      .send({ external_id: 't2', name: 'T2', parent_id: 999 });
 
     const ok = await request(app).delete(`/items/${t1.body.id}`);
     expect(ok.status).toBe(200);
@@ -123,7 +123,7 @@ describe("destroy operation: comprehensive options coverage", () => {
     expect(miss.status).toBe(404); // already deleted under parent scope
   });
 
-  test("404 when record not found (default and custom mapping)", async () => {
+  test('404 when record not found (default and custom mapping)', async () => {
     const { sequelize: s, app } = await build();
     sequelize = s;
 
@@ -131,11 +131,11 @@ describe("destroy operation: comprehensive options coverage", () => {
     expect(missDefault.status).toBe(404);
 
     const { sequelize: s2, app: app2 } = await build({
-      destroyOptions: { id_mapping: "external_id" },
+      destroyOptions: { id_mapping: 'external_id' },
     });
     await request(app2)
-      .post("/items")
-      .send({ external_id: "exists", name: "X" });
+      .post('/items')
+      .send({ external_id: 'exists', name: 'X' });
     const del = await request(app2).delete(`/items/exists`);
     expect(del.status).toBe(200);
     const missCustom = await request(app2).delete(`/items/not-exists`);
@@ -143,64 +143,64 @@ describe("destroy operation: comprehensive options coverage", () => {
     await s2.close();
   });
 
-  test("pre/post hooks: transaction present and payload mutated (destroy)", async () => {
+  test('pre/post hooks: transaction present and payload mutated (destroy)', async () => {
     const { sequelize: s, app } = await build({
       destroyOptions: {
         pre: async (context) => {
           expect(context.transaction).toBeTruthy();
-          expect(typeof context.transaction.commit).toBe("function");
+          expect(typeof context.transaction.commit).toBe('function');
           return { ran: true };
         },
         post: async (context) => {
           expect(context.preResult).toEqual({ ran: true });
-          context.payload.extra = "ok";
+          context.payload.extra = 'ok';
         },
       },
     });
     sequelize = s;
 
     const created = await request(app)
-      .post("/items")
-      .send({ external_id: "d-hook", name: "X" });
+      .post('/items')
+      .send({ external_id: 'd-hook', name: 'X' });
     const id = created.body.id;
 
     const del = await request(app).delete(`/items/${id}`);
     expect(del.status).toBe(200);
     expect(del.body.success).toBe(true);
-    expect(del.body.extra).toBe("ok");
+    expect(del.body.extra).toBe('ok');
   });
 
-  test("array pre/post hooks: multiple functions execute in order (destroy)", async () => {
+  test('array pre/post hooks: multiple functions execute in order (destroy)', async () => {
     const executionOrder = [];
     const { sequelize: s, app } = await build({
       destroyOptions: {
         pre: [
           async (context) => {
-            executionOrder.push("pre1");
+            executionOrder.push('pre1');
             expect(context.transaction).toBeTruthy();
             return { step: 1 };
           },
           async (context) => {
-            executionOrder.push("pre2");
+            executionOrder.push('pre2');
             expect(context.transaction).toBeTruthy();
             return { step: 2 };
           },
           async (context) => {
-            executionOrder.push("pre3");
+            executionOrder.push('pre3');
             expect(context.transaction).toBeTruthy();
             return { step: 3, finalPre: true };
           },
         ],
         post: [
           async (context) => {
-            executionOrder.push("post1");
+            executionOrder.push('post1');
             expect(context.preResult).toEqual({ step: 3, finalPre: true });
-            context.payload.hook1 = "executed";
+            context.payload.hook1 = 'executed';
           },
           async (context) => {
-            executionOrder.push("post2");
-            expect(context.payload.hook1).toBe("executed");
-            context.payload.hook2 = "also-executed";
+            executionOrder.push('post2');
+            expect(context.payload.hook1).toBe('executed');
+            context.payload.hook2 = 'also-executed';
           },
         ],
       },
@@ -209,8 +209,8 @@ describe("destroy operation: comprehensive options coverage", () => {
 
     // Create an item first
     const created = await request(app)
-      .post("/items")
-      .send({ external_id: "array-hooks-d1", name: "ArrayDestroyTest" });
+      .post('/items')
+      .send({ external_id: 'array-hooks-d1', name: 'ArrayDestroyTest' });
     expect(created.status).toBe(201);
     const id = created.body.id;
 
@@ -219,8 +219,8 @@ describe("destroy operation: comprehensive options coverage", () => {
 
     expect(deleted.status).toBe(200);
     expect(deleted.body.success).toBe(true);
-    expect(deleted.body.hook1).toBe("executed");
-    expect(deleted.body.hook2).toBe("also-executed");
-    expect(executionOrder).toEqual(["pre1", "pre2", "pre3", "post1", "post2"]);
+    expect(deleted.body.hook1).toBe('executed');
+    expect(deleted.body.hook2).toBe('also-executed');
+    expect(executionOrder).toEqual(['pre1', 'pre2', 'pre3', 'post1', 'post2']);
   });
 });

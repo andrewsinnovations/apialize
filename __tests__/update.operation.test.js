@@ -1,8 +1,8 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const request = require("supertest");
-const { Sequelize, DataTypes } = require("sequelize");
-const { create, single, update } = require("../src");
+const express = require('express');
+const bodyParser = require('body-parser');
+const request = require('supertest');
+const { Sequelize, DataTypes } = require('sequelize');
+const { create, single, update } = require('../src');
 
 // Build a fresh app + model per test to isolate middleware/params
 async function build({
@@ -11,9 +11,9 @@ async function build({
   updateOptions = {},
   modelOptions = {},
 } = {}) {
-  const sequelize = new Sequelize("sqlite::memory:", { logging: false });
+  const sequelize = new Sequelize('sqlite::memory:', { logging: false });
   const Item = sequelize.define(
-    "Item",
+    'Item',
     {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       external_id: {
@@ -27,24 +27,24 @@ async function build({
       category: {
         type: DataTypes.STRING(32),
         allowNull: true,
-        defaultValue: "uncat",
+        defaultValue: 'uncat',
       },
       user_id: { type: DataTypes.INTEGER, allowNull: true },
       parent_id: { type: DataTypes.INTEGER, allowNull: true },
     },
-    { tableName: "update_items", timestamps: false },
+    { tableName: 'update_items', timestamps: false }
   );
   await sequelize.sync({ force: true });
 
   const app = express();
   app.use(bodyParser.json());
-  if (mountCreate) app.use("/items", create(Item));
+  if (mountCreate) app.use('/items', create(Item));
   if (mountSingle)
     app.use(
-      "/items",
-      single(Item, { id_mapping: updateOptions.id_mapping || "id" }),
+      '/items',
+      single(Item, { id_mapping: updateOptions.id_mapping || 'id' })
     );
-  app.use("/items", update(Item, updateOptions, modelOptions));
+  app.use('/items', update(Item, updateOptions, modelOptions));
 
   return { sequelize, Item, app };
 }
@@ -58,7 +58,7 @@ async function getRecord(Item, where) {
   return row && row.get({ plain: true });
 }
 
-describe("update operation: comprehensive options coverage", () => {
+describe('update operation: comprehensive options coverage', () => {
   let sequelize;
 
   afterEach(async () => {
@@ -68,18 +68,18 @@ describe("update operation: comprehensive options coverage", () => {
     }
   });
 
-  test("default id mapping with full-replace semantics (unspecified -> default/null)", async () => {
+  test('default id mapping with full-replace semantics (unspecified -> default/null)', async () => {
     const ctx = await build();
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
     // Create an item with non-defaults
-    const created = await request(app).post("/items").send({
-      external_id: "ex-1",
-      name: "Alpha",
-      desc: "has-desc",
+    const created = await request(app).post('/items').send({
+      external_id: 'ex-1',
+      name: 'Alpha',
+      desc: 'has-desc',
       flag: false, // will be reset to default (true) by PUT when unspecified
-      category: "catA",
+      category: 'catA',
       user_id: 1,
       parent_id: 10,
     });
@@ -89,75 +89,75 @@ describe("update operation: comprehensive options coverage", () => {
     // PUT with only name provided would null external_id (NOT NULL). Include external_id to preserve it.
     const put = await request(app)
       .put(`/items/${id}`)
-      .send({ name: "Beta", external_id: "ex-1" });
+      .send({ name: 'Beta', external_id: 'ex-1' });
     expect(put.status).toBe(200);
     expect(put.body).toMatchObject({ success: true });
 
     const rec = await getRecord(Item, { id });
-    expect(rec.name).toBe("Beta");
+    expect(rec.name).toBe('Beta');
     expect(rec.desc).toBeNull(); // no default -> null
     expect(rec.flag).toBe(true); // defaultValue restored
-    expect(rec.category).toBe("uncat"); // defaultValue restored
-    expect(rec.external_id).toBe("ex-1"); // unchanged
+    expect(rec.category).toBe('uncat'); // defaultValue restored
+    expect(rec.external_id).toBe('ex-1'); // unchanged
   });
 
-  test("cannot change numeric id even if provided in body (default id)", async () => {
+  test('cannot change numeric id even if provided in body (default id)', async () => {
     const ctx = await build();
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
     const created = await request(app)
-      .post("/items")
-      .send({ external_id: "ex-2", name: "A" });
+      .post('/items')
+      .send({ external_id: 'ex-2', name: 'A' });
     expect(created.status).toBe(201);
     const id = created.body.id;
 
     // Try to change numeric id in body; it should be ignored/overridden. Preserve external_id to satisfy NOT NULL.
     const put = await request(app)
       .put(`/items/${id}`)
-      .send({ name: "B", id: 999, external_id: "ex-2" });
+      .send({ name: 'B', id: 999, external_id: 'ex-2' });
     expect(put.status).toBe(200);
 
     const rec = await getRecord(Item, { id });
     expect(rec.id).toBe(id);
-    expect(rec.external_id).toBe("ex-2");
-    expect(rec.name).toBe("B");
+    expect(rec.external_id).toBe('ex-2');
+    expect(rec.name).toBe('B');
   });
 
-  test("id_mapping: external_id with full-replace semantics and mapping immutability", async () => {
-    const ctx = await build({ updateOptions: { id_mapping: "external_id" } });
+  test('id_mapping: external_id with full-replace semantics and mapping immutability', async () => {
+    const ctx = await build({ updateOptions: { id_mapping: 'external_id' } });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
     const created = await request(app)
-      .post("/items")
-      .send({ external_id: "ext-A", name: "A", desc: "x", category: "c" });
+      .post('/items')
+      .send({ external_id: 'ext-A', name: 'A', desc: 'x', category: 'c' });
     expect(created.status).toBe(201);
 
     const put = await request(app)
       .put(`/items/ext-A`)
-      .send({ name: "B", external_id: "ext-B" }); // attempt to change mapping should be ignored
+      .send({ name: 'B', external_id: 'ext-B' }); // attempt to change mapping should be ignored
     expect(put.status).toBe(200);
 
-    const rec = await getRecord(Item, { external_id: "ext-A" });
+    const rec = await getRecord(Item, { external_id: 'ext-A' });
     expect(rec).toBeTruthy();
-    expect(rec.name).toBe("B");
-    expect(rec.external_id).toBe("ext-A"); // unchanged
+    expect(rec.name).toBe('B');
+    expect(rec.external_id).toBe('ext-A'); // unchanged
     expect(rec.desc).toBeNull(); // unspecified -> null
-    expect(rec.category).toBe("uncat"); // reset to default
+    expect(rec.category).toBe('uncat'); // reset to default
   });
 
-  test("ownership scoping via query filters: mismatch returns 404, match updates (preserve scoped fields)", async () => {
+  test('ownership scoping via query filters: mismatch returns 404, match updates (preserve scoped fields)', async () => {
     const ctx = await build();
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
     const r1 = await request(app)
-      .post("/items")
-      .send({ external_id: "o1", name: "N1", user_id: 1 });
+      .post('/items')
+      .send({ external_id: 'o1', name: 'N1', user_id: 1 });
     const r2 = await request(app)
-      .post("/items")
-      .send({ external_id: "o2", name: "N2", user_id: 2 });
+      .post('/items')
+      .send({ external_id: 'o2', name: 'N2', user_id: 2 });
     expect(r1.status).toBe(201);
     expect(r2.status).toBe(201);
 
@@ -167,19 +167,19 @@ describe("update operation: comprehensive options coverage", () => {
     // Attempt to update record 2 while scoping to user_id=1 -> not found
     const miss = await request(app)
       .put(`/items/${id2}?user_id=1`)
-      .send({ name: "NOOP" });
+      .send({ name: 'NOOP' });
     expect(miss.status).toBe(404);
 
     // Correct scope updates
     const ok = await request(app)
       .put(`/items/${id1}?user_id=1`)
-      .send({ name: "Scoped", user_id: "1", external_id: "o1" });
+      .send({ name: 'Scoped', user_id: '1', external_id: 'o1' });
     expect(ok.status).toBe(200);
     const rec = await getRecord(Item, { id: id1 });
-    expect(rec.name).toBe("Scoped");
+    expect(rec.name).toBe('Scoped');
   });
 
-  test("middleware can enforce parent scoping via req.apialize.options.where (preserve scoped fields)", async () => {
+  test('middleware can enforce parent scoping via req.apialize.options.where (preserve scoped fields)', async () => {
     const parentMiddleware = (req, _res, next) => {
       req.apialize = req.apialize || {};
       req.apialize.options = req.apialize.options || {};
@@ -197,33 +197,33 @@ describe("update operation: comprehensive options coverage", () => {
     const { Item, app } = ctx;
 
     const t1 = await request(app)
-      .post("/items")
-      .send({ external_id: "t1", name: "T1", parent_id: 123 });
+      .post('/items')
+      .send({ external_id: 't1', name: 'T1', parent_id: 123 });
     const t2 = await request(app)
-      .post("/items")
-      .send({ external_id: "t2", name: "T2", parent_id: 999 });
+      .post('/items')
+      .send({ external_id: 't2', name: 'T2', parent_id: 999 });
     expect(t1.status).toBe(201);
     expect(t2.status).toBe(201);
 
     // Correct parent updates
     const ok = await request(app)
       .put(`/items/${t1.body.id}`)
-      .send({ name: "T1-upd", parent_id: 123, external_id: "t1" });
+      .send({ name: 'T1-upd', parent_id: 123, external_id: 't1' });
     expect(ok.status).toBe(200);
 
     // Wrong parent -> 404
     const miss = await request(app)
       .put(`/items/${t2.body.id}`)
-      .send({ name: "T2-upd", parent_id: 123, external_id: "t2" });
+      .send({ name: 'T2-upd', parent_id: 123, external_id: 't2' });
     expect(miss.status).toBe(404);
   });
 
-  test("middleware can modify values prior to update (category locked)", async () => {
+  test('middleware can modify values prior to update (category locked)', async () => {
     const lockCategory = (req, _res, next) => {
       req.apialize = req.apialize || {};
       req.apialize.values = {
         ...(req.apialize.values || {}),
-        category: "locked",
+        category: 'locked',
       };
       next();
     };
@@ -233,51 +233,51 @@ describe("update operation: comprehensive options coverage", () => {
     const { Item, app } = ctx;
 
     const created = await request(app)
-      .post("/items")
-      .send({ external_id: "val-1", name: "A", category: "open" });
+      .post('/items')
+      .send({ external_id: 'val-1', name: 'A', category: 'open' });
     expect(created.status).toBe(201);
 
     const put = await request(app)
       .put(`/items/${created.body.id}`)
-      .send({ name: "B", category: "should-be-ignored", external_id: "val-1" });
+      .send({ name: 'B', category: 'should-be-ignored', external_id: 'val-1' });
     expect(put.status).toBe(200);
 
     const rec = await getRecord(Item, { id: created.body.id });
-    expect(rec.name).toBe("B");
-    expect(rec.category).toBe("locked"); // middleware override applied
+    expect(rec.name).toBe('B');
+    expect(rec.category).toBe('locked'); // middleware override applied
   });
 
-  test("404 when record not found (default id mapping)", async () => {
+  test('404 when record not found (default id mapping)', async () => {
     const ctx = await build();
     sequelize = ctx.sequelize;
     const { app } = ctx;
 
-    const put = await request(app).put(`/items/9999`).send({ name: "Nope" });
+    const put = await request(app).put(`/items/9999`).send({ name: 'Nope' });
     expect(put.status).toBe(404);
   });
 
-  test("id_mapping external_id: 404 when record not found", async () => {
-    const ctx = await build({ updateOptions: { id_mapping: "external_id" } });
+  test('id_mapping external_id: 404 when record not found', async () => {
+    const ctx = await build({ updateOptions: { id_mapping: 'external_id' } });
     sequelize = ctx.sequelize;
     const { app } = ctx;
 
     const put = await request(app)
       .put(`/items/missing-exid`)
-      .send({ name: "Nope" });
+      .send({ name: 'Nope' });
     expect(put.status).toBe(404);
   });
 
-  test("pre/post hooks: transaction present and payload mutated", async () => {
+  test('pre/post hooks: transaction present and payload mutated', async () => {
     const ctx = await build({
       updateOptions: {
         pre: async (context) => {
           expect(context.transaction).toBeTruthy();
-          expect(typeof context.transaction.commit).toBe("function");
+          expect(typeof context.transaction.commit).toBe('function');
           return { ok: true };
         },
         post: async (context) => {
           expect(context.preResult).toEqual({ ok: true });
-          context.payload.hook = "post";
+          context.payload.hook = 'post';
         },
       },
     });
@@ -285,50 +285,50 @@ describe("update operation: comprehensive options coverage", () => {
     const { Item, app } = ctx;
 
     const created = await request(app)
-      .post("/items")
-      .send({ external_id: "hook-1", name: "A" });
+      .post('/items')
+      .send({ external_id: 'hook-1', name: 'A' });
     expect(created.status).toBe(201);
     const id = created.body.id;
 
     const put = await request(app)
       .put(`/items/${id}`)
-      .send({ name: "B", external_id: "hook-1" });
+      .send({ name: 'B', external_id: 'hook-1' });
     expect(put.status).toBe(200);
     expect(put.body.success).toBe(true);
-    expect(put.body.hook).toBe("post");
+    expect(put.body.hook).toBe('post');
   });
 
-  test("array pre/post hooks: multiple functions execute in order (update)", async () => {
+  test('array pre/post hooks: multiple functions execute in order (update)', async () => {
     const executionOrder = [];
     const ctx = await build({
       updateOptions: {
         pre: [
           async (context) => {
-            executionOrder.push("pre1");
+            executionOrder.push('pre1');
             expect(context.transaction).toBeTruthy();
             return { step: 1 };
           },
           async (context) => {
-            executionOrder.push("pre2");
+            executionOrder.push('pre2');
             expect(context.transaction).toBeTruthy();
             return { step: 2 };
           },
           async (context) => {
-            executionOrder.push("pre3");
+            executionOrder.push('pre3');
             expect(context.transaction).toBeTruthy();
             return { step: 3, finalPre: true };
           },
         ],
         post: [
           async (context) => {
-            executionOrder.push("post1");
+            executionOrder.push('post1');
             expect(context.preResult).toEqual({ step: 3, finalPre: true });
-            context.payload.hook1 = "executed";
+            context.payload.hook1 = 'executed';
           },
           async (context) => {
-            executionOrder.push("post2");
-            expect(context.payload.hook1).toBe("executed");
-            context.payload.hook2 = "also-executed";
+            executionOrder.push('post2');
+            expect(context.payload.hook1).toBe('executed');
+            context.payload.hook2 = 'also-executed';
           },
         ],
       },
@@ -338,19 +338,19 @@ describe("update operation: comprehensive options coverage", () => {
 
     // First create an item
     const created = await request(app)
-      .post("/items")
-      .send({ external_id: "array-hooks-u1", name: "ArrayUpdateTest" });
+      .post('/items')
+      .send({ external_id: 'array-hooks-u1', name: 'ArrayUpdateTest' });
     expect(created.status).toBe(201);
 
     // Then update it with array hooks
     const updated = await request(app)
       .put(`/items/${created.body.id}`)
-      .send({ name: "ArrayUpdateTestUpdated", external_id: "array-hooks-u1" });
+      .send({ name: 'ArrayUpdateTestUpdated', external_id: 'array-hooks-u1' });
 
     expect(updated.status).toBe(200);
     expect(updated.body.success).toBe(true);
-    expect(updated.body.hook1).toBe("executed");
-    expect(updated.body.hook2).toBe("also-executed");
-    expect(executionOrder).toEqual(["pre1", "pre2", "pre3", "post1", "post2"]);
+    expect(updated.body.hook1).toBe('executed');
+    expect(updated.body.hook2).toBe('also-executed');
+    expect(executionOrder).toEqual(['pre1', 'pre2', 'pre3', 'post1', 'post2']);
   });
 });

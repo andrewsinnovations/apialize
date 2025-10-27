@@ -1,21 +1,19 @@
-const {
-  express,
-  apializeContext,
-  ensureFn,
-  asyncHandler,
-  defaultNotFound,
-} = require("./utils");
-const list = require("./list");
-const create = require("./create");
-const update = require("./update");
-const patch = require("./patch");
-const destroy = require("./destroy");
-const {
-  withTransactionAndHooks,
-  optionsWithTransaction,
-  normalizeId,
-  notFoundWithRollback,
-} = require("./operationUtils");
+const utils = require('./utils');
+const express = utils.express;
+const apializeContext = utils.apializeContext;
+const ensureFn = utils.ensureFn;
+const asyncHandler = utils.asyncHandler;
+const defaultNotFound = utils.defaultNotFound;
+const list = require('./list');
+const create = require('./create');
+const update = require('./update');
+const patch = require('./patch');
+const destroy = require('./destroy');
+const operationUtils = require('./operationUtils');
+const withTransactionAndHooks = operationUtils.withTransactionAndHooks;
+const optionsWithTransaction = operationUtils.optionsWithTransaction;
+const normalizeId = operationUtils.normalizeId;
+const notFoundWithRollback = operationUtils.notFoundWithRollback;
 
 function setupRelatedEndpoints(
   router,
@@ -23,374 +21,385 @@ function setupRelatedEndpoints(
   related,
   parentIdMapping,
   parentModelOptions,
-  parentParamName = "id",
+  parentParamName = 'id'
 ) {
-  related.forEach((relatedConfig) => {
+  related.forEach(function (relatedConfig) {
     if (!relatedConfig.model) {
       throw new Error(
-        "Related model configuration must include a 'model' property",
+        "Related model configuration must include a 'model' property"
       );
     }
 
-    const {
-      model: relatedModel,
-      options: relatedOptions = {},
-      perOperation = {}, // new: per-op overrides { list, get, post, put, patch, delete }
-      foreignKey,
-      path,
-      operations = ["list", "get"], // Default: read ops enabled; writes must be explicit
-    } = relatedConfig;
+    const relatedModel = relatedConfig.model;
+    const relatedOptions = relatedConfig.options || {};
+    const perOperation = relatedConfig.perOperation || {};
+    const foreignKey = relatedConfig.foreignKey;
+    const path = relatedConfig.path;
+    const operations = relatedConfig.operations || ['list', 'get'];
 
-    // Determine the path for the related endpoints (pluralized by default)
     const endpointPath = path || modelNameToPath(relatedModel.name);
 
-    // Determine the foreign key that links to the parent model
     const relatedForeignKey =
-      foreignKey || `${parentModel.name.toLowerCase()}_id`;
+      foreignKey || parentModel.name.toLowerCase() + '_id';
 
-    // Resolve parent's internal id (primary key) honoring the param name for this nesting level
-    const resolveParentInternalId = async (
+    const resolveParentInternalId = async function (
       req,
-      currentParamName = parentParamName,
-      preferStored = false,
-    ) => {
-      // Choose id source depending on context: for reads use current route param first; for writes prefer stored parentId
-      const parentParamId = preferStored
-        ? ((req.apialize && req.apialize.parentId) ??
-          req.params[currentParamName] ??
-          req.params["id"])
-        : (req.params[currentParamName] ??
-          req.params["id"] ??
-          (req.apialize && req.apialize.parentId));
+      currentParamName,
+      preferStored
+    ) {
+      const effectiveParamName =
+        typeof currentParamName === 'string'
+          ? currentParamName
+          : parentParamName;
+      const useStoredFirst = Boolean(preferStored);
+      var parentParamId = null;
+      if (useStoredFirst) {
+        if (req.apialize && req.apialize.parentId != null) {
+          parentParamId = req.apialize.parentId;
+        } else if (req.params && req.params[effectiveParamName] != null) {
+          parentParamId = req.params[effectiveParamName];
+        } else if (req.params && req.params['id'] != null) {
+          parentParamId = req.params['id'];
+        }
+      } else {
+        if (req.params && req.params[effectiveParamName] != null) {
+          parentParamId = req.params[effectiveParamName];
+        } else if (req.params && req.params['id'] != null) {
+          parentParamId = req.params['id'];
+        } else if (req.apialize && req.apialize.parentId != null) {
+          parentParamId = req.apialize.parentId;
+        }
+      }
       if (!parentParamId) return null;
-      if ((parentIdMapping || "id") === "id") return parentParamId;
-      // Find parent by its exposed identifier to obtain internal id
-      const where = { [parentIdMapping || "id"]: parentParamId };
-      const queryOptions = {
-        where,
-        attributes: ["id"],
-        ...(parentModelOptions || {}),
-      };
+      if ((parentIdMapping || 'id') === 'id') return parentParamId;
+      const where = {};
+      where[parentIdMapping || 'id'] = parentParamId;
+      const queryOptions = Object.assign(
+        {
+          where: where,
+          attributes: ['id'],
+        },
+        parentModelOptions || {}
+      );
       try {
         const parent = await parentModel.findOne(queryOptions);
-        return parent ? (parent.get ? parent.get("id") : parent.id) : null;
+        return parent ? (parent.get ? parent.get('id') : parent.id) : null;
       } catch (_e) {
         return null;
       }
     };
 
-    // Create middleware that filters related records by parent internal ID
-    const parentFilterMiddlewareFactory = (
-      paramName = parentParamName,
-      preferStored = false,
-    ) =>
-      asyncHandler(async (req, res, next) => {
+    const parentFilterMiddlewareFactory = function (
+      paramName,
+      preferStoredArg
+    ) {
+      const effectiveParamName =
+        typeof paramName === 'string' ? paramName : parentParamName;
+      const preferStoredVal = Boolean(preferStoredArg);
+      return asyncHandler(async function (req, res, next) {
         if (!req.apialize) req.apialize = {};
         if (!req.apialize.options) req.apialize.options = {};
         if (!req.apialize.options.where) req.apialize.options.where = {};
 
-        // Resolve parent internal id for this nesting level
         const parentInternalId = await resolveParentInternalId(
           req,
-          paramName,
-          preferStored,
+          effectiveParamName,
+          preferStoredVal
         );
-        // If not found, use impossible value to ensure empty matches (for list)
-        req.apialize.options.where[relatedForeignKey] =
-          parentInternalId ?? "__apialize_none__";
+        if (
+          parentInternalId === null ||
+          typeof parentInternalId === 'undefined'
+        ) {
+          req.apialize.options.where[relatedForeignKey] = '__apialize_none__';
+        } else {
+          req.apialize.options.where[relatedForeignKey] = parentInternalId;
+        }
         next();
       });
+    };
 
-    // Create middleware for write operations that sets the foreign key (param-aware)
-    const setForeignKeyMiddlewareFactory = (
-      paramName = parentParamName,
-      preferStored = false,
-    ) =>
-      asyncHandler(async (req, res, next) => {
-        if (["POST", "PUT", "PATCH"].includes(req.method)) {
+    const setForeignKeyMiddlewareFactory = function (
+      paramName,
+      preferStoredArg
+    ) {
+      const effectiveParamName =
+        typeof paramName === 'string' ? paramName : parentParamName;
+      const preferStoredVal = Boolean(preferStoredArg);
+      return asyncHandler(async function (req, res, next) {
+        const writeMethods = ['POST', 'PUT', 'PATCH'];
+        if (writeMethods.indexOf(req.method) !== -1) {
           if (!req.apialize) req.apialize = {};
           if (!req.apialize.values) req.apialize.values = {};
           const parentInternalId = await resolveParentInternalId(
             req,
-            paramName,
-            preferStored,
+            effectiveParamName,
+            preferStoredVal
           );
           if (parentInternalId == null) return defaultNotFound(res);
           req.apialize.values[relatedForeignKey] = parentInternalId;
         }
         next();
       });
+    };
 
-    // Create middleware instances for read and write operations
     const parentFilterForRead = parentFilterMiddlewareFactory(
       parentParamName,
-      false,
-    ); // reads: prefer route param
+      false
+    );
     const parentFilterForWrite = parentFilterMiddlewareFactory(
       parentParamName,
-      true,
-    ); // writes: prefer stored parentId
+      true
+    );
 
-    // Base middleware (per-op middleware will be appended later)
-    const baseReadMiddleware = [
-      parentFilterForRead,
-      ...(relatedOptions.middleware || []),
-    ];
-    const baseWriteMiddleware = [
-      parentFilterForWrite,
-      setForeignKeyMiddlewareFactory(parentParamName, true),
-      ...(relatedOptions.middleware || []),
-    ];
+    const baseReadMiddleware = []
+      .concat(parentFilterForRead)
+      .concat(
+        Array.isArray(relatedOptions.middleware)
+          ? relatedOptions.middleware
+          : []
+      );
+    const baseWriteMiddleware = []
+      .concat(parentFilterForWrite)
+      .concat(setForeignKeyMiddlewareFactory(parentParamName, true))
+      .concat(
+        Array.isArray(relatedOptions.middleware)
+          ? relatedOptions.middleware
+          : []
+      );
 
-    // Helper: merge base related options with per-operation overrides and base middleware
-    const resolveOpConfig = (opName) => {
-      const op = (perOperation && perOperation[opName]) || {};
+    const resolveOpConfig = function (opName) {
+      const op =
+        perOperation && perOperation[opName] ? perOperation[opName] : {};
       const isWrite =
-        opName === "post" ||
-        opName === "put" ||
-        opName === "patch" ||
-        opName === "delete";
-      const baseMiddleware = isWrite ? baseWriteMiddleware : baseReadMiddleware;
+        opName === 'post' ||
+        opName === 'put' ||
+        opName === 'patch' ||
+        opName === 'delete';
+      const baseMw = isWrite ? baseWriteMiddleware : baseReadMiddleware;
+      const opMiddleware = Array.isArray(op.middleware) ? op.middleware : [];
+      const mergedMiddleware = [].concat(baseMw).concat(opMiddleware);
+      const mergedOptions = Object.assign({}, relatedOptions, op);
+      mergedOptions.middleware = mergedMiddleware;
       return {
-        options: {
-          ...relatedOptions,
-          ...op,
-          middleware: [...baseMiddleware, ...(op.middleware || [])],
-        },
+        options: mergedOptions,
         modelOptions: op.modelOptions || relatedOptions.modelOptions || {},
-        id_mapping: op.id_mapping || relatedOptions.id_mapping || "id",
-        middleware: [...baseMiddleware, ...(op.middleware || [])],
+        id_mapping: op.id_mapping || relatedOptions.id_mapping || 'id',
+        middleware: mergedMiddleware,
         allow_bulk_delete:
-          typeof op.allow_bulk_delete === "boolean"
+          typeof op.allow_bulk_delete === 'boolean'
             ? op.allow_bulk_delete
             : false,
       };
     };
 
-    // Create a sub-router for all related operations
     const relatedRouter = express.Router({ mergeParams: true });
 
-    // Middleware to capture parent id before inner route adds its own ":id"/":relatedId"
-    const storeParentIdMiddleware = (req, _res, next) => {
+    const storeParentIdMiddleware = function (req, _res, next) {
       req.apialize = req.apialize || {};
-      // Always set current level parent id to ensure deeper levels can reference the latest context if they rely on parentId
       req.apialize.parentId = req.params[parentParamName];
       next();
     };
 
-    // LIST operation: GET /:id/related_things
-    if (operations.includes("list")) {
+    if (operations.indexOf('list') !== -1) {
       const { options: listOptions, modelOptions: listModelOptions } =
-        resolveOpConfig("list");
+        resolveOpConfig('list');
       const relatedListRouter = list(
         relatedModel,
         listOptions,
-        listModelOptions,
+        listModelOptions
       );
-      relatedRouter.use("/", relatedListRouter);
+      relatedRouter.use('/', relatedListRouter);
     }
 
-    // CREATE operation: POST /:id/related_things
-    if (operations.includes("post") || operations.includes("create")) {
+    if (
+      operations.indexOf('post') !== -1 ||
+      operations.indexOf('create') !== -1
+    ) {
       const { options: createOptions, modelOptions: postModelOptions } =
-        resolveOpConfig("post");
+        resolveOpConfig('post');
       const relatedCreateRouter = create(
         relatedModel,
         createOptions,
-        postModelOptions,
+        postModelOptions
       );
-      relatedRouter.use("/", relatedCreateRouter);
+      relatedRouter.use('/', relatedCreateRouter);
     }
 
-    // SINGLE operation: GET /:id/related_things/:relatedId using built-in single() via a nested router
-    if (operations.includes("get")) {
+    if (operations.indexOf('get') !== -1) {
       const { options: getOptions, modelOptions: getModelOptions } =
-        resolveOpConfig("get");
-      // Configure child single to read ':relatedId' param and pass child related configs for true recursion
+        resolveOpConfig('get');
+      const childSingleOptions = Object.assign({}, getOptions);
+      childSingleOptions.param_name = 'relatedId';
+      childSingleOptions.related = Array.isArray(relatedConfig.related)
+        ? relatedConfig.related
+        : [];
       const childSingleRouter = single(
         relatedModel,
-        {
-          ...getOptions,
-          param_name: "relatedId",
-          related: Array.isArray(relatedConfig.related)
-            ? relatedConfig.related
-            : [],
-        },
-        getModelOptions,
+        childSingleOptions,
+        getModelOptions
       );
       const nested = express.Router({ mergeParams: true });
-      // Mount at '/' so inner single's '/:relatedId' is the only id segment
-      nested.use("/", storeParentIdMiddleware, childSingleRouter);
-      relatedRouter.use("/", nested);
+      nested.use('/', storeParentIdMiddleware, childSingleRouter);
+      relatedRouter.use('/', nested);
     }
 
-    // UPDATE operation: PUT /:id/related_things/:relatedId
-    if (operations.includes("put") || operations.includes("update")) {
+    if (
+      operations.indexOf('put') !== -1 ||
+      operations.indexOf('update') !== -1
+    ) {
       const { options: updateOptions, modelOptions: putModelOptions } =
-        resolveOpConfig("put");
+        resolveOpConfig('put');
       const relatedUpdateRouter = update(
         relatedModel,
         updateOptions,
-        putModelOptions || {},
+        putModelOptions || {}
       );
-      // Mount at "/" so inner router's ":id" becomes ":relatedId" at the edge
-      // Capture parent id before inner router param overrides req.params.id
-      relatedRouter.use("/", storeParentIdMiddleware, relatedUpdateRouter);
+      relatedRouter.use('/', storeParentIdMiddleware, relatedUpdateRouter);
     }
 
-    // PATCH operation: PATCH /:id/related_things/:relatedId
-    if (operations.includes("patch")) {
+    if (operations.indexOf('patch') !== -1) {
       const { options: patchOptions, modelOptions: patchModelOptions } =
-        resolveOpConfig("patch");
+        resolveOpConfig('patch');
       const relatedPatchRouter = patch(
         relatedModel,
         patchOptions,
-        patchModelOptions || {},
+        patchModelOptions || {}
       );
-      // Mount at "/" so inner router's ":id" becomes ":relatedId" at the edge
-      (storeParentIdMiddleware,
-        relatedRouter.use("/", storeParentIdMiddleware, relatedPatchRouter));
+      relatedRouter.use('/', storeParentIdMiddleware, relatedPatchRouter);
     }
 
-    // DELETE operation: DELETE /:id/related_things/:relatedId
-    if (operations.includes("delete") || operations.includes("destroy")) {
+    if (
+      operations.indexOf('delete') !== -1 ||
+      operations.indexOf('destroy') !== -1
+    ) {
       const { options: destroyOptions, modelOptions: deleteModelOptions } =
-        resolveOpConfig("delete");
+        resolveOpConfig('delete');
       const relatedDestroyRouter = destroy(
         relatedModel,
         destroyOptions,
-        deleteModelOptions || {},
+        deleteModelOptions || {}
       );
-      // Mount at "/" so inner router's ":id" becomes ":relatedId" at the edge
-      relatedRouter.use("/", storeParentIdMiddleware, relatedDestroyRouter);
+      relatedRouter.use('/', storeParentIdMiddleware, relatedDestroyRouter);
 
-      // Bulk DELETE on collection: DELETE /:id/related_things?confirm=true
-      // Behavior: when confirm!=true, act as dry run and return the list of ids to be deleted
-      //           when confirm==true, delete all scoped related records and return count and ids
+      // Bulk DELETE: when confirm!=true, dry-run and return ids; when confirm==true, delete and return count and ids
       const {
         modelOptions: bulkDelModelOptions,
         id_mapping: bulkDelIdMapping,
         middleware: bulkDelMiddleware,
         allow_bulk_delete,
-      } = resolveOpConfig("delete");
+      } = resolveOpConfig('delete');
       if (allow_bulk_delete) {
         relatedRouter.delete(
-          "/",
+          '/',
           storeParentIdMiddleware,
           apializeContext,
           ...bulkDelMiddleware,
           asyncHandler(async (req, res) => {
-            // Determine confirmation flag
             const q = req.query || {};
-            const confirmed = ["true", "1", "yes", "y"].includes(
-              String(q.confirm).toLowerCase(),
-            );
+            const confirmVal = String(q.confirm).toLowerCase();
+            const confirmed =
+              ['true', '1', 'yes', 'y'].indexOf(confirmVal) !== -1;
 
-            // Where clause should already include parent FK scope from middleware
             const baseWhere =
               (req.apialize &&
                 req.apialize.options &&
                 req.apialize.options.where) ||
               {};
-            // Strip out non-column query flags potentially merged by apializeContext
-            if (Object.prototype.hasOwnProperty.call(baseWhere, "confirm")) {
+            if (Object.prototype.hasOwnProperty.call(baseWhere, 'confirm')) {
               delete baseWhere.confirm;
             }
 
-            // Fetch ids to be affected (respect id_mapping override)
-            const findOptions = {
-              ...bulkDelModelOptions,
+            const findOptions = Object.assign({}, bulkDelModelOptions, {
               where: baseWhere,
               attributes: [bulkDelIdMapping],
-            };
+            });
             const rows = await relatedModel.findAll(findOptions);
-            const ids = rows.map((r) =>
-              r && r.get ? r.get(bulkDelIdMapping) : r[bulkDelIdMapping],
-            );
+            const ids = [];
+            for (var i = 0; i < rows.length; i++) {
+              var r = rows[i];
+              if (r && typeof r.get === 'function') {
+                ids.push(r.get(bulkDelIdMapping));
+              } else if (r) {
+                ids.push(r[bulkDelIdMapping]);
+              }
+            }
 
             if (!confirmed) {
               return res.json({ success: true, confirm_required: true, ids });
             }
 
-            // Perform deletion
             try {
-              const destroyOptions = {
-                ...bulkDelModelOptions,
+              const destroyOptions = Object.assign({}, bulkDelModelOptions, {
                 where: baseWhere,
-              };
+              });
               const deleted = await relatedModel.destroy(destroyOptions);
               return res.json({ success: true, deleted, ids });
             } catch (err) {
-              // Surface error for debugging purposes
-              console.error("[Apialize] Bulk delete error:", err);
+              console.error('[Apialize] Bulk delete error:', err);
               return res.status(500).json({
                 success: false,
                 error: String((err && err.message) || err),
               });
             }
-          }),
+          })
         );
       }
     }
-
-    // Attach an error handler for related routes to surface middleware errors as JSON
-    relatedRouter.use((err, _req, res, _next) => {
+    relatedRouter.use(function (err, _req, res, _next) {
       // eslint-disable-next-line no-console
-      console.error("[Apialize] Related route error:", err);
+      console.error('[Apialize] Related route error:', err);
       res
         .status(500)
         .json({ success: false, error: String((err && err.message) || err) });
     });
-
-    // Mount the related router
     router.use(`/:${parentParamName}/${endpointPath}`, relatedRouter);
-    // Note: true recursion is handled by passing 'related' to the child single() above
   });
 }
 
 function modelNameToPath(modelName) {
-  // Convert CamelCase/PascalCase to snake_case for URL paths
   const snakeCase = modelName
-    .replace(/([A-Z])/g, "_$1")
+    .replace(/([A-Z])/g, '_$1')
     .toLowerCase()
-    .replace(/^_/, ""); // Remove leading underscore
-
-  // Simple pluralization
+    .replace(/^_/, '');
   return pluralize(snakeCase);
 }
 
 function pluralize(word) {
-  // Simple pluralization rules
-  if (word.endsWith("y")) {
-    return word.slice(0, -1) + "ies";
+  if (word.endsWith('y')) {
+    return word.slice(0, -1) + 'ies';
   } else if (
-    word.endsWith("s") ||
-    word.endsWith("sh") ||
-    word.endsWith("ch") ||
-    word.endsWith("x") ||
-    word.endsWith("z")
+    word.endsWith('s') ||
+    word.endsWith('sh') ||
+    word.endsWith('ch') ||
+    word.endsWith('x') ||
+    word.endsWith('z')
   ) {
-    return word + "es";
+    return word + 'es';
   } else {
-    return word + "s";
+    return word + 's';
   }
 }
 
 function single(model, options = {}, modelOptions = {}) {
-  ensureFn(model, "findOne");
-  const {
-    middleware = [],
-    id_mapping = "id",
-    param_name = "id",
-    related = [],
-    pre = null,
-    post = null,
-    member_routes = [],
-  } = options;
-  const inline = middleware.filter((fn) => typeof fn === "function");
+  ensureFn(model, 'findOne');
+  const middleware = Array.isArray(options.middleware)
+    ? options.middleware
+    : [];
+  const id_mapping =
+    typeof options.id_mapping === 'string' ? options.id_mapping : 'id';
+  const param_name =
+    typeof options.param_name === 'string' ? options.param_name : 'id';
+  const related = Array.isArray(options.related) ? options.related : [];
+  const pre = options.pre || null;
+  const post = options.post || null;
+  const member_routes = Array.isArray(options.member_routes)
+    ? options.member_routes
+    : [];
+  const inline = middleware.filter(function (fn) {
+    return typeof fn === 'function';
+  });
   const router = express.Router({ mergeParams: true });
 
-  // Main single record endpoint
   router.get(
     `/:${param_name}`,
     apializeContext,
@@ -399,30 +408,27 @@ function single(model, options = {}, modelOptions = {}) {
       const paramValue = req.params[param_name];
       req.apialize.id = paramValue;
       if (!req.apialize.where) req.apialize.where = {};
-      if (typeof req.apialize.where[id_mapping] === "undefined")
+      if (typeof req.apialize.where[id_mapping] === 'undefined')
         req.apialize.where[id_mapping] = paramValue;
-      // Merge modelOptions with any apialize options (which may be mutated by middleware)
-      // Follow list() behavior: request-specific options should override base model options
-      req.apialize.options = {
-        ...modelOptions,
-        ...(req.apialize.options || {}),
-      };
-
-      // Combine where clauses from modelOptions, existing req options, and the id-mapping constraint
+      req.apialize.options = Object.assign(
+        {},
+        modelOptions,
+        req.apialize.options || {}
+      );
       const modelWhere = (modelOptions && modelOptions.where) || {};
       const reqOptionsWhere =
         (req.apialize.options && req.apialize.options.where) || {};
-      const fullWhere = {
-        ...modelWhere,
-        ...reqOptionsWhere,
-        ...req.apialize.where,
-      };
-      // Persist merged where back to req.apialize.options so hooks/transactions see it
+      const fullWhere = Object.assign(
+        {},
+        modelWhere,
+        reqOptionsWhere,
+        req.apialize.where
+      );
       req.apialize.options.where = fullWhere;
       const payload = await withTransactionAndHooks(
         {
           model,
-          options: { ...options, pre, post },
+          options: Object.assign({}, options, { pre: pre, post: post }),
           req,
           res,
           modelOptions,
@@ -437,46 +443,44 @@ function single(model, options = {}, modelOptions = {}) {
 
           context.record = result;
           let recordPayload = result;
-          if (recordPayload && typeof recordPayload === "object")
+          if (recordPayload && typeof recordPayload === 'object')
             recordPayload = recordPayload.get
               ? recordPayload.get({ plain: true })
-              : { ...recordPayload };
+              : Object.assign({}, recordPayload);
 
           recordPayload = normalizeId(recordPayload, id_mapping);
 
           context.payload = { success: true, record: recordPayload };
-          // Do not send the response here; return the payload so post hooks can run.
           return context.payload;
-        },
+        }
       );
-
-      // Send the response after hooks/transaction complete, unless already sent (e.g., 404 path)
       if (!res.headersSent) {
         res.json(payload);
       }
-    }),
+    })
   );
-
-  // Helper to load a single record (without sending a response) for member_routes
-  const loadSingleRecord = async (req, res, next) => {
+  const loadSingleRecord = async function (req, res, next) {
     const paramValue = req.params[param_name];
     req.apialize = req.apialize || {};
     req.apialize.id = paramValue;
-
-    // Ensure where and options are present/merged the same way as the GET route
     req.apialize.where = req.apialize.where || {};
-    if (typeof req.apialize.where[id_mapping] === "undefined") {
+    if (typeof req.apialize.where[id_mapping] === 'undefined') {
       req.apialize.where[id_mapping] = paramValue;
     }
-    req.apialize.options = { ...modelOptions, ...(req.apialize.options || {}) };
+    req.apialize.options = Object.assign(
+      {},
+      modelOptions,
+      req.apialize.options || {}
+    );
     const modelWhere = (modelOptions && modelOptions.where) || {};
     const reqOptionsWhere =
       (req.apialize.options && req.apialize.options.where) || {};
-    const fullWhere = {
-      ...modelWhere,
-      ...reqOptionsWhere,
-      ...req.apialize.where,
-    };
+    const fullWhere = Object.assign(
+      {},
+      modelWhere,
+      reqOptionsWhere,
+      req.apialize.where
+    );
     req.apialize.options.where = fullWhere;
 
     try {
@@ -484,61 +488,54 @@ function single(model, options = {}, modelOptions = {}) {
       if (result == null) return defaultNotFound(res);
 
       let recordPayload = result;
-      if (recordPayload && typeof recordPayload === "object") {
+      if (recordPayload && typeof recordPayload === 'object') {
         recordPayload = recordPayload.get
           ? recordPayload.get({ plain: true })
-          : { ...recordPayload };
+          : Object.assign({}, recordPayload);
       }
       recordPayload = normalizeId(recordPayload, id_mapping);
-
-      // Expose to downstream handlers
-      req.apialize.rawRecord = result; // ORM instance
-      req.apialize.record = recordPayload; // plain normalized
+      req.apialize.rawRecord = result;
+      req.apialize.record = recordPayload;
       req.apialize.singlePayload = { success: true, record: recordPayload };
       return next();
     } catch (err) {
       return next(err);
     }
   };
-
-  // Mount member (follow-up) routes under "/:param_name/<path>"
   if (Array.isArray(member_routes) && member_routes.length > 0) {
-    const allowed = new Set(["get", "post", "put", "patch", "delete"]);
-    const ensureLeadingSlash = (p) =>
-      typeof p === "string" && p.length > 0
-        ? p.startsWith("/")
-          ? p
-          : `/${p}`
-        : null;
+    const allowedList = ['get', 'post', 'put', 'patch', 'delete'];
+    function ensureLeadingSlash(p) {
+      if (typeof p !== 'string' || p.length === 0) return null;
+      if (p.charAt(0) === '/') return p;
+      return '/' + p;
+    }
 
-    member_routes.forEach((route, idx) => {
+    member_routes.forEach(function (route, idx) {
       if (
         !route ||
-        typeof route !== "object" ||
-        typeof route.handler !== "function"
+        typeof route !== 'object' ||
+        typeof route.handler !== 'function'
       ) {
         throw new Error(
-          `[Apialize] member_routes[${idx}] must be an object with a 'handler' function and a 'path' string`,
+          `[Apialize] member_routes[${idx}] must be an object with a 'handler' function and a 'path' string`
         );
       }
-      const method = String(route.method || "get").toLowerCase();
-      if (!allowed.has(method)) {
+      const method = String(route.method || 'get').toLowerCase();
+      if (allowedList.indexOf(method) === -1) {
         throw new Error(
-          `[Apialize] member_routes[${idx}].method must be one of ${Array.from(allowed).join(", ")}`,
+          `[Apialize] member_routes[${idx}].method must be one of ${allowedList.join(', ')}`
         );
       }
-      const subPath = ensureLeadingSlash(route.path || "");
+      const subPath = ensureLeadingSlash(route.path || '');
       if (!subPath) {
         throw new Error(
-          `[Apialize] member_routes[${idx}] requires a non-empty 'path' (e.g., 'stats' or '/stats')`,
+          `[Apialize] member_routes[${idx}] requires a non-empty 'path' (e.g., 'stats' or '/stats')`
         );
       }
       const fullPath = `/:${param_name}${subPath}`;
       const perRouteMw = Array.isArray(route.middleware)
         ? route.middleware
         : [];
-
-      // Chain: apializeContext -> inline middleware -> load record -> per-route middleware -> handler wrapper
       router[method](
         fullPath,
         apializeContext,
@@ -548,27 +545,23 @@ function single(model, options = {}, modelOptions = {}) {
         asyncHandler(async (req, res) => {
           const out = await route.handler(req, res);
           if (!res.headersSent) {
-            if (typeof out === "undefined") {
+            if (typeof out === 'undefined') {
               return res.json(req.apialize.singlePayload);
             }
             return res.json(out);
           }
-          // If response already sent by handler, do nothing
-        }),
+        })
       );
     });
   }
-
-  // Create related model endpoints
   if (Array.isArray(related) && related.length > 0) {
-    // Propagate param_name to ensure child routes mount under the correct parent param segment
     setupRelatedEndpoints(
       router,
       model,
       related,
       id_mapping,
       modelOptions,
-      param_name,
+      param_name
     );
   }
 

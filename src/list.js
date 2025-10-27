@@ -1,6 +1,6 @@
-const { express, apializeContext, ensureFn, asyncHandler } = require("./utils");
-const Sequelize = require("sequelize");
-const { withTransactionAndHooks, normalizeRows } = require("./operationUtils");
+const { express, apializeContext, ensureFn, asyncHandler } = require('./utils');
+const Sequelize = require('sequelize');
+const { withTransactionAndHooks, normalizeRows } = require('./operationUtils');
 const { Op } = Sequelize;
 
 // Default configuration for list operation
@@ -13,39 +13,32 @@ const LIST_DEFAULTS = {
   metaShowFilters: false, // include applied filters in meta.filters
   metaShowOrdering: false, // include applied ordering in meta.order
   defaultPageSize: 100, // default page size when not specified in query or model config
-  defaultOrderBy: "id", // default column to order by when no ordering is specified
-  defaultOrderDir: "ASC", // default order direction when no ordering is specified
-  // New: optional pre/post processing hooks for the list operation
-  // pre(context): can mutate context and/or return a value; return value stored on context.preResult
-  // post(context): can mutate context, including context.payload before response is sent
+  defaultOrderBy: 'id', // default column to order by when no ordering is specified
+  defaultOrderDir: 'ASC', // default order direction when no ordering is specified
   pre: null,
   post: null,
 };
 
-// Helper function to get model attributes with their data types
 function getModelAttributes(model) {
   if (!model || !model.rawAttributes) return {};
   return model.rawAttributes;
 }
 
-// Helper function to validate if a column exists on the model
 function validateColumnExists(model, columnName) {
   const attributes = getModelAttributes(model);
-  return attributes.hasOwnProperty(columnName);
+  return Object.prototype.hasOwnProperty.call(attributes, columnName);
 }
 
-// Resolve a dotted path like "Alias.field" (or deeper: "A.B.field") against includes
-// Returns { foundModel, attribute, aliasPath } or null if not found
 function resolveIncludedAttribute(rootModel, includes, dottedPath) {
   if (
     !dottedPath ||
-    typeof dottedPath !== "string" ||
-    !dottedPath.includes(".")
+    typeof dottedPath !== 'string' ||
+    !dottedPath.includes('.')
   )
     return null;
   if (!Array.isArray(includes) || !includes.length) return null;
 
-  const parts = dottedPath.split(".");
+  const parts = dottedPath.split('.');
   const attrName = parts.pop();
   let currIncludes = includes;
   let currModel = rootModel;
@@ -65,11 +58,10 @@ function resolveIncludedAttribute(rootModel, includes, dottedPath) {
   return {
     foundModel: currModel,
     attribute: attrs[attrName],
-    aliasPath: `${aliasChain.join(".")}.${attrName}`,
+    aliasPath: `${aliasChain.join('.')}.${attrName}`,
   };
 }
 
-// Helper function to validate data type compatibility
 function validateDataType(model, columnName, value) {
   const attributes = getModelAttributes(model);
   const attribute = attributes[columnName];
@@ -81,25 +73,25 @@ function validateDataType(model, columnName, value) {
 
   try {
     switch (typeName) {
-      case "integer":
-      case "bigint":
+      case 'integer':
+      case 'bigint':
         return !isNaN(parseInt(value, 10));
-      case "float":
-      case "real":
-      case "double":
-      case "decimal":
+      case 'float':
+      case 'real':
+      case 'double':
+      case 'decimal':
         return !isNaN(parseFloat(value));
-      case "boolean":
-        return ["true", "false", "1", "0", "yes", "no"].includes(
-          String(value).toLowerCase(),
+      case 'boolean':
+        return ['true', 'false', '1', '0', 'yes', 'no'].includes(
+          String(value).toLowerCase()
         );
-      case "date":
-      case "dateonly":
+      case 'date':
+      case 'dateonly':
         return !isNaN(Date.parse(value));
-      case "string":
-      case "text":
-      case "char":
-      case "varchar":
+      case 'string':
+      case 'text':
+      case 'char':
+      case 'varchar':
         return true; // Strings are always valid
       default:
         return true; // Allow unknown types
@@ -109,9 +101,8 @@ function validateDataType(model, columnName, value) {
   }
 }
 
-// Handle pagination logic
 function setupPagination(req, query, modelCfg, defaultPageSize) {
-  let page = parseInt(query["api:page"], 10);
+  let page = parseInt(query['api:page'], 10);
   if (isNaN(page) || page < 1) page = 1;
 
   const effectivePageSize =
@@ -119,7 +110,7 @@ function setupPagination(req, query, modelCfg, defaultPageSize) {
       ? modelCfg.page_size
       : defaultPageSize;
 
-  let pageSize = parseInt(query["api:pagesize"], 10);
+  let pageSize = parseInt(query['api:pagesize'], 10);
   if (isNaN(pageSize) || pageSize < 1) pageSize = effectivePageSize;
 
   req.apialize.options.limit = pageSize;
@@ -128,7 +119,6 @@ function setupPagination(req, query, modelCfg, defaultPageSize) {
   return { page, pageSize };
 }
 
-// Handle ordering logic
 function setupOrdering(
   req,
   res,
@@ -138,53 +128,55 @@ function setupOrdering(
   allowOrdering,
   defaultOrderBy,
   defaultOrderDir,
-  idMapping,
+  idMapping
 ) {
   let rawOrderBy, globalDir;
 
   if (allowOrdering) {
-    // Use query params first, then model config as fallback
-    rawOrderBy = query["api:orderby"] || modelCfg.orderby;
-    globalDir = (query["api:orderdir"] || modelCfg.orderdir || "ASC")
+    rawOrderBy = query['api:orderby'] || modelCfg.orderby;
+    globalDir = (query['api:orderdir'] || modelCfg.orderdir || 'ASC')
       .toString()
       .toUpperCase();
   } else {
-    // When ordering is disabled, still use model config but ignore query params
     rawOrderBy = modelCfg.orderby;
-    globalDir = (modelCfg.orderdir || "ASC").toString().toUpperCase();
+    globalDir = (modelCfg.orderdir || 'ASC').toString().toUpperCase();
   }
 
   if (rawOrderBy) {
-    const fields = rawOrderBy
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const order = [];
+    const splitFields = rawOrderBy.split(',');
+    const fields = [];
+    for (let i = 0; i < splitFields.length; i++) {
+      const trimmed =
+        splitFields[i] != null ? String(splitFields[i]).trim() : '';
+      if (trimmed) fields.push(trimmed);
+    }
 
-    for (const f of fields) {
+    const order = [];
+    for (let i = 0; i < fields.length; i++) {
+      const f = fields[i];
       if (!f) continue;
 
       let columnName;
       let direction;
-      if (f.startsWith("-")) {
+      if (f.charAt(0) === '-') {
         columnName = f.slice(1);
-        direction = "DESC";
-      } else if (f.startsWith("+")) {
+        direction = 'DESC';
+      } else if (f.charAt(0) === '+') {
         columnName = f.slice(1);
-        direction = "ASC";
+        direction = 'ASC';
       } else {
         columnName = f;
-        direction = globalDir === "DESC" ? "DESC" : "ASC";
+        direction = globalDir === 'DESC' ? 'DESC' : 'ASC';
       }
 
       // Validate column exists on model
       if (!validateColumnExists(model, columnName)) {
         console.warn(
-          `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`,
+          `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`
         );
         res.status(400).json({
           success: false,
-          error: "Bad request",
+          error: 'Bad request',
         });
         return false; // Indicate validation failed
       }
@@ -194,17 +186,15 @@ function setupOrdering(
     if (order.length) req.apialize.options.order = order;
   }
 
-  // Default ordering if none specified
   if (!req.apialize.options.order) {
     const effectiveDefaultOrderBy =
-      defaultOrderBy === "id" && idMapping ? idMapping : defaultOrderBy;
+      defaultOrderBy === 'id' && idMapping ? idMapping : defaultOrderBy;
     req.apialize.options.order = [[effectiveDefaultOrderBy, defaultOrderDir]];
   }
 
   return true; // Indicate success
 }
 
-// Handle filtering logic
 function setupFiltering(req, res, model, query, allowFiltering) {
   let appliedFilters = {};
 
@@ -216,47 +206,45 @@ function setupFiltering(req, res, model, query, allowFiltering) {
       : [];
 
   for (const [key, value] of Object.entries(query)) {
-    if (key.startsWith("api:")) continue;
+    if (key.startsWith('api:')) continue;
     if (value === undefined) continue;
 
     let targetModel = model;
     let outKey = key;
     let attribute;
 
-    if (key.includes(".")) {
+    if (key.includes('.')) {
       const resolved = resolveIncludedAttribute(model, includes, key);
       if (!resolved) {
         console.warn(
-          `[Apialize] Bad request: Invalid filter column '${key}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`,
+          `[Apialize] Bad request: Invalid filter column '${key}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`
         );
-        res.status(400).json({ success: false, error: "Bad request" });
+        res.status(400).json({ success: false, error: 'Bad request' });
         return false;
       }
       targetModel = resolved.foundModel;
       attribute = resolved.attribute;
       outKey = `$${resolved.aliasPath}$`;
     } else {
-      // Validate column exists on root model
       if (!validateColumnExists(model, key)) {
         console.warn(
-          `[Apialize] Bad request: Invalid filter column '${key}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`,
+          `[Apialize] Bad request: Invalid filter column '${key}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`
         );
-        res.status(400).json({ success: false, error: "Bad request" });
+        res.status(400).json({ success: false, error: 'Bad request' });
         return false; // Indicate validation failed
       }
       attribute = getModelAttributes(model)[key];
     }
 
-    // Validate data type compatibility against the target model/attribute
     const okType =
       attribute && attribute.type
-        ? validateDataType({ rawAttributes: { tmp: attribute } }, "tmp", value)
+        ? validateDataType({ rawAttributes: { tmp: attribute } }, 'tmp', value)
         : true;
     if (!okType) {
       console.warn(
-        `[Apialize] Bad request: Invalid filter value '${value}' is not compatible with column '${key}' data type on model '${targetModel && targetModel.name ? targetModel.name : "Model"}'. Query: ${req.originalUrl}`,
+        `[Apialize] Bad request: Invalid filter value '${value}' is not compatible with column '${key}' data type on model '${targetModel && targetModel.name ? targetModel.name : 'Model'}'. Query: ${req.originalUrl}`
       );
-      res.status(400).json({ success: false, error: "Bad request" });
+      res.status(400).json({ success: false, error: 'Bad request' });
       return false; // Indicate validation failed
     }
 
@@ -264,27 +252,30 @@ function setupFiltering(req, res, model, query, allowFiltering) {
   }
 
   if (Object.keys(appliedFilters).length) {
-    req.apialize.options.where = {
-      ...(req.apialize.options.where || {}),
-      ...appliedFilters,
-    };
+    const existingWhere = req.apialize.options.where || {};
+    const mergedWhere = Object.assign({}, existingWhere);
+    const appliedKeys = Object.keys(appliedFilters);
+    for (let i = 0; i < appliedKeys.length; i++) {
+      const k = appliedKeys[i];
+      mergedWhere[k] = appliedFilters[k];
+    }
+    req.apialize.options.where = mergedWhere;
   }
 
   return appliedFilters;
 }
 
-// Handle multi-column text search filtering using api:filterfields and api:filter
 function setupMultiColumnFilter(
   req,
   res,
   model,
   query,
   allowMultiColumnFiltering,
-  configuredFields,
+  configuredFields
 ) {
   if (!allowMultiColumnFiltering) return true; // feature disabled
 
-  const rawValue = (query["api:filter"] || "").toString();
+  const rawValue = (query['api:filter'] || '').toString();
   const fields = Array.isArray(configuredFields)
     ? configuredFields.filter(Boolean)
     : [];
@@ -301,25 +292,23 @@ function setupMultiColumnFilter(
   for (const f of fields) {
     let colExpr = null;
     let attr;
-    if (f.includes(".")) {
+    if (f.includes('.')) {
       const resolved = resolveIncludedAttribute(model, includes, f);
       if (!resolved) {
         console.warn(
-          `[Apialize] Bad request: Invalid filter field '${f}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`,
+          `[Apialize] Bad request: Invalid filter field '${f}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`
         );
-        res.status(400).json({ success: false, error: "Bad request" });
+        res.status(400).json({ success: false, error: 'Bad request' });
         return false;
       }
       attr = resolved.attribute;
-      // For function wrapping (LOWER), reference the table alias column directly
-      // e.g., Sequelize.col('Parent.parent_name') instead of using $...$ syntax
       colExpr = Sequelize.col(resolved.aliasPath);
     } else {
       if (!validateColumnExists(model, f)) {
         console.warn(
-          `[Apialize] Bad request: Invalid filter field '${f}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`,
+          `[Apialize] Bad request: Invalid filter field '${f}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`
         );
-        res.status(400).json({ success: false, error: "Bad request" });
+        res.status(400).json({ success: false, error: 'Bad request' });
         return false;
       }
       attr = getModelAttributes(model)[f];
@@ -327,22 +316,22 @@ function setupMultiColumnFilter(
     }
 
     const typeName =
-      attr && attr.type ? attr.type.constructor.name.toLowerCase() : "";
-    const isStringLike = ["string", "text", "char", "varchar"].includes(
-      typeName,
+      attr && attr.type ? attr.type.constructor.name.toLowerCase() : '';
+    const isStringLike = ['string', 'text', 'char', 'varchar'].includes(
+      typeName
     );
     if (!isStringLike) {
       console.warn(
-        `[Apialize] Bad request: Filter field '${f}' is not a text column on model '${model.name}'. Query: ${req.originalUrl}`,
+        `[Apialize] Bad request: Filter field '${f}' is not a text column on model '${model.name}'. Query: ${req.originalUrl}`
       );
-      res.status(400).json({ success: false, error: "Bad request" });
+      res.status(400).json({ success: false, error: 'Bad request' });
       return false;
     }
 
     ors.push(
-      Sequelize.where(Sequelize.fn("LOWER", colExpr), {
+      Sequelize.where(Sequelize.fn('LOWER', colExpr), {
         [Op.like]: `%${valueLower}%`,
-      }),
+      })
     );
   }
 
@@ -358,7 +347,6 @@ function setupMultiColumnFilter(
   return true;
 }
 
-// Process query results and build response
 function buildResponse(
   result,
   page,
@@ -368,24 +356,43 @@ function buildResponse(
   metaShowOrdering,
   allowFiltering,
   req,
-  idMapping,
+  idMapping
 ) {
-  const rows = Array.isArray(result.rows)
-    ? result.rows.map((r) => (r && r.get ? r.get({ plain: true }) : r))
-    : result.rows;
-  // Normalize id according to idMapping using shared utility
+  let rows;
+  if (Array.isArray(result.rows)) {
+    rows = [];
+    for (let i = 0; i < result.rows.length; i++) {
+      const r = result.rows[i];
+      if (r && typeof r.get === 'function') {
+        rows.push(r.get({ plain: true }));
+      } else {
+        rows.push(r);
+      }
+    }
+  } else {
+    rows = result.rows;
+  }
   const normalizedRows = normalizeRows(rows, idMapping);
   const totalPages = Math.max(1, Math.ceil(result.count / pageSize));
 
   let orderOut;
   if (metaShowOrdering) {
-    orderOut = Array.isArray(req.apialize.options.order)
-      ? req.apialize.options.order.map((o) => {
-          if (Array.isArray(o)) return [o[0], (o[1] || "ASC").toUpperCase()];
-          if (typeof o === "string") return [o, "ASC"];
-          return o;
-        })
-      : [];
+    if (Array.isArray(req.apialize.options.order)) {
+      orderOut = [];
+      for (let i = 0; i < req.apialize.options.order.length; i++) {
+        const o = req.apialize.options.order[i];
+        if (Array.isArray(o)) {
+          const dir = (o[1] || 'ASC').toString().toUpperCase();
+          orderOut.push([o[0], dir]);
+        } else if (typeof o === 'string') {
+          orderOut.push([o, 'ASC']);
+        } else {
+          orderOut.push(o);
+        }
+      }
+    } else {
+      orderOut = [];
+    }
   }
 
   const meta = {
@@ -405,35 +412,34 @@ function buildResponse(
   };
 }
 
-// list(model, options, modelOptions)
-// options.middleware: array of express middleware
-// Configurable flags (all optional, see LIST_DEFAULTS above for defaults)
-// modelOptions: passed directly to Sequelize findAndCountAll (attributes, include, etc.)
 function list(model, options = {}, modelOptions = {}) {
-  ensureFn(model, "findAndCountAll");
-  const {
-    middleware,
-    allowFiltering,
-    allowOrdering,
-    allowMultiColumnFiltering,
-    filter_fields,
-    metaShowFilters,
-    metaShowOrdering,
-    defaultPageSize,
-    defaultOrderBy,
-    defaultOrderDir,
-    id_mapping,
-    pre,
-    post,
-  } = { ...LIST_DEFAULTS, ...options };
-  const idMapping = id_mapping || "id";
+  ensureFn(model, 'findAndCountAll');
+  const mergedOptions = Object.assign({}, LIST_DEFAULTS, options);
+  const middleware = mergedOptions.middleware;
+  const allowFiltering = mergedOptions.allowFiltering;
+  const allowOrdering = mergedOptions.allowOrdering;
+  const allowMultiColumnFiltering = mergedOptions.allowMultiColumnFiltering;
+  const filter_fields = mergedOptions.filter_fields;
+  const metaShowFilters = mergedOptions.metaShowFilters;
+  const metaShowOrdering = mergedOptions.metaShowOrdering;
+  const defaultPageSize = mergedOptions.defaultPageSize;
+  const defaultOrderBy = mergedOptions.defaultOrderBy;
+  const defaultOrderDir = mergedOptions.defaultOrderDir;
+  const id_mapping = mergedOptions.id_mapping;
+  const pre = mergedOptions.pre;
+  const post = mergedOptions.post;
 
-  const inline = middleware.filter((fn) => typeof fn === "function");
+  const idMapping = id_mapping || 'id';
+
+  const inline = [];
+  for (let i = 0; i < middleware.length; i++) {
+    const fn = middleware[i];
+    if (typeof fn === 'function') inline.push(fn);
+  }
   const router = express.Router({ mergeParams: true });
 
   router.get(
-    "/",
-    // Pre-middleware to disable query param filtering when allowFiltering is false
+    '/',
     (req, _res, next) => {
       if (!allowFiltering) req._apializeDisableQueryFilters = true;
       next();
@@ -444,18 +450,23 @@ function list(model, options = {}, modelOptions = {}) {
       const q = req.query || {};
       const modelCfg = (model && model.apialize) || {};
 
-      // Merge base model options with request-specific options
-      req.apialize.options = { ...modelOptions, ...req.apialize.options };
+      const mergedReqOptions = Object.assign({}, modelOptions);
+      if (req.apialize.options && typeof req.apialize.options === 'object') {
+        const keys = Object.keys(req.apialize.options);
+        for (let i = 0; i < keys.length; i++) {
+          const k = keys[i];
+          mergedReqOptions[k] = req.apialize.options[k];
+        }
+      }
+      req.apialize.options = mergedReqOptions;
 
-      // Setup pagination
       const { page, pageSize } = setupPagination(
         req,
         q,
         modelCfg,
-        defaultPageSize,
+        defaultPageSize
       );
 
-      // Setup ordering (returns false if validation fails)
       const orderingValid = setupOrdering(
         req,
         res,
@@ -465,24 +476,33 @@ function list(model, options = {}, modelOptions = {}) {
         allowOrdering,
         defaultOrderBy,
         defaultOrderDir,
-        idMapping,
+        idMapping
       );
       if (!orderingValid) return; // Response already sent
 
-      // Setup filtering (returns false if validation fails)
       const appliedFilters = setupFiltering(req, res, model, q, allowFiltering);
       if (appliedFilters === false) return; // Response already sent
 
-      // Setup multi-column text filtering (returns false if validation fails)
+      let multiFilterFields;
+      if (Array.isArray(filter_fields) && filter_fields.length > 0) {
+        multiFilterFields = filter_fields;
+      } else if (
+        modelCfg &&
+        Array.isArray(modelCfg.filter_fields) &&
+        modelCfg.filter_fields.length > 0
+      ) {
+        multiFilterFields = modelCfg.filter_fields;
+      } else {
+        multiFilterFields = [];
+      }
+
       const multiOk = setupMultiColumnFilter(
         req,
         res,
         model,
         q,
         allowMultiColumnFiltering,
-        filter_fields && filter_fields.length
-          ? filter_fields
-          : modelCfg.filter_fields || [],
+        multiFilterFields
       );
       if (!multiOk) return; // Response already sent
 
@@ -507,16 +527,16 @@ function list(model, options = {}, modelOptions = {}) {
             metaShowOrdering,
             allowFiltering,
             req,
-            idMapping,
+            idMapping
           );
           context.payload = response;
           return context.payload;
-        },
+        }
       );
       if (!res.headersSent) {
         res.json(payload);
       }
-    }),
+    })
   );
 
   router.apialize = {};

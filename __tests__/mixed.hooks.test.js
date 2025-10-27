@@ -1,25 +1,25 @@
-const express = require("express");
-const bodyParser = require("body-parser");
-const request = require("supertest");
-const { Sequelize, DataTypes, Op } = require("sequelize");
-const { create, single, update, list } = require("../src");
+const express = require('express');
+const bodyParser = require('body-parser');
+const request = require('supertest');
+const { Sequelize, DataTypes, Op } = require('sequelize');
+const { create, single, update, list } = require('../src');
 
 async function build() {
-  const sequelize = new Sequelize("sqlite::memory:", { logging: false });
+  const sequelize = new Sequelize('sqlite::memory:', { logging: false });
 
   // Create models with relationships for testing include/attributes
   const Category = sequelize.define(
-    "Category",
+    'Category',
     {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       name: { type: DataTypes.STRING(100), allowNull: false },
       description: { type: DataTypes.STRING(255), allowNull: true },
     },
-    { tableName: "mixed_hooks_categories", timestamps: false },
+    { tableName: 'mixed_hooks_categories', timestamps: false }
   );
 
   const Item = sequelize.define(
-    "Item",
+    'Item',
     {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       external_id: {
@@ -33,16 +33,16 @@ async function build() {
       status: {
         type: DataTypes.STRING(20),
         allowNull: false,
-        defaultValue: "active",
+        defaultValue: 'active',
       },
       price: { type: DataTypes.DECIMAL(10, 2), allowNull: true },
     },
-    { tableName: "mixed_hooks_items", timestamps: false },
+    { tableName: 'mixed_hooks_items', timestamps: false }
   );
 
   // Set up relationships
-  Category.hasMany(Item, { foreignKey: "category_id", as: "items" });
-  Item.belongsTo(Category, { foreignKey: "category_id", as: "category" });
+  Category.hasMany(Item, { foreignKey: 'category_id', as: 'items' });
+  Item.belongsTo(Category, { foreignKey: 'category_id', as: 'category' });
 
   await sequelize.sync({ force: true });
 
@@ -51,7 +51,7 @@ async function build() {
 
   // Create operation with array hooks
   app.use(
-    "/items",
+    '/items',
     create(Item, {
       pre: [
         async (ctx) => {
@@ -62,33 +62,33 @@ async function build() {
         },
       ],
       post: async (ctx) => {
-        ctx.payload.createHook = "single-post";
+        ctx.payload.createHook = 'single-post';
       },
-    }),
+    })
   );
 
   // Update operation with mixed hooks (single pre, array post)
   app.use(
-    "/items",
+    '/items',
     update(Item, {
       pre: async (ctx) => {
         return { updateStep: 1 };
       },
       post: [
         async (ctx) => {
-          ctx.payload.updateHook1 = "mixed-post1";
+          ctx.payload.updateHook1 = 'mixed-post1';
         },
         async (ctx) => {
-          ctx.payload.updateHook2 = "mixed-post2";
+          ctx.payload.updateHook2 = 'mixed-post2';
         },
       ],
-    }),
+    })
   );
 
   return { sequelize, Item, Category, app };
 }
 
-describe("mixed hooks: single functions and arrays together", () => {
+describe('mixed hooks: single functions and arrays together', () => {
   let sequelize;
 
   afterEach(async () => {
@@ -98,87 +98,87 @@ describe("mixed hooks: single functions and arrays together", () => {
     }
   });
 
-  test("mixed hook types work together correctly", async () => {
+  test('mixed hook types work together correctly', async () => {
     const { sequelize: s, app } = await build();
     sequelize = s;
 
     // Test create with array pre hooks and single post hook
     const created = await request(app)
-      .post("/items")
-      .send({ external_id: "mixed-1", name: "MixedTest" });
+      .post('/items')
+      .send({ external_id: 'mixed-1', name: 'MixedTest' });
 
     expect(created.status).toBe(201);
     expect(created.body.success).toBe(true);
-    expect(created.body.createHook).toBe("single-post");
+    expect(created.body.createHook).toBe('single-post');
 
     const itemId = created.body.id;
 
     // Test update with single pre hook and array post hooks
     const updated = await request(app)
       .put(`/items/${itemId}`)
-      .send({ external_id: "mixed-1", name: "MixedTestUpdated" });
+      .send({ external_id: 'mixed-1', name: 'MixedTestUpdated' });
 
     expect(updated.status).toBe(200);
     expect(updated.body.success).toBe(true);
-    expect(updated.body.updateHook1).toBe("mixed-post1");
-    expect(updated.body.updateHook2).toBe("mixed-post2");
+    expect(updated.body.updateHook1).toBe('mixed-post1');
+    expect(updated.body.updateHook2).toBe('mixed-post2');
   });
 
-  test("execution order is preserved across different hook configurations", async () => {
+  test('execution order is preserved across different hook configurations', async () => {
     const { sequelize: s, app } = await build();
     sequelize = s;
 
     // Create item with array pre hooks
     const created = await request(app)
-      .post("/items")
-      .send({ external_id: "order-test", name: "OrderTest" });
+      .post('/items')
+      .send({ external_id: 'order-test', name: 'OrderTest' });
 
     expect(created.status).toBe(201);
-    expect(created.body.createHook).toBe("single-post");
+    expect(created.body.createHook).toBe('single-post');
 
     // Update with single pre and array post hooks
     const updated = await request(app)
       .put(`/items/${created.body.id}`)
-      .send({ external_id: "order-test", name: "OrderTestUpdated" });
+      .send({ external_id: 'order-test', name: 'OrderTestUpdated' });
 
     expect(updated.status).toBe(200);
-    expect(updated.body.updateHook1).toBe("mixed-post1");
-    expect(updated.body.updateHook2).toBe("mixed-post2");
+    expect(updated.body.updateHook1).toBe('mixed-post1');
+    expect(updated.body.updateHook2).toBe('mixed-post2');
   });
 
-  test("pre hooks can modify where clause to filter results", async () => {
+  test('pre hooks can modify where clause to filter results', async () => {
     const { sequelize: s, Category, Item } = await build();
     sequelize = s;
 
     // Create test data
     const category1 = await Category.create({
-      name: "Electronics",
-      description: "Electronic items",
+      name: 'Electronics',
+      description: 'Electronic items',
     });
     const category2 = await Category.create({
-      name: "Books",
-      description: "Book items",
+      name: 'Books',
+      description: 'Book items',
     });
 
     await Item.create({
-      external_id: "item1",
-      name: "Laptop",
+      external_id: 'item1',
+      name: 'Laptop',
       category_id: category1.id,
-      status: "active",
+      status: 'active',
       price: 999.99,
     });
     await Item.create({
-      external_id: "item2",
-      name: "Mouse",
+      external_id: 'item2',
+      name: 'Mouse',
       category_id: category1.id,
-      status: "inactive",
+      status: 'inactive',
       price: 29.99,
     });
     await Item.create({
-      external_id: "item3",
-      name: "Novel",
+      external_id: 'item3',
+      name: 'Novel',
       category_id: category2.id,
-      status: "active",
+      status: 'active',
       price: 25.99,
     });
 
@@ -186,14 +186,14 @@ describe("mixed hooks: single functions and arrays together", () => {
     const app = express();
     app.use(bodyParser.json());
     app.use(
-      "/items",
+      '/items',
       list(Item, {
         pre: [
           async (ctx) => {
             // First pre hook: filter by status
             ctx.req.apialize.options.where = {
               ...ctx.req.apialize.options.where,
-              status: "active",
+              status: 'active',
             };
             return { step: 1 };
           },
@@ -210,17 +210,17 @@ describe("mixed hooks: single functions and arrays together", () => {
           ctx.payload.meta.whereClauseModified = true;
           ctx.payload.meta.preResult = ctx.preResult;
         },
-      }),
+      })
     );
 
-    const response = await request(app).get("/items");
+    const response = await request(app).get('/items');
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.data).toHaveLength(2); // Only laptop and novel (active + price > 20)
     expect(response.body.data.map((item) => item.name).sort()).toEqual([
-      "Laptop",
-      "Novel",
+      'Laptop',
+      'Novel',
     ]);
     expect(response.body.meta.whereClauseModified).toBe(true);
     expect(response.body.meta.preResult).toEqual({
@@ -229,41 +229,41 @@ describe("mixed hooks: single functions and arrays together", () => {
     });
   });
 
-  test("pre hooks can modify include clause to add relations", async () => {
+  test('pre hooks can modify include clause to add relations', async () => {
     const { sequelize: s, Category, Item } = await build();
     sequelize = s;
 
     // Create test data
     const category = await Category.create({
-      name: "Electronics",
-      description: "Electronic items",
+      name: 'Electronics',
+      description: 'Electronic items',
     });
     const item = await Item.create({
-      external_id: "item-with-cat",
-      name: "Smartphone",
+      external_id: 'item-with-cat',
+      name: 'Smartphone',
       category_id: category.id,
-      status: "active",
+      status: 'active',
     });
 
     // Create separate app for this test to avoid routing conflicts
     const app = express();
     app.use(bodyParser.json());
     app.use(
-      "/items",
+      '/items',
       single(Item, {
         pre: [
           async (ctx) => {
             // First pre hook: add basic include
             ctx.req.apialize.options.include = [
-              { model: Category, as: "category" },
+              { model: Category, as: 'category' },
             ];
             return { step: 1 };
           },
           async (ctx) => {
             // Second pre hook: modify attributes for the include
             ctx.req.apialize.options.include[0].attributes = [
-              "name",
-              "description",
+              'name',
+              'description',
             ];
             return { step: 2, includeModified: true };
           },
@@ -272,32 +272,32 @@ describe("mixed hooks: single functions and arrays together", () => {
           ctx.payload.includeClauseModified = true;
           ctx.payload.preResult = ctx.preResult;
         },
-      }),
+      })
     );
 
     const response = await request(app).get(`/items/${item.id}`);
 
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
-    expect(response.body.record.name).toBe("Smartphone");
+    expect(response.body.record.name).toBe('Smartphone');
     expect(response.body.record.category).toBeDefined();
-    expect(response.body.record.category.name).toBe("Electronics");
-    expect(response.body.record.category.description).toBe("Electronic items");
+    expect(response.body.record.category.name).toBe('Electronics');
+    expect(response.body.record.category.description).toBe('Electronic items');
     expect(response.body.record.category.id).toBeUndefined(); // Should be excluded due to attributes filter
     expect(response.body.includeClauseModified).toBe(true);
     expect(response.body.preResult).toEqual({ step: 2, includeModified: true });
   });
 
-  test("pre hooks can modify attributes clause to control returned fields", async () => {
+  test('pre hooks can modify attributes clause to control returned fields', async () => {
     const { sequelize: s, Item } = await build();
     sequelize = s;
 
     // Create test data
     const item = await Item.create({
-      external_id: "attr-test",
-      name: "Test Item",
-      desc: "This is a test item",
-      status: "active",
+      external_id: 'attr-test',
+      name: 'Test Item',
+      desc: 'This is a test item',
+      status: 'active',
       price: 99.99,
     });
 
@@ -305,17 +305,17 @@ describe("mixed hooks: single functions and arrays together", () => {
     const app = express();
     app.use(bodyParser.json());
     app.use(
-      "/items",
+      '/items',
       single(Item, {
         pre: [
           async (ctx) => {
             // First pre hook: limit to basic fields
-            ctx.req.apialize.options.attributes = ["id", "name", "external_id"];
+            ctx.req.apialize.options.attributes = ['id', 'name', 'external_id'];
             return { step: 1 };
           },
           async (ctx) => {
             // Second pre hook: add one more field
-            ctx.req.apialize.options.attributes.push("status");
+            ctx.req.apialize.options.attributes.push('status');
             return { step: 2, attributesModified: true };
           },
         ],
@@ -323,7 +323,7 @@ describe("mixed hooks: single functions and arrays together", () => {
           ctx.payload.attributesClauseModified = true;
           ctx.payload.preResult = ctx.preResult;
         },
-      }),
+      })
     );
 
     const response = await request(app).get(`/items/${item.id}`);
@@ -331,9 +331,9 @@ describe("mixed hooks: single functions and arrays together", () => {
     expect(response.status).toBe(200);
     expect(response.body.success).toBe(true);
     expect(response.body.record.id).toBe(item.id);
-    expect(response.body.record.name).toBe("Test Item");
-    expect(response.body.record.external_id).toBe("attr-test");
-    expect(response.body.record.status).toBe("active");
+    expect(response.body.record.name).toBe('Test Item');
+    expect(response.body.record.external_id).toBe('attr-test');
+    expect(response.body.record.status).toBe('active');
     // These should be excluded due to attributes filter
     expect(response.body.record.desc).toBeUndefined();
     expect(response.body.record.price).toBeUndefined();

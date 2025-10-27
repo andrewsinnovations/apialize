@@ -1,36 +1,42 @@
-const { defaultNotFound } = require("./utils");
+const utils = require('./utils');
+const defaultNotFound = utils.defaultNotFound;
 
-function buildContext({ req, res, model, options, modelOptions, idMapping }) {
-  return {
-    req,
-    request: req,
-    res,
-    model,
-    options,
-    modelOptions,
-    apialize: req.apialize,
-    idMapping,
-    transaction: null,
-    preResult: undefined,
-    payload: null,
-  };
+function buildContext(params) {
+  const ctx = {};
+  ctx.req = params.req;
+  ctx.request = params.req;
+  ctx.res = params.res;
+  ctx.model = params.model;
+  ctx.options = params.options;
+  ctx.modelOptions = params.modelOptions;
+  ctx.apialize = params.req && params.req.apialize;
+  ctx.idMapping = params.idMapping;
+  ctx.transaction = null;
+  ctx.preResult = undefined;
+  ctx.payload = null;
+  return ctx;
 }
 
 function hasSequelize(model) {
   return !!(
     model &&
     model.sequelize &&
-    typeof model.sequelize.transaction === "function"
+    typeof model.sequelize.transaction === 'function'
   );
 }
 
 function optionsWithTransaction(opts, t) {
-  return t ? { ...(opts || {}), transaction: t } : opts || {};
+  if (!t) {
+    return opts || {};
+  }
+  const result = opts ? Object.assign({}, opts) : {};
+  result.transaction = t;
+  return result;
 }
 
 async function notFoundWithRollback(context) {
   const t = context && context.transaction;
-  if (t && typeof t.rollback === "function") {
+  if (t && typeof t.rollback === 'function') {
     try {
       await t.rollback();
     } catch (_) {}
@@ -43,10 +49,15 @@ async function notFoundWithRollback(context) {
 }
 
 function normalizeId(row, idMapping) {
-  if (!row || typeof row !== "object") return row;
-  if (!idMapping || idMapping === "id") return row;
+  if (!row || typeof row !== 'object') {
+    return row;
+  }
+  if (!idMapping || idMapping === 'id') {
+    return row;
+  }
   if (Object.prototype.hasOwnProperty.call(row, idMapping)) {
-    const next = { ...row, id: row[idMapping] };
+    const next = Object.assign({}, row);
+    next.id = row[idMapping];
     delete next[idMapping];
     return next;
   }
@@ -54,52 +65,57 @@ function normalizeId(row, idMapping) {
 }
 
 function normalizeRows(rows, idMapping) {
-  if (!Array.isArray(rows)) return rows;
-  return rows.map((r) => normalizeId(r, idMapping));
+  if (!Array.isArray(rows)) {
+    return rows;
+  }
+  const normalized = [];
+  for (let i = 0; i < rows.length; i += 1) {
+    normalized.push(normalizeId(rows[i], idMapping));
+  }
+  return normalized;
 }
 
-async function withTransactionAndHooks(
-  {
-    model,
-    options = {},
-    req,
-    res,
-    modelOptions = {},
-    idMapping = "id",
-    useReqOptionsTransaction = false,
-  },
-  run,
-) {
+async function withTransactionAndHooks(config, run) {
+  const model = config && config.model;
+  const req = config && config.req;
+  const res = config && config.res;
+  const options = (config && config.options) || {};
+  const modelOptions = (config && config.modelOptions) || {};
+  const idMapping = (config && config.idMapping) || 'id';
+  const useReqOptionsTransaction = !!(
+    config && config.useReqOptionsTransaction
+  );
+
   const context = buildContext({
-    req,
-    res,
-    model,
-    options,
-    modelOptions,
-    idMapping,
+    req: req,
+    res: res,
+    model: model,
+    options: options,
+    modelOptions: modelOptions,
+    idMapping: idMapping,
   });
+
   let t = null;
   if (hasSequelize(model)) {
     t = await model.sequelize.transaction();
     context.transaction = t;
-    if (useReqOptionsTransaction) {
-      req.apialize.options = {
-        ...(req.apialize.options || {}),
-        transaction: t,
-      };
+    if (useReqOptionsTransaction && req && req.apialize) {
+      if (!req.apialize.options) {
+        req.apialize.options = {};
+      }
+      req.apialize.options.transaction = t;
     }
   }
 
   try {
-    // Execute pre hooks
     if (options.pre) {
-      if (typeof options.pre === "function") {
+      if (typeof options.pre === 'function') {
         context.preResult = await options.pre(context);
       } else if (Array.isArray(options.pre)) {
-        for (const preHook of options.pre) {
-          if (typeof preHook === "function") {
+        for (let i = 0; i < options.pre.length; i += 1) {
+          const preHook = options.pre[i];
+          if (typeof preHook === 'function') {
             const result = await preHook(context);
-            // Store the result of the last pre hook
             context.preResult = result;
           }
         }
@@ -108,26 +124,26 @@ async function withTransactionAndHooks(
 
     const result = await run(context);
 
-    // Execute post hooks
     if (!context._responseSent && options.post) {
-      if (typeof options.post === "function") {
+      if (typeof options.post === 'function') {
         await options.post(context);
       } else if (Array.isArray(options.post)) {
-        for (const postHook of options.post) {
-          if (typeof postHook === "function") {
+        for (let i = 0; i < options.post.length; i += 1) {
+          const postHook = options.post[i];
+          if (typeof postHook === 'function') {
             await postHook(context);
           }
         }
       }
     }
 
-    if (!context._rolledBack && t && typeof t.commit === "function") {
+    if (!context._rolledBack && t && typeof t.commit === 'function') {
       await t.commit();
     }
 
     return result;
   } catch (err) {
-    if (t && typeof t.rollback === "function") {
+    if (t && typeof t.rollback === 'function') {
       try {
         await t.rollback();
       } catch (_) {}
@@ -137,10 +153,10 @@ async function withTransactionAndHooks(
 }
 
 module.exports = {
-  buildContext,
-  withTransactionAndHooks,
-  optionsWithTransaction,
-  notFoundWithRollback,
-  normalizeId,
-  normalizeRows,
+  buildContext: buildContext,
+  withTransactionAndHooks: withTransactionAndHooks,
+  optionsWithTransaction: optionsWithTransaction,
+  notFoundWithRollback: notFoundWithRollback,
+  normalizeId: normalizeId,
+  normalizeRows: normalizeRows,
 };

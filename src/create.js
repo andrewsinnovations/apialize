@@ -1,65 +1,97 @@
-const { express, apializeContext, ensureFn, asyncHandler } = require("./utils");
+const {
+  express,
+  apializeContext,
+  ensureFn,
+  asyncHandler,
+  filterMiddlewareFns,
+  buildHandlers,
+  getIdFromInstance,
+} = require('./utils');
 const {
   withTransactionAndHooks,
   optionsWithTransaction,
-} = require("./operationUtils");
+} = require('./operationUtils');
 
 function create(model, options = {}, modelOptions = {}) {
-  ensureFn(model, "create");
-  const {
-    middleware = [],
-    id_mapping = "id",
-    pre = null,
-    post = null,
-  } = options;
-  const inline = middleware.filter((fn) => typeof fn === "function");
-  const router = express.Router({ mergeParams: true });
-  router.post(
-    "/",
-    apializeContext,
-    ...inline,
-    asyncHandler(async (req, res) => {
-      const payload = await withTransactionAndHooks(
-        {
-          model,
-          options: { ...options, pre, post },
-          req,
-          res,
-          modelOptions,
-          idMapping: id_mapping,
-        },
-        async (context) => {
-          const createOptions = optionsWithTransaction(
-            { ...modelOptions, ...req.apialize.options },
-            context.transaction,
-          );
-          const created = await model.create(
-            req.apialize.values,
-            createOptions,
-          );
-          context.created = created;
-          let idValue;
-          if (created && typeof created.get === "function") {
-            idValue = created.get(id_mapping);
-          }
-          if (typeof idValue === "undefined") {
-            idValue =
-              (created && created[id_mapping]) ??
-              (created?.dataValues && created.dataValues[id_mapping]);
-          }
-          if (typeof idValue === "undefined") {
-            idValue = created?.id ?? created?.dataValues?.id;
-          }
+  ensureFn(model, 'create');
 
-          context.payload = { success: true, id: idValue };
-          return context.payload;
-        },
-      );
-      if (!res.headersSent) {
-        res.status(201).json(payload);
+  const middleware = Array.isArray(options && options.middleware)
+    ? options.middleware
+    : [];
+  const id_mapping =
+    typeof (options && options.id_mapping) !== 'undefined'
+      ? options.id_mapping
+      : 'id';
+  const pre =
+    typeof (options && options.pre) !== 'undefined' ? options.pre : null;
+  const post =
+    typeof (options && options.post) !== 'undefined' ? options.post : null;
+
+  const inline = filterMiddlewareFns(middleware);
+
+  const router = express.Router({ mergeParams: true });
+
+  const handlers = buildHandlers(inline, async (req, res) => {
+    const effectiveOptions = Object.assign({}, options, {
+      pre: pre,
+      post: post,
+    });
+
+    const payload = await withTransactionAndHooks(
+      {
+        model: model,
+        options: effectiveOptions,
+        req: req,
+        res: res,
+        modelOptions: modelOptions,
+        idMapping: id_mapping,
+      },
+      async function (context) {
+        const mergedCreateOptions = {};
+        if (modelOptions && typeof modelOptions === 'object') {
+          for (const key in modelOptions) {
+            if (Object.prototype.hasOwnProperty.call(modelOptions, key)) {
+              mergedCreateOptions[key] = modelOptions[key];
+            }
+          }
+        }
+        if (
+          req &&
+          req.apialize &&
+          req.apialize.options &&
+          typeof req.apialize.options === 'object'
+        ) {
+          const reqOptions = req.apialize.options;
+          for (const key in reqOptions) {
+            if (Object.prototype.hasOwnProperty.call(reqOptions, key)) {
+              mergedCreateOptions[key] = reqOptions[key];
+            }
+          }
+        }
+
+        const createOptions = optionsWithTransaction(
+          mergedCreateOptions,
+          context.transaction
+        );
+
+        const values = req && req.apialize ? req.apialize.values : undefined;
+        const created = await model.create(values, createOptions);
+        context.created = created;
+
+        const idValue = getIdFromInstance(created, id_mapping);
+
+        context.payload = { success: true, id: idValue };
+        return context.payload;
       }
-    }),
-  );
+    );
+
+    if (!res.headersSent) {
+      res.status(201).json(payload);
+    }
+  });
+
+  router.post('/', handlers);
+
   router.apialize = {};
   return router;
 }
