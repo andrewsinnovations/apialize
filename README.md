@@ -87,6 +87,7 @@ const {
   list,
   single,
   create,
+  search,
   update,
   patch,
   destroy,
@@ -98,6 +99,7 @@ Individual mounting (choose only what you need):
 
 ```js
 app.use('/widgets', create(Widget)); // POST /widgets
+app.use('/widgets', search(Widget)); // POST /widgets/search
 app.use('/widgets', list(Widget)); // GET /widgets
 app.use('/widgets', single(Widget)); // GET /widgets/:id
 app.use('/widgets', update(Widget)); // PUT /widgets/:id
@@ -113,6 +115,7 @@ app.use('/widgets', crud(Widget));
 // GET /widgets          (list)
 // GET /widgets/:id      (single)
 // POST /widgets         (create)
+// POST /widgets/search  (search)
 // PUT /widgets/:id      (update)
 // PATCH /widgets/:id    (patch)
 // DELETE /widgets/:id   (destroy)
@@ -127,6 +130,7 @@ Each helper accepts `(model, options = {}, modelOptions = {})` unless otherwise 
 - `list(model, options?, modelOptions?)`
 - `single(model, options?, modelOptions?)`
 - `create(model, options?, modelOptions?)`
+- `search(model, options?, modelOptions?)` // POST body-driven list variant
 - `update(model, options?, modelOptions?)`
 - `patch(model, options?, modelOptions?)`
 - `destroy(model, options?, modelOptions?)`
@@ -158,6 +162,8 @@ const opts = {
   routes: {
     list: [rateLimitList],
     create: [validateBody],
+    // search uses default path '/search' under crud. You can attach middleware here.
+    search: [requireRole('analyst')],
   },
 };
 app.use('/widgets', crud(Widget, opts));
@@ -222,7 +228,7 @@ Bad request (invalid filter/order column or type): `400 { success: false, error:
 
 ## 5. Filtering, pagination, ordering
 
-Every ordinary query parameter becomes a simple equality in `where` (unless already set by earlier middleware). Reserved keys are NOT turned into filters:
+Every ordinary query parameter becomes a simple equality in `where` (unless already set by earlier middleware). For string attributes, equality is case-insensitive by default (translated to `ILIKE` on Postgres, `LIKE` elsewhere without wildcards). Reserved keys are NOT turned into filters:
 
 - `api:page` – 1‑based page (default 1)
 - `api:pagesize` – page size (default 100)
@@ -267,6 +273,55 @@ Ordering examples:
 | `api:orderby=-score,name`            | score DESC then name ASC |
 | `api:orderby=-score,+name`           | score DESC then name ASC |
 
+### Filtering on included models (dotted paths)
+
+When you pass Sequelize `include` options to `list()` via the third argument (`modelOptions`) or in a pre hook, you can filter on attributes of included associations using dotted paths. apialize translates these to the `$alias.attribute$` form supported by Sequelize.
+
+Example:
+
+```js
+// Mount list on Album and include Artist under alias 'artist'
+app.use(
+  '/albums',
+  list(Album, {}, { include: [{ model: Artist, as: 'artist' }] })
+);
+
+// GET /albums?artist.name=prince
+// Default equality on string fields is case-insensitive, so this matches 'Prince'.
+
+// You can also use operators:
+// GET /albums?artist.name:ieq=PRINCE   // case-insensitive equality
+// GET /albums?artist.name:contains=inc // substring match
+```
+
+If a dotted path doesn’t match an included alias/attribute, the request returns `400 Bad request`.
+
+#### Multi-level filtering and ordering (list)
+
+You can filter and order by attributes multiple levels deep as long as the nested includes are present.
+
+```js
+// Album → Artist → Label
+app.use(
+  '/albums',
+  list(
+    Album,
+    { metaShowOrdering: true },
+    {
+      include: [
+        { model: Artist, as: 'artist', include: [{ model: Label, as: 'label' }] },
+      ],
+    }
+  )
+);
+
+// Filter: label name (case-insensitive equality by default)
+// GET /albums?artist.label.name=warner
+
+// Order: first by label name, then by artist name
+// GET /albums?api:orderby=artist.label.name,artist.name
+```
+
 Complex operators via middleware:
 
 ```js
@@ -279,6 +334,30 @@ app.use('/numbers', list(NumberModel, onlyOdd));
 ```
 
 Add your own sorting / advanced operator grammar (e.g. parse `api:sort=-created_at,name`).
+
+### List filtering operators (colon syntax)
+
+Beyond raw equality (`?field=value`), the list endpoint supports operator-style filters using the `field:operator=value` syntax. Multiple filters are implicitly ANDed.
+
+Supported operators:
+
+- Equality/inequality: `eq`, `=`, `neq`, `!=`
+- Case-insensitive equality: `ieq`
+- Comparisons: `gt`, `gte`, `lt`, `lte`
+- Sets: `in` (comma-separated), `not_in` (comma-separated)
+- Strings: `contains`, `icontains`, `starts_with`, `ends_with`, `not_contains`, `not_icontains`, `not_starts_with`, `not_ends_with`
+- Booleans: raw equality works (`?active=true`); for completeness, `is_true` and `is_false` are also accepted (e.g., `?active:is_true=true`)
+
+Examples:
+
+- `GET /items?name:icontains=display` → case-insensitive substring match
+- `GET /items?score:gte=2` → numeric comparison
+- `GET /items?category:in=A,B` → set membership (comma-separated)
+- `GET /items?name:not_icontains=auto&api:orderby=id` → excludes case-insensitive matches, ordered by id
+- `GET /items?name:starts_with=dis` → prefix match
+- `GET /items?name:ends_with=lay` → suffix match
+- `GET /items?category:not_in=tools,vehicles` → not in set
+- `GET /items?name:ieq=alpha` → case-insensitive equality (matches `Alpha` and `alpha`)
 
 ---
 
@@ -730,6 +809,165 @@ app.use(
 ```
 
 Note: The final HTTP response body is taken from `context.payload` so your `post()` hook can modify it.
+
+---
+
+## Search (body-driven filtering via POST)
+
+`search(model, options?, modelOptions?)` exposes a POST route that returns the same response shape as `list`, but accepts complex boolean filters in the request body instead of using query parameters. Mount it under a separate subpath to avoid colliding with `create` (which also uses POST):
+
+```js
+app.use('/items/search', search(Item)); // POST /items/search
+```
+
+Request body shape:
+
+```jsonc
+{
+  "filters": {
+    // implicit AND of keys when no boolean wrapper provided
+    "and": [
+      { "status": "active" },
+      {
+        "or": [{ "category": "electronics" }, { "name_contains": "display" }],
+      },
+      { "price": { "gte": 100, "lt": 500 } },
+    ],
+  },
+  "ordering": [{ "orderby": "price", "direction": "asc" }],
+  "paging": { "page": 1, "size": 50 },
+}
+```
+
+### Filtering on included models (dotted paths)
+
+When you pass Sequelize `include` options to `search()` via the third argument (`modelOptions`) or in a pre hook, you can filter on attributes of included associations using dotted paths. apialize will translate these to the `$alias.attribute$` form supported by Sequelize.
+
+Example:
+
+```js
+// Mount search on Album and include Artist under alias 'artist'
+app.use(
+  '/albums',
+  search(Album, {}, { include: [{ model: Artist, as: 'artist' }] })
+);
+
+// POST /albums/search with filters on included model
+// { "filters": { "artist.name": { "icontains": "beethoven" } } }
+```
+
+Supported operators and boolean grouping work the same as for top‑level attributes. If a dotted path doesn’t match an included alias/attribute, the request returns `400 Bad request`.
+
+#### Multi-level filtering and ordering (search)
+
+```js
+// Album → Artist → Label
+app.use(
+  '/albums',
+  search(
+    Album,
+    { metaShowOrdering: true },
+    { include: [{ model: Artist, as: 'artist', include: [{ model: Label, as: 'label' }] }] }
+  )
+);
+
+// Filter by label name (default case-insensitive equality)
+// POST /albums/search
+// { "filters": { "artist.label.name": "warner" } }
+
+// Order by label desc, then artist asc, then title asc
+// POST /albums/search
+// {
+//   "ordering": [
+//     { "orderby": "artist.label.name", "direction": "DESC" },
+//     { "orderby": "artist.name", "direction": "ASC" },
+//     { "orderby": "title", "direction": "ASC" }
+//   ]
+// }
+
+// meta.order echoes readable paths, e.g.:
+// [["artist.label.name","DESC"],["artist.name","ASC"],["title","ASC"]]
+```
+
+### Filtering operators (what you can express in filters)
+
+You can express complex filters using an operator-object form per field. Top-level keys are implicitly ANDed; provide explicit boolean arrays `and: [...]` and `or: [...]` for grouping.
+
+Operator-object form (supported keys):
+
+- Equality: `eq`, `=`
+- Inequality: `neq`, `!=`
+- Comparisons: `gt`, `>`, `gte`, `>=`, `lt`, `<`, `lte`, `<=`
+- Sets: `in`, `not_in`
+- Strings: `contains`, `icontains`, `starts_with`, `ends_with`,
+  `not_contains`, `not_icontains`, `not_starts_with`, `not_ends_with`
+- Booleans: `is_true`, `is_false` (raw equality `"active": true` is also supported)
+
+Examples (operator-object form):
+
+```jsonc
+{
+  "filters": {
+  "price": { "gte": 100, "lt": 500 },
+  "status": { "neq": "archived" },
+    "category": { "in": ["A", "B"] },
+  "name": { "icontains": "display" },
+  "title": { "not_contains": "draft" },
+  "sku": { "not_starts_with": "TMP-" },
+  "ext": { "not_ends_with": ".bak" },
+    "active": { "is_true": true }
+  }
+}
+```
+
+Boolean grouping:
+
+```jsonc
+{
+  "filters": {
+    "and": [
+      { "status": "active" },
+      {
+        "or": [
+          { "price": { "lt": 300 } },
+          { "score": { "gte": 9 } }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Multi-field substring search (OR across fields):
+
+```jsonc
+{
+  "filters": {
+    "or": [
+      { "name": { "icontains": "auto" } },
+      { "category": { "icontains": "auto" } },
+      { "external_id": { "icontains": "auto" } }
+    ]
+  }
+}
+```
+
+Notes on case-insensitivity and dialects:
+
+- On Postgres, case-insensitive matches use `iLike`; on other dialects they fall back to `LIKE` with case-insensitive behavior depending on the database (SQLite is case-insensitive for ASCII by default).
+- Equality on booleans works with raw values (e.g., `{ "active": true }`) or the explicit `is_true`/`is_false` operators.
+
+Error handling and validation:
+
+- If a filter references a non-existent column or uses a value that doesn’t match the column type, the server responds `400 { success: false, error: "Bad request" }`.
+- Invalid order columns also return `400`.
+
+Ordering and paging in search:
+
+- `ordering`: either a single object `{ orderby, direction }` or an array of them. Defaults to the same stable ordering as `list` (by `id` or your configured `id_mapping` ascending) when omitted.
+- `paging`: `{ page, size }`, both 1-based positive integers; defaults to page 1 and the operation’s `defaultPageSize`.
+
+Options align with `list` where applicable: `defaultPageSize`, `defaultOrderBy`, `defaultOrderDir`, `metaShowOrdering`, `middleware`, `pre`, `post`, and `id_mapping`. Ordering can be a single object or an array. If omitted, defaults to the same stable ordering as `list` (`id`/`id_mapping` ASC).
 
 ---
 

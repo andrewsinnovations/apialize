@@ -5,6 +5,7 @@ const create = require('./create');
 const update = require('./update');
 const patch = require('./patch');
 const destroy = require('./destroy');
+const search = require('./search');
 const { apializeContext } = require('./utils');
 
 module.exports = {
@@ -15,5 +16,6 @@ module.exports = {
   update,
   patch,
   destroy,
+  search,
   apializeContext,
 };

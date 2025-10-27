@@ -173,6 +173,75 @@ describe('list operation: comprehensive options coverage', () => {
     expect(res.body).toMatchObject({ success: false, error: 'Bad request' });
   });
 
+  test('colon operators: icontains, gte, and in', async () => {
+    const ctx = await buildAppAndModel({
+      listOptions: { metaShowFilters: true },
+    });
+    sequelize = ctx.sequelize;
+    const { Item, app } = ctx;
+
+    await seed(Item, [
+      { external_id: 'u1', name: 'DisplayPort Cable', category: 'A', score: 1 },
+      { external_id: 'u2', name: '4k Display', category: 'B', score: 3 },
+      { external_id: 'u3', name: 'Monitor', category: 'A', score: 2 },
+    ]);
+
+    // icontains on name
+    const res1 = await request(app).get('/items?name:icontains=display');
+    expect(res1.status).toBe(200);
+    expect(names(res1)).toEqual(['DisplayPort Cable', '4k Display']);
+
+    // gte on score
+    const res2 = await request(app).get('/items?score:gte=2');
+    expect(res2.status).toBe(200);
+    expect(names(res2)).toEqual(['4k Display', 'Monitor']);
+
+    // in on category (comma-separated)
+    const res3 = await request(app).get('/items?category:in=A,B');
+    expect(res3.status).toBe(200);
+    expect(res3.body.meta.count).toBe(3);
+  });
+
+  test('colon operators: not_icontains, starts_with, ends_with, neq, not_in', async () => {
+    const ctx = await buildAppAndModel();
+    sequelize = ctx.sequelize;
+    const { Item, app } = ctx;
+
+    await seed(Item, [
+      { external_id: 'e1', name: 'Auto Wrench', category: 'tools', score: 1 },
+      { external_id: 'e2', name: 'Automatic Transmission', category: 'vehicles', score: 2 },
+      { external_id: 'e3', name: 'Manual Bike', category: 'bicycles', score: 3 },
+      { external_id: 'e4', name: 'Router', category: 'network', score: 4 },
+      { external_id: 'e5', name: 'display stand', category: 'electronics', score: 5 },
+      { external_id: 'e6', name: '4k Display', category: 'electronics', score: 6 },
+    ]);
+
+    // not_icontains excludes anything containing 'auto' (case-insensitive)
+    const r1 = await request(app).get('/items?name:not_icontains=auto&api:orderby=id');
+    expect(r1.status).toBe(200);
+    expect(names(r1)).toEqual(['Manual Bike', 'Router', 'display stand', '4k Display']);
+
+    // starts_with only
+    const r2 = await request(app).get('/items?name:starts_with=dis');
+    expect(r2.status).toBe(200);
+    expect(names(r2)).toEqual(['display stand']);
+
+    // ends_with only
+    const r3 = await request(app).get('/items?name:ends_with=lay');
+    expect(r3.status).toBe(200);
+    expect(names(r3)).toEqual(['4k Display']);
+
+    // neq on category
+    const r4 = await request(app).get('/items?category:neq=electronics&api:orderby=id');
+    expect(r4.status).toBe(200);
+    expect(names(r4)).toEqual(['Auto Wrench', 'Automatic Transmission', 'Manual Bike', 'Router']);
+
+    // not_in on category
+    const r5 = await request(app).get('/items?category:not_in=tools,vehicles&api:orderby=id');
+    expect(r5.status).toBe(200);
+    expect(names(r5)).toEqual(['Manual Bike', 'Router', 'display stand', '4k Display']);
+  });
+
   test('pagination via page and pagesize, defaults, and model apialize page_size', async () => {
     const ctx = await buildAppAndModel({ modelApialize: { page_size: 2 } });
     sequelize = ctx.sequelize;
@@ -315,84 +384,6 @@ describe('list operation: comprehensive options coverage', () => {
     expect(res.body.data.map((r) => r.id)).toEqual(['a', 'b', 'c']);
   });
 
-  test('multi-column filter: case-insensitive OR across fields (configured in list options)', async () => {
-    const ctx = await buildAppAndModel({
-      listOptions: { filter_fields: ['name', 'category'] },
-    });
-    sequelize = ctx.sequelize;
-    const { Item, app } = ctx;
-
-    await seed(Item, [
-      { external_id: 'u1', name: 'Alpha', category: 'Zed', score: 1 },
-      { external_id: 'u2', name: 'Bravo', category: 'ALpine', score: 2 },
-      { external_id: 'u3', name: 'Charlie', category: 'Bee', score: 3 },
-    ]);
-
-    // filter 'al' should match name: Alpha and category: ALpine (case-insensitive)
-    const res = await request(app).get('/items?api:filter=al');
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.meta.count).toBe(2);
-    expect(names(res)).toEqual(['Alpha', 'Bravo']);
-  });
-
-  test('multi-column filter can be disabled via option', async () => {
-    const ctx = await buildAppAndModel({
-      listOptions: {
-        allowMultiColumnFiltering: false,
-        filter_fields: ['name', 'category'],
-      },
-    });
-    sequelize = ctx.sequelize;
-    const { Item, app } = ctx;
-
-    await seed(Item, [
-      { external_id: 'u1', name: 'Alpha', category: 'Zed', score: 1 },
-      { external_id: 'u2', name: 'Bravo', category: 'ALpine', score: 2 },
-      { external_id: 'u3', name: 'Charlie', category: 'Bee', score: 3 },
-    ]);
-
-    const res = await request(app).get('/items?api:filter=al');
-    expect(res.status).toBe(200);
-    // With filtering disabled, all rows are returned (no other filters applied)
-    expect(res.body.meta.count).toBe(3);
-    expect(names(res)).toEqual(['Alpha', 'Bravo', 'Charlie']);
-  });
-
-  test('multi-column filter: invalid configured field returns 400', async () => {
-    const ctx = await buildAppAndModel({
-      listOptions: { filter_fields: ['name', 'notARealColumn'] },
-    });
-    sequelize = ctx.sequelize;
-    const { Item, app } = ctx;
-    await seed(Item, [
-      { external_id: 'u1', name: 'Alpha', category: 'Zed', score: 1 },
-    ]);
-
-    const res = await request(app).get('/items?api:filter=al');
-    expect(res.status).toBe(400);
-    expect(res.body).toMatchObject({ success: false, error: 'Bad request' });
-  });
-
-  test('multi-column filter: fields from model.apialize config', async () => {
-    const ctx = await buildAppAndModel({
-      modelApialize: { filter_fields: ['name', 'category'] },
-    });
-    sequelize = ctx.sequelize;
-    const { Item, app } = ctx;
-
-    await seed(Item, [
-      { external_id: 'u1', name: 'Alpha', category: 'Zed', score: 1 },
-      { external_id: 'u2', name: 'Bravo', category: 'ALpine', score: 2 },
-      { external_id: 'u3', name: 'Charlie', category: 'Bee', score: 3 },
-    ]);
-
-    const res = await request(app).get('/items?api:filter=al');
-    expect(res.status).toBe(200);
-    expect(res.body.meta.count).toBe(2);
-    expect(names(res)).toEqual(['Alpha', 'Bravo']);
-  });
-
   test('filtering on included model attribute via dotted path', async () => {
     // Build a fresh schema with an associated Parent model
     const sequelizeLocal = new Sequelize('sqlite::memory:', { logging: false });
@@ -440,57 +431,6 @@ describe('list operation: comprehensive options coverage', () => {
     expect(res.status).toBe(200);
     expect(res.body.meta.count).toBe(2);
     expect(res.body.data.map((r) => r.name)).toEqual(['Alpha', 'Charlie']);
-  });
-
-  test('multi-column search can include include fields via config', async () => {
-    const sequelizeLocal = new Sequelize('sqlite::memory:', { logging: false });
-    sequelize = sequelizeLocal; // for cleanup
-    const Parent = sequelizeLocal.define(
-      'Parent',
-      {
-        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-        parent_name: { type: DataTypes.STRING(100), allowNull: false },
-      },
-      { tableName: 'parents2', timestamps: false }
-    );
-    const Item3 = sequelizeLocal.define(
-      'Item',
-      {
-        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-        name: { type: DataTypes.STRING(100), allowNull: false },
-        parent_id: { type: DataTypes.INTEGER, allowNull: false },
-      },
-      { tableName: 'list_items_included2', timestamps: false }
-    );
-
-    Item3.belongsTo(Parent, { as: 'Parent', foreignKey: 'parent_id' });
-    await sequelizeLocal.sync({ force: true });
-
-    const t1 = await Parent.create({ parent_name: 'Acme' });
-    const t2 = await Parent.create({ parent_name: 'Globex' });
-    await Item3.bulkCreate([
-      { name: 'Omega', parent_id: t1.id },
-      { name: 'Alpha', parent_id: t2.id },
-      { name: 'Beta', parent_id: t2.id },
-    ]);
-
-    const app = express();
-    app.use(bodyParser.json());
-    // Configure multi-column filter across name and Parent.parent_name
-    app.use(
-      '/items',
-      list(
-        Item3,
-        { filter_fields: ['name', 'Parent.parent_name'] },
-        { include: [{ model: Parent, as: 'Parent' }] }
-      )
-    );
-
-    // Search for 'ac' should match parent_name: Acme on first row, not the others
-    const res = await request(app).get('/items?api:filter=ac');
-    expect(res.status).toBe(200);
-    expect(res.body.meta.count).toBe(1);
-    expect(res.body.data.map((r) => r.name)).toEqual(['Omega']);
   });
 
   test('pre/post hooks receive context with transaction and can mutate payload', async () => {

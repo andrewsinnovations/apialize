@@ -35,8 +35,8 @@ function apializeContext(req, res, next) {
         key === 'api:pagesize' ||
         key === 'api:orderby' ||
         key === 'api:orderdir' ||
-        key === 'api:filter' ||
-        key.indexOf('.') !== -1
+        key.indexOf('.') !== -1 ||
+        key.indexOf(':') !== -1
       ) {
         continue;
       }
