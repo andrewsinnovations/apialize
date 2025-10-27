@@ -82,6 +82,11 @@ function apializeContext(req, res, next) {
   }
   apialize.options = options;
   apialize.values = values;
+  // Preserve the raw request body separately for operations that need
+  // access to the unmerged payload (e.g., batch create with array bodies).
+  if (req && typeof req.body !== 'undefined') {
+    apialize.body = req.body;
+  }
 
   req.apialize = apialize;
   next();
@@ -144,8 +149,11 @@ function getOwnershipWhere(req) {
 
 function getProvidedValues(req) {
   if (req && req.apialize) {
-    if (req.apialize.body) return req.apialize.body;
-    if (req.apialize.values) return req.apialize.values;
+    // Prefer middleware-merged values when available; fall back to raw body
+    if (req.apialize.values && typeof req.apialize.values === 'object') {
+      return req.apialize.values;
+    }
+    if (typeof req.apialize.body !== 'undefined') return req.apialize.body;
   }
   if (req && req.body) return req.body;
   return {};

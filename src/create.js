@@ -18,6 +18,12 @@ function create(model, options = {}, modelOptions = {}) {
   const middleware = Array.isArray(options && options.middleware)
     ? options.middleware
     : [];
+  const allow_bulk_create = Object.prototype.hasOwnProperty.call(
+    options || {},
+    'allow_bulk_create'
+  )
+    ? !!options.allow_bulk_create
+    : false;
   const id_mapping =
     typeof (options && options.id_mapping) !== 'undefined'
       ? options.id_mapping
@@ -32,6 +38,12 @@ function create(model, options = {}, modelOptions = {}) {
   const router = express.Router({ mergeParams: true });
 
   const handlers = buildHandlers(inline, async (req, res) => {
+    const rawBody = req && req.body;
+    if (Array.isArray(rawBody) && !allow_bulk_create) {
+      return res
+        .status(400)
+        .json({ success: false, error: 'Cannot insert multiple records.' });
+    }
     const effectiveOptions = Object.assign({}, options, {
       pre: pre,
       post: post,
@@ -73,6 +85,41 @@ function create(model, options = {}, modelOptions = {}) {
           mergedCreateOptions,
           context.transaction
         );
+        // Array body -> bulk create in a single transaction
+        const rawBody = req && req.body;
+        if (Array.isArray(rawBody)) {
+          // Ensure bulkCreate is available only when needed
+          ensureFn(model, 'bulkCreate');
+          const bulkOptions = Object.assign({}, createOptions, {
+            returning: true,
+            validate: true,
+            individualHooks: true,
+          });
+          const createdArray = await model.bulkCreate(rawBody, bulkOptions);
+
+          const out = createdArray.map((inst) =>
+            inst && typeof inst.get === 'function'
+              ? inst.get({ plain: true })
+              : inst
+          );
+
+          if (id_mapping && id_mapping !== 'id') {
+            for (let i = 0; i < out.length; i += 1) {
+              const row = out[i];
+              if (
+                row &&
+                Object.prototype.hasOwnProperty.call(row, id_mapping) &&
+                typeof row[id_mapping] !== 'undefined'
+              ) {
+                row.id = row[id_mapping];
+              }
+            }
+          }
+
+          context.created = createdArray;
+          context.payload = out;
+          return context.payload;
+        }
 
         const values = req && req.apialize ? req.apialize.values : undefined;
         const created = await model.create(values, createOptions);

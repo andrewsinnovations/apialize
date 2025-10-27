@@ -163,6 +163,15 @@ const opts = {
 app.use('/widgets', crud(Widget, opts));
 ```
 
+### Create options
+
+The `create(model, options?, modelOptions?)` helper also supports:
+
+- `allow_bulk_create` (boolean, default `false`)
+  - When the request body is an array and this flag is `true`, `create` will insert all records in a single transaction using the model's `bulkCreate` and return an array of created objects.
+  - When `false` (the default) and the request body is an array, the request is rejected with `400 { success: false, error: "Bulk create disabled" }`.
+  - Identifier mapping is respected for array responses: if `id_mapping` is set (e.g., `'external_id'`), each returned object will also have `id` set to that mapped value.
+
 ### Identifier mapping
 
 apialize assumes your public identifier is an `id` column. For record operations (`single`, `update`, `patch`, `destroy`), customize which field the URL parameter maps to using `id_mapping`:
@@ -1052,8 +1061,6 @@ For internal consistency and to reduce repetition across operations, a few share
 - `getIdFromInstance(instance, idMapping)` – extracts the exposed identifier from a Sequelize instance or plain object.
 
 These are used by `create`, `update`, `patch`, and `destroy` to keep implementation small and consistent. When adding new operations, prefer these utilities to replicate the common patterns.
-
-## License
 
 ## License
 
