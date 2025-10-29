@@ -344,4 +344,42 @@ describe('mixed hooks: single functions and arrays together', () => {
       attributesModified: true,
     });
   });
+
+  test('single post hook mutations persist in returned payload', async () => {
+    const { sequelize: s, Item } = await build();
+    sequelize = s;
+
+    // Seed one item
+    const item = await Item.create({
+      external_id: 'mut-payload',
+      name: 'Original Name',
+      status: 'active',
+    });
+
+    // New app with single route whose post hook mutates the payload
+    const app = express();
+    app.use(bodyParser.json());
+    app.use(
+      '/items',
+      single(Item, {
+        post: async (ctx) => {
+          // mutate nested record and add a top-level field
+          if (ctx && ctx.payload && ctx.payload.record) {
+            ctx.payload.record.name = 'Name From Post Hook';
+            ctx.payload.record.extra = 'added-by-hook';
+          }
+          ctx.payload.mutated = true;
+        },
+      })
+    );
+
+    const res = await request(app).get(`/items/${item.id}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    // Ensure the mutation happened on the same payload object that is returned
+    expect(res.body.record.name).toBe('Name From Post Hook');
+    expect(res.body.record.extra).toBe('added-by-hook');
+    expect(res.body.mutated).toBe(true);
+  });
 });

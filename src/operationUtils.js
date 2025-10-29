@@ -122,7 +122,7 @@ async function withTransactionAndHooks(config, run) {
       }
     }
 
-    const result = await run(context);
+  const result = await run(context);
 
     if (!context._responseSent && options.post) {
       if (typeof options.post === 'function') {
@@ -141,7 +141,10 @@ async function withTransactionAndHooks(config, run) {
       await t.commit();
     }
 
-    return result;
+    // Always return the latest payload from context when available so that
+    // post hooks that replace or mutate context.payload are reflected in the
+    // final response. Fall back to the original result when no payload exists.
+    return typeof context.payload !== 'undefined' ? context.payload : result;
   } catch (err) {
     if (t && typeof t.rollback === 'function') {
       try {
