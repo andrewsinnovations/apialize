@@ -52,7 +52,6 @@ describe('create operation: comprehensive options coverage', () => {
 
   test('default id mapping returns numeric id, respects middleware value overrides, and modelOptions (attributes)', async () => {
     const prependDesc = (req, _res, next) => {
-      req.apialize = req.apialize || {};
       req.apialize.values = {
         ...(req.apialize.values || {}),
         desc: `mdw-` + (req.apialize.values.desc || ''),
@@ -97,7 +96,6 @@ describe('create operation: comprehensive options coverage', () => {
 
   test('middleware can enforce parent scoping on create via options merger', async () => {
     const scope = (req, _res, next) => {
-      req.apialize = req.apialize || {};
       req.apialize.options = {
         ...(req.apialize.options || {}),
         where: { parent_id: 7 },

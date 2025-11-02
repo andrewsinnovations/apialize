@@ -1,4 +1,5 @@
 const utils = require('./utils');
+const { createHelpers } = require('./contextHelpers');
 const defaultNotFound = utils.defaultNotFound;
 
 function buildContext(params) {
@@ -14,6 +15,22 @@ function buildContext(params) {
   ctx.transaction = null;
   ctx.preResult = undefined;
   ctx.payload = null;
+  
+  // Enhance req.apialize with model-aware helper functions if model is available
+  if (params.model && params.req && params.req.apialize) {
+    const helpers = createHelpers(params.req, params.model);
+    // Update the helper functions with model support
+    Object.assign(params.req.apialize, helpers);
+    
+    // Also add helper functions directly to context for convenience
+    Object.assign(ctx, helpers);
+  } else if (params.req && params.req.apialize) {
+    // Add basic helpers (without model-dependent functions) to context
+    const helpers = createHelpers(params.req);
+    Object.assign(params.req.apialize, helpers);
+    Object.assign(ctx, helpers);
+  }
+  
   return ctx;
 }
 

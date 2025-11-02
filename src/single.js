@@ -226,10 +226,13 @@ function setupRelatedEndpoints(
     }
 
     if (operations.indexOf('get') !== -1) {
-      const { options: getOptions, modelOptions: getModelOptions } =
+      const { options: getOptions, modelOptions: getModelOptions, id_mapping: relatedIdMapping } =
         resolveOpConfig('get');
       const childSingleOptions = Object.assign({}, getOptions);
-      childSingleOptions.param_name = 'relatedId';
+      // Use a parameter name that matches the actual URL parameter for this model
+      const relatedParamName = relatedModel.name.toLowerCase() + 'Id';
+      childSingleOptions.param_name = relatedParamName;
+      childSingleOptions.id_mapping = relatedIdMapping;
       childSingleOptions.related = Array.isArray(relatedConfig.related)
         ? relatedConfig.related
         : [];
@@ -239,7 +242,13 @@ function setupRelatedEndpoints(
         getModelOptions
       );
       const nested = express.Router({ mergeParams: true });
-      nested.use('/', storeParentIdMiddleware, childSingleRouter);
+      // Create a custom store parent middleware that uses the correct parameter name
+      const storeRelatedParentIdMiddleware = function (req, _res, next) {
+        req.apialize = req.apialize || {};
+        req.apialize.parentId = req.params[relatedParamName];
+        next();
+      };
+      nested.use('/', storeRelatedParentIdMiddleware, childSingleRouter);
       relatedRouter.use('/', nested);
     }
 

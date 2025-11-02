@@ -1,4 +1,5 @@
 const express = require('express');
+const { createHelpers } = require('./contextHelpers');
 
 function apializeContext(req, res, next) {
   const existing =
@@ -87,6 +88,10 @@ function apializeContext(req, res, next) {
   if (req && typeof req.body !== 'undefined') {
     apialize.body = req.body;
   }
+
+  // Add helper functions to apialize object (without model for now)
+  const helpers = createHelpers(req);
+  Object.assign(apialize, helpers);
 
   req.apialize = apialize;
   next();

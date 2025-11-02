@@ -147,16 +147,10 @@ describe('patch operation: comprehensive options coverage', () => {
 
   test('middleware can enforce parent scoping and modify values', async () => {
     const scope = (req, _res, next) => {
-      req.apialize = req.apialize || {};
-      req.apialize.options = req.apialize.options || {};
-      req.apialize.options.where = {
-        ...(req.apialize.options.where || {}),
-        parent_id: 8,
-      };
+      req.apialize.applyWhere({ parent_id: 8 });
       next();
     };
     const override = (req, _res, next) => {
-      req.apialize = req.apialize || {};
       req.apialize.values = { ...(req.apialize.values || {}), desc: 'locked' };
       next();
     };

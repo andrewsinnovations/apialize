@@ -191,18 +191,12 @@ describe('mixed hooks: single functions and arrays together', () => {
         pre: [
           async (ctx) => {
             // First pre hook: filter by status
-            ctx.req.apialize.options.where = {
-              ...ctx.req.apialize.options.where,
-              status: 'active',
-            };
+            ctx.applyWhere({ status: 'active' });
             return { step: 1 };
           },
           async (ctx) => {
             // Second pre hook: further filter by price > 20
-            ctx.req.apialize.options.where = {
-              ...ctx.req.apialize.options.where,
-              price: { [Op.gt]: 20 },
-            };
+            ctx.applyWhere({ price: { [Op.gt]: 20 } });
             return { step: 2, whereModified: true };
           },
         ],

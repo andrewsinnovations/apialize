@@ -181,12 +181,7 @@ describe('update operation: comprehensive options coverage', () => {
 
   test('middleware can enforce parent scoping via req.apialize.options.where (preserve scoped fields)', async () => {
     const parentMiddleware = (req, _res, next) => {
-      req.apialize = req.apialize || {};
-      req.apialize.options = req.apialize.options || {};
-      req.apialize.options.where = {
-        ...(req.apialize.options.where || {}),
-        parent_id: 123,
-      };
+      req.apialize.applyWhere({ parent_id: 123 });
       next();
     };
 
@@ -220,7 +215,6 @@ describe('update operation: comprehensive options coverage', () => {
 
   test('middleware can modify values prior to update (category locked)', async () => {
     const lockCategory = (req, _res, next) => {
-      req.apialize = req.apialize || {};
       req.apialize.values = {
         ...(req.apialize.values || {}),
         category: 'locked',

@@ -369,7 +369,7 @@ You can attach middleware at three levels:
 2. Per operation (via `crud` `routes.<op>` arrays)
 3. Inline for a single helper (`list(Model, auth, audit)`)
 
-All middleware run after an internal context initializer (`apializeContext`) which ensures `req.apialize` exists and merges query/body.
+All middleware run after the library automatically initializes `req.apialize` and merges query/body data.
 
 `req.apialize` structure:
 
@@ -523,14 +523,266 @@ The context object provides access to request data, model, options, and more:
   appliedFilters,        // (list) filters derived from query
   existing,              // (update/patch) loaded record before save
   nextValues,            // (update/patch) values to be saved
+
+  // Helper functions (available directly on context for convenience)
+  applyWhere,            // Apply where conditions (overwrites existing keys)
+  applyScope,            // Apply Sequelize scopes (when model available)
+  applyMultipleWhere,    // Apply multiple where conditions at once
+  applyWhereIfNotExists, // Apply conditions only if they don't exist
+  applyScopes,           // Apply multiple scopes in sequence (when model available)
+  removeWhere,           // Remove specific where conditions
+  replaceWhere,          // Replace entire where clause
 }
+```
+
+### Context Helper Functions
+
+The context object in pre/post hooks includes built-in helper functions for convenience. These same functions are also available on `req.apialize` for use in middleware:
+
+#### `context.applyWhere(additionalWhere)` | `req.apialize.applyWhere(additionalWhere)`
+
+Apply additional where conditions to the existing where clause. New conditions overwrite existing conditions for the same keys:
+
+```js
+// In pre/post hooks
+app.use('/items', list(Item, {
+  pre: async (context) => {
+    // Simple where conditions - use context directly for convenience
+    context.applyWhere({ 
+      tenant_id: context.req.user.tenantId,
+      status: 'active'
+    });
+    
+    // With Sequelize operators
+    const { Op } = require('sequelize');
+    context.applyWhere({
+      price: { [Op.gt]: 0 },
+      created_at: { [Op.gte]: new Date('2024-01-01') }
+    });
+    
+    // Later calls overwrite earlier ones for the same keys
+    context.applyWhere({ status: 'published' }); // status becomes 'published'
+    
+    return { tenantFiltered: true };
+  }
+}));
+
+// In middleware (req.apialize helpers are automatically available)
+const tenantMiddleware = (req, res, next) => {
+  req.apialize.applyWhere({ tenant_id: req.user.tenantId });
+  next();
+};
+
+app.use('/items', list(Item, {
+  middleware: [tenantMiddleware]
+}));
+```
+
+**Behavior:**
+- Last condition wins for the same key
+- Simple and predictable overwrite behavior
+- Available in middleware, pre hooks, and post hooks
+- For complex AND logic, build the condition explicitly:
+
+```js
+// Instead of multiple calls, build complex conditions explicitly
+req.apialize.applyWhere({ 
+  [Op.and]: [
+    { price: { [Op.gte]: 100 } },
+    { price: { [Op.lte]: 500 } },
+    { category: 'electronics' }
+  ]
+});
+```
+
+#### `context.applyScope(scope, ...args)` | `req.apialize.applyScope(scope, ...args)`
+
+Apply Sequelize scopes to modify query options (only available when model is present):
+
+```js
+// Define scopes in your model
+Item.addScope('byTenant', (tenantId) => ({
+  where: { tenant_id: tenantId }
+}));
+
+Item.addScope('activeOnly', {
+  where: { status: 'active' }
+});
+
+// Use in pre hooks
+app.use('/items', list(Item, {
+  pre: async (context) => {
+    // Apply parameterized scope - use context directly
+    context.applyScope('byTenant', context.req.user.tenantId);
+    
+    // Apply simple scope
+    context.applyScope('activeOnly');
+    
+    return { scopesApplied: true };
+  }
+}));
+```
+
+#### `context.applyWhereIfNotExists(conditionalWhere)`
+
+Apply where conditions only if they don't already exist:
+
+```js
+app.use('/items', list(Item, {
+  pre: async (context) => {
+    // Always apply tenant filtering
+    context.applyWhere({ tenant_id: context.req.user.tenantId });
+    
+    // Only apply default status if user hasn't specified one
+    context.applyWhereIfNotExists({ status: 'active' });
+    
+    return { conditionalFiltersApplied: true };
+  }
+}));
+```
+
+#### `context.applyMultipleWhere(whereConditions)`
+
+Apply multiple where conditions at once:
+
+```js
+app.use('/items', list(Item, {
+  pre: async (context) => {
+    const conditions = [
+      { tenant_id: context.req.user.tenantId },
+      { status: 'active' },
+      { price: { [Op.gt]: 0 } }
+    ];
+    
+    context.applyMultipleWhere(conditions);
+    
+    return { multipleFiltersApplied: true };
+  }
+}));
+```
+
+#### `context.applyScopes(scopes)`
+
+Apply multiple scopes in sequence:
+
+```js
+app.use('/items', list(Item, {
+  pre: async (context) => {
+    const scopes = [
+      'activeOnly',
+      { name: 'byTenant', args: [context.req.user.tenantId] },
+      'withCategory'
+    ];
+    
+    context.applyScopes(scopes);
+    
+    return { multipleScopesApplied: true };
+  }
+}));
+```
+
+#### `context.removeWhere(keysToRemove)` & `context.replaceWhere(newWhere)`
+
+Remove or replace where conditions:
+
+```js
+app.use('/items', list(Item, {
+  pre: async (context) => {
+    // Add base conditions
+    context.applyWhere({ 
+      tenant_id: context.req.user.tenantId,
+      status: 'active'
+    });
+    
+    // Remove status filter for admin users
+    if (context.req.user.role === 'admin') {
+      context.removeWhere('status');
+    }
+    
+    // Or completely replace where clause
+    if (context.req.user.role === 'superadmin') {
+      context.replaceWhere({}); // See everything
+    }
+    
+    return { adminAccess: true };
+  }
+}));
+```
+
+#### Multi-tenant Example with Helper Functions
+
+```js
+app.use('/items', crud(Item, {
+  routes: {
+    list: {
+      pre: async (context) => {
+        const user = context.req.user;
+        
+        // Base tenant isolation (always applied)
+        context.applyScope('byTenant', user.tenantId);
+        
+        // Role-based filtering
+        switch (user.role) {
+          case 'admin':
+            // Admin sees all items in tenant
+            break;
+            
+          case 'manager':
+            // Manager sees department items
+            context.applyScope('byDepartment', user.departmentId);
+            break;
+            
+          case 'user':
+            // User sees only their own items
+            context.applyWhere({ created_by: user.id });
+            break;
+        }
+        
+        // Apply common filters
+        context.applyScope('activeOnly');
+        
+        // Handle special query parameters
+        if (context.req.query.archived === 'true') {
+          context.removeWhere('status');
+          context.applyWhere({ archived_at: { [Op.not]: null } });
+        }
+        
+        return { 
+          tenantId: user.tenantId,
+          role: user.role,
+          filtersApplied: true 
+        };
+      }
+    },
+    
+    create: {
+      pre: async (context) => {
+        const user = context.req.user;
+        
+        // Auto-inject tenant and user info
+        if (!context.req.apialize.values) {
+          context.req.apialize.values = {};
+        }
+        
+        Object.assign(context.req.apialize.values, {
+          tenant_id: user.tenantId,
+          created_by: user.id,
+          department_id: user.departmentId,
+          status: 'active'
+        });
+        
+        return { autoFieldsInjected: true };
+      }
+    }
+  }
+}));
 ```
 
 ### Query Control in Pre Hooks
 
-Pre hooks can dynamically modify database queries by manipulating `ctx.apialize.options`:
+Pre hooks can dynamically modify database queries either by using the built-in helper functions (recommended) or by directly manipulating `ctx.apialize.options`:
 
-#### Controlling WHERE Clauses
+#### Controlling WHERE Clauses (Recommended: Helper Functions)
 
 ```js
 app.use(
@@ -538,7 +790,33 @@ app.use(
   list(Item, {
     pre: [
       async (ctx) => {
-        // Add tenant filtering
+        // Using helper functions (recommended)
+        ctx.applyWhere({ tenant_id: ctx.req.user.tenant_id });
+        return { step: 1 };
+      },
+      async (ctx) => {
+        // Apply multiple conditions with operators
+        const { Op } = require('sequelize');
+        ctx.applyWhere({
+          status: 'active',
+          price: { [Op.gt]: 0 }
+        });
+        return { step: 2 };
+      },
+    ],
+  })
+);
+```
+
+#### Controlling WHERE Clauses (Manual Approach)
+
+```js
+app.use(
+  '/items',
+  list(Item, {
+    pre: [
+      async (ctx) => {
+        // Manual manipulation (still supported)
         ctx.apialize.options.where.tenant_id = ctx.req.user.tenant_id;
         return { step: 1 };
       },
@@ -1293,7 +1571,7 @@ Notes:
 For internal consistency and to reduce repetition across operations, a few shared helpers live in `src/utils.js`:
 
 - `filterMiddlewareFns(middleware)` – filters any non-function entries out of middleware arrays.
-- `buildHandlers(middleware, handler)` – composes the standard chain `[apializeContext, ...middleware, asyncHandler(handler)]` used by route helpers.
+- `buildHandlers(middleware, handler)` – composes the standard middleware chain with request context initialization and error handling.
 - `getProvidedValues(req)` – resolves input precedence for writes: `req.apialize.body` → `req.apialize.values` → `req.body` → `{}`.
 - `getOwnershipWhere(req)` – pulls `req.apialize.options.where` or `{}`.
 - `getIdFromInstance(instance, idMapping)` – extracts the exposed identifier from a Sequelize instance or plain object.

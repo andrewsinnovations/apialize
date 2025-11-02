@@ -91,7 +91,7 @@ describe('multi-user ownership with default numeric id (bearer auth)', () => {
       if (!session) return res.status(401).json({ error: 'Unauthorized' });
       const userId = session.user_id;
 
-      req.apialize.options.where.user_id = userId;
+      req.apialize.applyWhere({ user_id: userId });
       if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
         req.body.user_id = userId;
         req.apialize.values = {

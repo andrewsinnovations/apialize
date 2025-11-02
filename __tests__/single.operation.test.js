@@ -117,12 +117,7 @@ describe('single operation: comprehensive options coverage', () => {
 
   test('middleware modifies context before read (inject filter)', async () => {
     const scope = (req, _res, next) => {
-      req.apialize = req.apialize || {};
-      req.apialize.options = req.apialize.options || {};
-      req.apialize.options.where = {
-        ...(req.apialize.options.where || {}),
-        parent_id: 5,
-      };
+      req.apialize.applyWhere({ parent_id: 5 });
       next();
     };
     const { sequelize: s, app } = await build({
