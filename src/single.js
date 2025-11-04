@@ -414,26 +414,6 @@ function single(model, options = {}, modelOptions = {}) {
     apializeContext,
     ...inline,
     asyncHandler(async (req, res) => {
-      const paramValue = req.params[param_name];
-      req.apialize.id = paramValue;
-      if (!req.apialize.where) req.apialize.where = {};
-      if (typeof req.apialize.where[id_mapping] === 'undefined')
-        req.apialize.where[id_mapping] = paramValue;
-      req.apialize.options = Object.assign(
-        {},
-        modelOptions,
-        req.apialize.options || {}
-      );
-      const modelWhere = (modelOptions && modelOptions.where) || {};
-      const reqOptionsWhere =
-        (req.apialize.options && req.apialize.options.where) || {};
-      const fullWhere = Object.assign(
-        {},
-        modelWhere,
-        reqOptionsWhere,
-        req.apialize.where
-      );
-      req.apialize.options.where = fullWhere;
       const payload = await withTransactionAndHooks(
         {
           model,
@@ -445,6 +425,28 @@ function single(model, options = {}, modelOptions = {}) {
           useReqOptionsTransaction: true,
         },
         async (context) => {
+          // Setup query parameters after pre-hooks (so pre-hooks can modify them)
+          const paramValue = req.params[param_name];
+          req.apialize.id = paramValue;
+          if (!req.apialize.where) req.apialize.where = {};
+          if (typeof req.apialize.where[id_mapping] === 'undefined')
+            req.apialize.where[id_mapping] = paramValue;
+          req.apialize.options = Object.assign(
+            {},
+            modelOptions,
+            req.apialize.options || {}
+          );
+          const modelWhere = (modelOptions && modelOptions.where) || {};
+          const reqOptionsWhere =
+            (req.apialize.options && req.apialize.options.where) || {};
+          const fullWhere = Object.assign(
+            {},
+            modelWhere,
+            reqOptionsWhere,
+            req.apialize.where
+          );
+          req.apialize.options.where = fullWhere;
+
           const result = await model.findOne(req.apialize.options);
           if (result == null) {
             return notFoundWithRollback(context);

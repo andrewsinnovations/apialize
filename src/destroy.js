@@ -34,9 +34,6 @@ function destroy(model, options = {}, modelOptions = {}) {
   const router = express.Router({ mergeParams: true });
 
   const handleDestroy = asyncHandler(async function handleDestroy(req, res) {
-    const id = req.params.id;
-    const ownershipWhere = getOwnershipWhere(req);
-
     const hookOptions = Object.assign({}, options, { pre: pre, post: post });
 
     const payload = await withTransactionAndHooks(
@@ -49,6 +46,10 @@ function destroy(model, options = {}, modelOptions = {}) {
         idMapping: id_mapping,
       },
       async function (context) {
+        // Extract ID and ownership after pre-hooks (so pre-hooks can modify them)
+        const id = req.params.id;
+        const ownershipWhere = getOwnershipWhere(req);
+        
         const where = Object.assign({}, ownershipWhere);
         where[id_mapping] = id;
 

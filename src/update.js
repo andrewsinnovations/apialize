@@ -27,12 +27,6 @@ function update(model, options = {}, modelOptions = {}) {
   const inline = filterMiddlewareFns(middleware);
   const router = express.Router({ mergeParams: true });
   const handlers = buildHandlers(inline, async function (req, res) {
-    const id = req.params.id;
-
-    const provided = getProvidedValues(req);
-
-    const ownershipWhere = getOwnershipWhere(req);
-
     const combinedOptions = Object.assign({}, options, { pre, post });
 
     const payload = await withTransactionAndHooks(
@@ -45,6 +39,11 @@ function update(model, options = {}, modelOptions = {}) {
         idMapping: id_mapping,
       },
       async (context) => {
+        // Extract data after pre-hooks (so pre-hooks can modify them)
+        const id = req.params.id;
+        const provided = getProvidedValues(req);
+        const ownershipWhere = getOwnershipWhere(req);
+        
         const where = Object.assign({}, ownershipWhere);
         where[id_mapping] = id;
         const findModelOptions = Object.assign({}, modelOptions, { where });

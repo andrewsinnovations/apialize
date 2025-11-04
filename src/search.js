@@ -327,42 +327,6 @@ function search(model, options = {}, modelOptions = {}) {
 
       // Build where with Op from the model's Sequelize
       const Op = getSequelizeOp(model);
-      const includes =
-        (req && req.apialize && req.apialize.options && req.apialize.options.include) || [];
-      const whereTree = buildWhere(model, filters || {}, Op, includes);
-      if (whereTree && whereTree.__error) {
-        return res.status(400).json({ success: false, error: 'Bad request' });
-      }
-      // Use Reflect.ownKeys so we don't drop symbol-keyed operators like Op.or
-      if (Reflect.ownKeys(whereTree).length) {
-        req.apialize.options.where = Object.assign(
-          {},
-          req.apialize.options.where || {},
-          whereTree
-        );
-      }
-
-      // Paging
-      let page = parseInt(paging.page, 10);
-      if (isNaN(page) || page < 1) page = 1;
-      let pageSize = parseInt(paging.size, 10);
-      if (isNaN(pageSize) || pageSize < 1) pageSize = defaultPageSize;
-      req.apialize.options.limit = pageSize;
-      req.apialize.options.offset = (page - 1) * pageSize;
-
-      // Ordering
-      const orderArr = buildOrdering(
-        model,
-        ordering,
-        defaultOrderBy,
-        defaultOrderDir,
-        idMapping,
-        includes
-      );
-      if (orderArr && orderArr.error) {
-        return res.status(400).json({ success: false, error: 'Bad request' });
-      }
-      req.apialize.options.order = orderArr;
 
       const payload = await withTransactionAndHooks(
         {
@@ -375,6 +339,58 @@ function search(model, options = {}, modelOptions = {}) {
           useReqOptionsTransaction: true,
         },
         async (context) => {
+          // Paging (after pre-hooks so they can modify pagination)
+          let page = parseInt(paging.page, 10);
+          if (isNaN(page) || page < 1) page = 1;
+          let pageSize = parseInt(paging.size ?? paging.page_size, 10);
+          if (isNaN(pageSize) || pageSize < 1) pageSize = defaultPageSize;
+          req.apialize.options.limit = pageSize;
+          req.apialize.options.offset = (page - 1) * pageSize;
+
+          // Get includes from current req.apialize.options and any model scope state
+          // This runs after pre-hooks, ensuring we see any scoped includes applied in hooks
+          let includes = req.apialize.options.include || [];
+          
+          // If model has scoped includes that aren't in req.apialize.options, merge them
+          if (model && model._scope && model._scope.include) {
+            const scopeIncludes = Array.isArray(model._scope.include) 
+              ? model._scope.include 
+              : [model._scope.include];
+            includes = Array.isArray(includes) 
+              ? [...includes, ...scopeIncludes]
+              : [...scopeIncludes, includes];
+          }
+          
+          // Build where using current includes state (after pre-hooks have run)
+          const whereTree = buildWhere(model, filters || {}, Op, includes);
+          if (whereTree && whereTree.__error) {
+            context.res.status(400).json({ success: false, error: 'Bad request' });
+            return;
+          }
+          // Use Reflect.ownKeys so we don't drop symbol-keyed operators like Op.or
+          if (Reflect.ownKeys(whereTree).length) {
+            req.apialize.options.where = Object.assign(
+              {},
+              req.apialize.options.where || {},
+              whereTree
+            );
+          }
+
+          // Build ordering (also use current includes state after pre-hooks)
+          const orderArr = buildOrdering(
+            model,
+            ordering,
+            defaultOrderBy,
+            defaultOrderDir,
+            idMapping,
+            includes
+          );
+          if (orderArr && orderArr.error) {
+            context.res.status(400).json({ success: false, error: 'Bad request' });
+            return;
+          }
+          req.apialize.options.order = orderArr;
+
           const result = await model.findAndCountAll(req.apialize.options);
           const response = buildResponse(
             result,

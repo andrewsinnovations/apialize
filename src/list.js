@@ -71,29 +71,6 @@ function list(model, options = {}, modelOptions = {}) {
       }
       req.apialize.options = mergedReqOptions;
 
-      const { page, pageSize } = setupPagination(
-        req,
-        q,
-        modelCfg,
-        defaultPageSize
-      );
-
-      const orderingValid = setupOrdering(
-        req,
-        res,
-        model,
-        q,
-        modelCfg,
-        allowOrdering,
-        defaultOrderBy,
-        defaultOrderDir,
-        idMapping
-      );
-      if (!orderingValid) return; // Response already sent
-
-      const appliedFilters = setupFiltering(req, res, model, q, allowFiltering);
-      if (appliedFilters === false) return; // Response already sent
-
       const payload = await withTransactionAndHooks(
         {
           model,
@@ -105,6 +82,30 @@ function list(model, options = {}, modelOptions = {}) {
           useReqOptionsTransaction: true,
         },
         async (context) => {
+          // Setup pagination, ordering, and filtering after pre-hooks (so pre-hooks can modify them)
+          const { page, pageSize } = setupPagination(
+            req,
+            q,
+            modelCfg,
+            defaultPageSize
+          );
+
+          const orderingValid = setupOrdering(
+            req,
+            res,
+            model,
+            q,
+            modelCfg,
+            allowOrdering,
+            defaultOrderBy,
+            defaultOrderDir,
+            idMapping
+          );
+          if (!orderingValid) return; // Response already sent
+
+          const appliedFilters = setupFiltering(req, res, model, q, allowFiltering);
+          if (appliedFilters === false) return; // Response already sent
+
           const result = await model.findAndCountAll(req.apialize.options);
           const response = buildResponse(
             result,

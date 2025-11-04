@@ -38,12 +38,6 @@ function create(model, options = {}, modelOptions = {}) {
   const router = express.Router({ mergeParams: true });
 
   const handlers = buildHandlers(inline, async (req, res) => {
-    const rawBody = req && req.body;
-    if (Array.isArray(rawBody) && !allow_bulk_create) {
-      return res
-        .status(400)
-        .json({ success: false, error: 'Cannot insert multiple records.' });
-    }
     const effectiveOptions = Object.assign({}, options, {
       pre: pre,
       post: post,
@@ -59,6 +53,12 @@ function create(model, options = {}, modelOptions = {}) {
         idMapping: id_mapping,
       },
       async function (context) {
+        // Check bulk create validation after pre-hooks (so pre-hooks can modify the body/settings)
+        const rawBody = req && req.body;
+        if (Array.isArray(rawBody) && !allow_bulk_create) {
+          context.res.status(400).json({ success: false, error: 'Cannot insert multiple records.' });
+          return;
+        }
         const mergedCreateOptions = {};
         if (modelOptions && typeof modelOptions === 'object') {
           for (const key in modelOptions) {
@@ -86,7 +86,6 @@ function create(model, options = {}, modelOptions = {}) {
           context.transaction
         );
         // Array body -> bulk create in a single transaction
-        const rawBody = req && req.body;
         if (Array.isArray(rawBody)) {
           // Ensure bulkCreate is available only when needed
           ensureFn(model, 'bulkCreate');
