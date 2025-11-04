@@ -135,12 +135,19 @@ You can apply Sequelize scopes declaratively by including a `scopes` array in `m
 // Define scopes in your model
 User.addScope('active', { where: { status: 'active' } });
 User.addScope('byTenant', (tenantId) => ({ where: { tenant_id: tenantId } }));
+User.addScope('featured', { where: { is_featured: true } });
 
-// Apply scopes to operations
+// Apply single scope
 app.use('/users', list(User, {}, { 
   scopes: ['active'] // Only show active users
 }));
 
+// Apply multiple scopes (combined with AND logic)
+app.use('/users', list(User, {}, { 
+  scopes: ['active', 'featured'] // Only show active AND featured users
+}));
+
+// Apply parameterized scopes
 app.use('/users', single(User, {}, { 
   scopes: [
     'active',
@@ -148,12 +155,36 @@ app.use('/users', single(User, {}, {
   ]
 }));
 
+// Works with write operations to restrict which records can be modified
 app.use('/users', update(User, {}, { 
-  scopes: ['active', 'byTenant'] // Only allow updates to active users in tenant
+  scopes: ['active'] // Only allow updates to active users (404 if inactive)
+}));
+
+app.use('/users', destroy(User, {}, { 
+  scopes: ['byTenant', 'active'] // Only allow deletion of active users in tenant
 }));
 ```
 
-Scopes in `modelOptions` work with all operations (`list`, `single`, `create`, `update`, `patch`, `destroy`, `search`) and can be combined with other `modelOptions` like `attributes`, `include`, etc. Invalid scopes are logged as errors but don't prevent the operation from continuing.
+**Key behaviors:**
+- **Applied before pre-hooks**: Scopes are applied first, then pre-hooks can add additional filtering
+- **All operations**: Works with `list`, `single`, `create`, `update`, `patch`, `destroy`, and `search`
+- **Combinable**: Can be combined with other `modelOptions` like `attributes`, `include`, etc.
+- **Write operation restrictions**: For `single`, `update`, `patch`, and `destroy`, scopes limit which records can be accessed/modified (returns 404 if no matching record found)
+- **AND logic**: Multiple scopes are combined with AND logic
+- **Error handling**: Invalid scopes are logged as errors but don't prevent the operation from continuing
+
+```js
+// Example: Multi-tenant application with role-based access
+app.use('/documents', list(Document, {}, { 
+  scopes: [
+    { name: 'byTenant', args: [req.user.tenantId] },
+    'published',
+    { name: 'byAccessLevel', args: [req.user.role] }
+  ],
+  attributes: ['id', 'title', 'created_at'],
+  include: [{ model: User, as: 'author', attributes: ['name'] }]
+}));
+```
 
 - `list(model, options?, modelOptions?)`
 - `single(model, options?, modelOptions?)`
@@ -228,6 +259,8 @@ app.use('/items', destroy(Item, { id_mapping: 'external_id' }));
 //          PATCH /items/abc-123 will update WHERE external_id = 'abc-123'
 //          DELETE /items/abc-123 will delete WHERE external_id = 'abc-123'
 ```
+
+For related model filtering and ordering, see the `relation_id_mapping` option documented in the filtering sections below.
 
 Pagination & ordering precedence (within `list()`):
 
@@ -323,6 +356,49 @@ app.use(
 ```
 
 If a dotted path doesn’t match an included alias/attribute, the request returns `400 Bad request`.
+
+### Relation ID mapping for filtering and ordering
+
+The `relation_id_mapping` option allows filters and ordering on related model 'id' fields to be mapped to custom fields (e.g., `external_id`). This is particularly useful when your related models use custom public identifiers instead of internal database IDs.
+
+Configuration:
+
+```js
+// Configure list with relation_id_mapping
+app.use('/songs', list(Song, {
+  relation_id_mapping: [
+    { model: Artist, id_field: 'external_id' },
+    { model: Album, id_field: 'external_id' }
+  ]
+}, {
+  include: [
+    { model: Artist, as: 'artist' },
+    { model: Album, as: 'album' }
+  ]
+}));
+
+// Now artist.id filters will use artist.external_id instead of artist.id
+// GET /songs?artist.id=artist-beethoven   // Uses artist.external_id
+// GET /songs?album.id=album-symphony-5    // Uses album.external_id
+// GET /songs?api:orderby=artist.id        // Orders by artist.external_id
+```
+
+The mapping applies to:
+- **Equality filters**: `?artist.id=value` → `artist.external_id = value`
+- **Operator filters**: `?artist.id:in=val1,val2` → `artist.external_id IN (val1, val2)`
+- **Ordering**: `?api:orderby=artist.id` → `ORDER BY artist.external_id`
+
+Only affects `.id` field references; other fields like `artist.name` work normally. Can be combined with regular `id_mapping` for the root model:
+
+```js
+app.use('/songs', list(Song, {
+  id_mapping: 'external_id',              // Root model uses external_id for id
+  relation_id_mapping: [                  // Related models also use external_id for id
+    { model: Artist, id_field: 'external_id' },
+    { model: Album, id_field: 'external_id' }
+  ]
+}));
+```
 
 #### Multi-level filtering and ordering (list)
 
@@ -509,15 +585,19 @@ app.use(
 
 ### Hook Execution Flow
 
-1. **Pre hooks** run before the database query
+1. **Model scopes** are applied first (from `modelOptions.scopes`)
+   - Scopes filter data at the model level before any hooks run
+   - Multiple scopes are combined with AND logic
+
+2. **Pre hooks** run before the database query
    - Execute in array order if multiple hooks provided
-   - Can modify query options (`where`, `include`, `attributes`, etc.)
+   - Can modify query options (`where`, `include`, `attributes`, etc.) on top of applied scopes
    - Return value from last pre hook is stored in `context.preResult`
    - All hooks receive the same context object
 
-2. **Database query** executes with modified options
+3. **Database query** executes with modified options (scopes + pre hook modifications)
 
-3. **Post hooks** run after the query and response construction
+4. **Post hooks** run after the query and response construction
    - Execute in array order if multiple hooks provided
    - Can modify the response payload before it's sent to client
    - Have access to `context.preResult` from pre hooks
@@ -1124,6 +1204,11 @@ Note: The final HTTP response body is taken from `context.payload` so your `post
 
 ```js
 app.use('/items/search', search(Item)); // POST /items/search
+
+// With scopes applied automatically before search filters
+app.use('/items/search', search(Item, {}, {
+  scopes: ['active', { name: 'byTenant', args: [req.user.tenantId] }]
+})); // Only search within active items in user's tenant
 ```
 
 Request body shape:
@@ -1163,6 +1248,59 @@ app.use(
 ```
 
 Supported operators and boolean grouping work the same as for top‑level attributes. If a dotted path doesn’t match an included alias/attribute, the request returns `400 Bad request`.
+
+### Relation ID mapping for search filtering and ordering
+
+The `relation_id_mapping` option works with `search()` endpoints in the same way as `list()`, allowing filters and ordering on related model 'id' fields to be mapped to custom fields (e.g., `external_id`).
+
+Configuration:
+
+```js
+// Configure search with relation_id_mapping
+app.use('/songs/search', search(Song, {
+  relation_id_mapping: [
+    { model: Artist, id_field: 'external_id' },
+    { model: Album, id_field: 'external_id' }
+  ]
+}, {
+  include: [
+    { model: Artist, as: 'artist' },
+    { model: Album, as: 'album' }
+  ]
+}));
+```
+
+Usage in search requests:
+
+```js
+// POST /songs/search - Filter by artist.id using external_id
+{
+  "filters": { 
+    "artist.id": "artist-beethoven"    // Uses artist.external_id
+  }
+}
+
+// POST /songs/search - Complex filters with operators
+{
+  "filters": { 
+    "album.id": { 
+      "in": ["album-symphony-5", "album-requiem"]  // Uses album.external_id
+    }
+  }
+}
+
+// POST /songs/search - Ordering by relation id field
+{
+  "ordering": [
+    { "orderby": "artist.id", "direction": "DESC" }  // Orders by artist.external_id
+  ]
+}
+```
+
+The mapping applies to the same cases as in `list()`:
+- **Equality filters**: `"artist.id": "value"` → `artist.external_id = value`
+- **Operator filters**: `"artist.id": { "in": [...] }` → `artist.external_id IN (...)`
+- **Ordering**: `"orderby": "artist.id"` → `ORDER BY artist.external_id`
 
 #### Multi-level filtering and ordering (search)
 
