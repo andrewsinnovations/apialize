@@ -43,7 +43,7 @@ const SEARCH_DEFAULTS = {
 // Convert a single key/value or { op: val } object to a Sequelize where fragment
 function buildFieldPredicate(model, key, rawVal, Op, includes, relationIdMapping) {
   const dialect =
-    model && model.sequelize && typeof model.sequelize.getDialect === 'function'
+    model && model.sequelize && typeof model.sequelize.getDialectx === 'function'
       ? model.sequelize.getDialect()
       : null;
   const CI = dialect === 'postgres' ? Op.iLike || Op.like : Op.like;
@@ -64,9 +64,17 @@ function buildFieldPredicate(model, key, rawVal, Op, includes, relationIdMapping
     const parts = key.split('.');
     let actualColumn = parts[parts.length - 1];
     if (actualColumn === 'id' && Array.isArray(relationIdMapping)) {
-      const relationMapping = relationIdMapping.find(mapping => 
-        mapping.model === resolved.foundModel
-      );
+      const relationMapping = relationIdMapping.find(mapping => {
+        // Compare models by name, tableName, or reference equality
+        if (mapping.model === resolved.foundModel) return true;
+        if (mapping.model && resolved.foundModel) {
+          // Compare by model name
+          if (mapping.model.name === resolved.foundModel.name) return true;
+          // Compare by table name as fallback
+          if (mapping.model.tableName === resolved.foundModel.tableName) return true;
+        }
+        return false;
+      });
       if (relationMapping && relationMapping.id_field) {
         actualColumn = relationMapping.id_field;
         // Update the alias path to use the mapped field
@@ -292,9 +300,17 @@ function buildOrdering(
       
       // Apply relation_id_mapping if configured and the attribute is 'id'
       if (attr === 'id' && Array.isArray(relationIdMapping)) {
-        const relationMapping = relationIdMapping.find(mapping => 
-          mapping.model === resolved.foundModel
-        );
+        const relationMapping = relationIdMapping.find(mapping => {
+          // Compare models by name, tableName, or reference equality
+          if (mapping.model === resolved.foundModel) return true;
+          if (mapping.model && resolved.foundModel) {
+            // Compare by model name
+            if (mapping.model.name === resolved.foundModel.name) return true;
+            // Compare by table name as fallback
+            if (mapping.model.tableName === resolved.foundModel.tableName) return true;
+          }
+          return false;
+        });
         if (relationMapping && relationMapping.id_field) {
           attr = relationMapping.id_field;
         }

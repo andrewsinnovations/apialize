@@ -127,6 +127,34 @@ app.use('/widgets', crud(Widget));
 
 Each helper accepts `(model, options = {}, modelOptions = {})` unless otherwise stated. `options.middleware` is an array of Express middleware. `modelOptions` are passed through to Sequelize calls (`attributes`, `include`, etc.).
 
+#### `modelOptions.scopes`
+
+You can apply Sequelize scopes declaratively by including a `scopes` array in `modelOptions`. Scopes are applied automatically before pre-hooks run, allowing you to filter data at the model level:
+
+```js
+// Define scopes in your model
+User.addScope('active', { where: { status: 'active' } });
+User.addScope('byTenant', (tenantId) => ({ where: { tenant_id: tenantId } }));
+
+// Apply scopes to operations
+app.use('/users', list(User, {}, { 
+  scopes: ['active'] // Only show active users
+}));
+
+app.use('/users', single(User, {}, { 
+  scopes: [
+    'active',
+    { name: 'byTenant', args: [req.user.tenantId] } // Parameterized scope
+  ]
+}));
+
+app.use('/users', update(User, {}, { 
+  scopes: ['active', 'byTenant'] // Only allow updates to active users in tenant
+}));
+```
+
+Scopes in `modelOptions` work with all operations (`list`, `single`, `create`, `update`, `patch`, `destroy`, `search`) and can be combined with other `modelOptions` like `attributes`, `include`, etc. Invalid scopes are logged as errors but don't prevent the operation from continuing.
+
 - `list(model, options?, modelOptions?)`
 - `single(model, options?, modelOptions?)`
 - `create(model, options?, modelOptions?)`

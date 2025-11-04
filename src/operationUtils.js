@@ -125,6 +125,16 @@ async function withTransactionAndHooks(config, run) {
   }
 
   try {
+    // Apply scopes from modelOptions before pre-hooks run
+    if (modelOptions.scopes && Array.isArray(modelOptions.scopes) && model && context.applyScopes) {
+      try {
+        context.applyScopes(modelOptions.scopes);
+      } catch (scopeError) {
+        // If scope application fails, log the error but continue execution
+        console.error('[Apialize] Error applying modelOptions scopes:', scopeError);
+      }
+    }
+
     if (options.pre) {
       if (typeof options.pre === 'function') {
         context.preResult = await options.pre(context);
