@@ -34,12 +34,14 @@ const SEARCH_DEFAULTS = {
   post: null,
   // id_mapping supported like other operations
   id_mapping: 'id',
+  // relation_id_mapping allows mapping relation 'id' filters to custom fields
+  relation_id_mapping: null,
   // configurable mount path for the POST route
   path: '/search',
 };
 
 // Convert a single key/value or { op: val } object to a Sequelize where fragment
-function buildFieldPredicate(model, key, rawVal, Op, includes) {
+function buildFieldPredicate(model, key, rawVal, Op, includes, relationIdMapping) {
   const dialect =
     model && model.sequelize && typeof model.sequelize.getDialect === 'function'
       ? model.sequelize.getDialect()
@@ -57,11 +59,35 @@ function buildFieldPredicate(model, key, rawVal, Op, includes) {
     if (!resolved) {
       return { error: `Invalid column '${key}'` };
     }
-    outKey = `$${resolved.aliasPath}$`;
-    validateModel = resolved.foundModel;
+    
+    // Apply relation_id_mapping if configured and the column is 'id'
     const parts = key.split('.');
-    validateColumn = parts[parts.length - 1];
-    attribute = resolved.attribute;
+    let actualColumn = parts[parts.length - 1];
+    if (actualColumn === 'id' && Array.isArray(relationIdMapping)) {
+      const relationMapping = relationIdMapping.find(mapping => 
+        mapping.model === resolved.foundModel
+      );
+      if (relationMapping && relationMapping.id_field) {
+        actualColumn = relationMapping.id_field;
+        // Update the alias path to use the mapped field
+        const aliasPrefix = resolved.aliasPath.split('.').slice(0, -1).join('.');
+        const newAliasPath = aliasPrefix ? `${aliasPrefix}.${actualColumn}` : actualColumn;
+        outKey = `$${newAliasPath}$`;
+        // Update validation column for the mapped field
+        validateColumn = actualColumn;
+        const attrs = getModelAttributes(resolved.foundModel);
+        attribute = attrs && attrs[actualColumn];
+      } else {
+        outKey = `$${resolved.aliasPath}$`;
+        validateColumn = actualColumn;
+        attribute = resolved.attribute;
+      }
+    } else {
+      outKey = `$${resolved.aliasPath}$`;
+      validateColumn = actualColumn;
+      attribute = resolved.attribute;
+    }
+    validateModel = resolved.foundModel;
   } else {
     const attrs = getModelAttributes(validateModel);
     attribute = attrs && attrs[validateColumn];
@@ -144,14 +170,14 @@ function buildFieldPredicate(model, key, rawVal, Op, includes) {
   return { [outKey]: rawVal };
 }
 
-function buildWhere(model, filters, Op, includes) {
+function buildWhere(model, filters, Op, includes, relationIdMapping) {
   if (!filters || typeof filters !== 'object') return {};
 
   // Explicit boolean arrays
   if (Array.isArray(filters.and)) {
     const parts = [];
     for (const item of filters.and) {
-      const sub = buildWhere(model, item, Op, includes);
+      const sub = buildWhere(model, item, Op, includes, relationIdMapping);
       if (sub && Object.keys(sub).length) parts.push(sub);
     }
     // Flatten AND into a single object when possible to avoid relying on Op.and
@@ -194,7 +220,7 @@ function buildWhere(model, filters, Op, includes) {
   if (Array.isArray(filters.or)) {
     const parts = [];
     for (const item of filters.or) {
-      const sub = buildWhere(model, item, Op, includes);
+      const sub = buildWhere(model, item, Op, includes, relationIdMapping);
       if (sub && Object.keys(sub).length) parts.push(sub);
     }
     return parts.length ? { [Op.or]: parts } : {};
@@ -208,7 +234,7 @@ function buildWhere(model, filters, Op, includes) {
     const v = filters[k];
     if (k === 'and' && Array.isArray(v)) continue;
     if (k === 'or' && Array.isArray(v)) continue;
-    const pred = buildFieldPredicate(model, k, v, Op, includes);
+    const pred = buildFieldPredicate(model, k, v, Op, includes, relationIdMapping);
     if (pred && pred.error) return { __error: pred.error };
     if (pred && Object.keys(pred).length) andParts.push(pred);
   }
@@ -238,7 +264,8 @@ function buildOrdering(
   defaultOrderBy,
   defaultOrderDir,
   idMapping,
-  includes
+  includes,
+  relationIdMapping
 ) {
   let items = ordering;
   if (!items) items = [];
@@ -261,7 +288,18 @@ function buildOrdering(
         return { error: `Invalid order column '${colName}'` };
       }
       const parts = colName.split('.');
-      const attr = parts[parts.length - 1];
+      let attr = parts[parts.length - 1];
+      
+      // Apply relation_id_mapping if configured and the attribute is 'id'
+      if (attr === 'id' && Array.isArray(relationIdMapping)) {
+        const relationMapping = relationIdMapping.find(mapping => 
+          mapping.model === resolved.foundModel
+        );
+        if (relationMapping && relationMapping.id_field) {
+          attr = relationMapping.id_field;
+        }
+      }
+      
       const chain = Array.isArray(resolved.includeChain)
         ? resolved.includeChain.map((c) => ({ model: c.model, as: c.as }))
         : [{ model: resolved.foundModel, as: parts.slice(0, -1).join('.') || parts[0] }];
@@ -290,6 +328,7 @@ function search(model, options = {}, modelOptions = {}) {
   const defaultOrderDir = merged.defaultOrderDir;
   const metaShowOrdering = !!merged.metaShowOrdering;
   const idMapping = merged.id_mapping || 'id';
+  const relationIdMapping = merged.relation_id_mapping;
   const pre = merged.pre;
   const post = merged.post;
 
@@ -362,8 +401,15 @@ function search(model, options = {}, modelOptions = {}) {
           }
           
           // Build where using current includes state (after pre-hooks have run)
-          const whereTree = buildWhere(model, filters || {}, Op, includes);
+          const whereTree = buildWhere(model, filters || {}, Op, includes, relationIdMapping);
           if (whereTree && whereTree.__error) {
+            if (process.env.NODE_ENV === 'development') {
+              console.warn(
+                `[Apialize] Search bad request: ${whereTree.__error}. Body:`,
+                JSON.stringify(body, null, 2),
+                `URL: ${req.originalUrl}`
+              );
+            }
             context.res.status(400).json({ success: false, error: 'Bad request' });
             return;
           }
@@ -383,9 +429,17 @@ function search(model, options = {}, modelOptions = {}) {
             defaultOrderBy,
             defaultOrderDir,
             idMapping,
-            includes
+            includes,
+            relationIdMapping
           );
           if (orderArr && orderArr.error) {
+            if (process.env.NODE_ENV === 'development') {
+              console.warn(
+                `[Apialize] Search bad request: ${orderArr.error}. Body:`,
+                JSON.stringify(body, null, 2),
+                `URL: ${req.originalUrl}`
+              );
+            }
             context.res.status(400).json({ success: false, error: 'Bad request' });
             return;
           }

@@ -113,7 +113,8 @@ function setupOrdering(
   allowOrdering,
   defaultOrderBy,
   defaultOrderDir,
-  idMapping
+  idMapping,
+  relationIdMapping
 ) {
   let rawOrderBy, globalDir;
 
@@ -162,14 +163,27 @@ function setupOrdering(
       if (columnName.includes('.')) {
         const resolved = resolveIncludedAttribute(model, includes, columnName);
         if (!resolved) {
-          console.warn(
-            `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`
-          );
+          if (process.env.NODE_ENV === 'development') {
+            console.warn(
+              `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`
+            );
+          }
           res.status(400).json({ success: false, error: 'Bad request' });
           return false;
         }
         const parts = columnName.split('.');
-        const attr = parts[parts.length - 1];
+        let attr = parts[parts.length - 1];
+        
+        // Apply relation_id_mapping if configured and the attribute is 'id'
+        if (attr === 'id' && Array.isArray(relationIdMapping)) {
+          const relationMapping = relationIdMapping.find(mapping => 
+            mapping.model === resolved.foundModel
+          );
+          if (relationMapping && relationMapping.id_field) {
+            attr = relationMapping.id_field;
+          }
+        }
+        
         const chain = Array.isArray(resolved.includeChain)
           ? resolved.includeChain.map((c) => ({ model: c.model, as: c.as }))
           : [{ model: resolved.foundModel, as: parts.slice(0, -1).join('.') || parts[0] }];
@@ -177,9 +191,11 @@ function setupOrdering(
       } else {
         // Validate column exists on root model
         if (!validateColumnExists(model, columnName)) {
-          console.warn(
-            `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`
-          );
+          if (process.env.NODE_ENV === 'development') {
+            console.warn(
+              `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`
+            );
+          }
           res.status(400).json({ success: false, error: 'Bad request' });
           return false; // Indicate validation failed
         }
@@ -217,7 +233,7 @@ function getSequelizeOp(model) {
   }
 }
 
-function setupFiltering(req, res, model, query, allowFiltering) {
+function setupFiltering(req, res, model, query, allowFiltering, relationIdMapping) {
   // appliedFiltersMeta is returned (for meta), dbFilters are merged into Sequelize where
   let appliedFiltersMeta = {};
   let appliedFiltersDb = {};
@@ -258,20 +274,47 @@ function setupFiltering(req, res, model, query, allowFiltering) {
     if (rawKey.includes('.')) {
       const resolved = resolveIncludedAttribute(model, includes, rawKey);
       if (!resolved) {
-        console.warn(
-          `[Apialize] Bad request: Invalid filter column '${rawKey}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`
-        );
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(
+            `[Apialize] Bad request: Invalid filter column '${rawKey}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`
+          );
+        }
         res.status(400).json({ success: false, error: 'Bad request' });
         return false;
       }
+      
+      // Apply relation_id_mapping if configured and the column is 'id'
+      const parts = rawKey.split('.');
+      let actualColumn = parts[parts.length - 1];
+      if (actualColumn === 'id' && Array.isArray(relationIdMapping)) {
+        const relationMapping = relationIdMapping.find(mapping => 
+          mapping.model === resolved.foundModel
+        );
+        if (relationMapping && relationMapping.id_field) {
+          actualColumn = relationMapping.id_field;
+          // Update the alias path to use the mapped field
+          const aliasPrefix = resolved.aliasPath.split('.').slice(0, -1).join('.');
+          const newAliasPath = aliasPrefix ? `${aliasPrefix}.${actualColumn}` : actualColumn;
+          outKey = `$${newAliasPath}$`;
+          // Update attribute for the mapped field
+          const attrs = getModelAttributes(resolved.foundModel);
+          attribute = attrs && attrs[actualColumn];
+        } else {
+          outKey = `$${resolved.aliasPath}$`;
+          attribute = resolved.attribute;
+        }
+      } else {
+        outKey = `$${resolved.aliasPath}$`;
+        attribute = resolved.attribute;
+      }
       targetModel = resolved.foundModel;
-      attribute = resolved.attribute;
-      outKey = `$${resolved.aliasPath}$`;
     } else {
       if (!validateColumnExists(model, rawKey)) {
-        console.warn(
-          `[Apialize] Bad request: Invalid filter column '${rawKey}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`
-        );
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(
+            `[Apialize] Bad request: Invalid filter column '${rawKey}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`
+          );
+        }
         res.status(400).json({ success: false, error: 'Bad request' });
         return false; // Indicate validation failed
       }
@@ -283,9 +326,11 @@ function setupFiltering(req, res, model, query, allowFiltering) {
         ? validateDataType({ rawAttributes: { tmp: attribute } }, 'tmp', value)
         : true;
     if (!okType) {
-      console.warn(
-        `[Apialize] Bad request: Invalid filter value '${value}' is not compatible with column '${rawKey}' data type on model '${targetModel && targetModel.name ? targetModel.name : 'Model'}'. Query: ${req.originalUrl}`
-      );
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(
+          `[Apialize] Bad request: Invalid filter value '${value}' is not compatible with column '${rawKey}' data type on model '${targetModel && targetModel.name ? targetModel.name : 'Model'}'. Query: ${req.originalUrl}`
+        );
+      }
       res.status(400).json({ success: false, error: 'Bad request' });
       return false; // Indicate validation failed
     }
@@ -333,9 +378,11 @@ function setupFiltering(req, res, model, query, allowFiltering) {
         is_false: Op.eq,
       };
       if (!Object.prototype.hasOwnProperty.call(opMap, operator)) {
-        console.warn(
-          `[Apialize] Bad request: Invalid operator '${operator}' for filter '${rawKey}'. Query: ${req.originalUrl}`
-        );
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(
+            `[Apialize] Bad request: Invalid operator '${operator}' for filter '${rawKey}'. Query: ${req.originalUrl}`
+          );
+        }
         res.status(400).json({ success: false, error: 'Bad request' });
         return false;
       }

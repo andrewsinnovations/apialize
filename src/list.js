@@ -23,6 +23,8 @@ const LIST_DEFAULTS = {
   defaultOrderDir: 'ASC', // default order direction when no ordering is specified
   pre: null,
   post: null,
+  // relation_id_mapping allows mapping relation 'id' filters to custom fields
+  relation_id_mapping: null,
 };
 
 function list(model, options = {}, modelOptions = {}) {
@@ -37,6 +39,7 @@ function list(model, options = {}, modelOptions = {}) {
   const defaultOrderBy = mergedOptions.defaultOrderBy;
   const defaultOrderDir = mergedOptions.defaultOrderDir;
   const id_mapping = mergedOptions.id_mapping;
+  const relationIdMapping = mergedOptions.relation_id_mapping;
   const pre = mergedOptions.pre;
   const post = mergedOptions.post;
 
@@ -99,11 +102,12 @@ function list(model, options = {}, modelOptions = {}) {
             allowOrdering,
             defaultOrderBy,
             defaultOrderDir,
-            idMapping
+            idMapping,
+            relationIdMapping
           );
           if (!orderingValid) return; // Response already sent
 
-          const appliedFilters = setupFiltering(req, res, model, q, allowFiltering);
+          const appliedFilters = setupFiltering(req, res, model, q, allowFiltering, relationIdMapping);
           if (appliedFilters === false) return; // Response already sent
 
           const result = await model.findAndCountAll(req.apialize.options);
