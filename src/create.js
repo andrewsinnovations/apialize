@@ -6,32 +6,97 @@ const {
   filterMiddlewareFns,
   buildHandlers,
   getIdFromInstance,
+  extractOption,
+  extractBooleanOption,
+  extractMiddleware,
+  mergeReqOptionsIntoModelOptions,
+  convertInstanceToPlainObject,
 } = require('./utils');
 const {
   withTransactionAndHooks,
   optionsWithTransaction,
 } = require('./operationUtils');
 
-function create(model, options = {}, modelOptions = {}) {
+function validateBulkCreateRequest(rawBody, allow_bulk_create, context) {
+  if (Array.isArray(rawBody) && !allow_bulk_create) {
+    context.res
+      .status(400)
+      .json({ success: false, error: 'Cannot insert multiple records.' });
+    return false;
+  }
+  return true;
+}
+
+function applyIdMapping(outputArray, id_mapping) {
+  if (id_mapping && id_mapping !== 'id') {
+    for (let i = 0; i < outputArray.length; i++) {
+      const row = outputArray[i];
+      if (
+        row &&
+        Object.prototype.hasOwnProperty.call(row, id_mapping) &&
+        typeof row[id_mapping] !== 'undefined'
+      ) {
+        row.id = row[id_mapping];
+      }
+    }
+  }
+}
+
+function handleBulkCreate(model, rawBody, createOptions, context, id_mapping) {
+  ensureFn(model, 'bulkCreate');
+
+  const bulkOptions = Object.assign({}, createOptions, {
+    returning: true,
+    validate: true,
+    individualHooks: true,
+  });
+
+  return model.bulkCreate(rawBody, bulkOptions).then((createdArray) => {
+    const outputArray = [];
+    for (let i = 0; i < createdArray.length; i++) {
+      const instance = createdArray[i];
+      const plainObject = convertInstanceToPlainObject(instance);
+      outputArray.push(plainObject);
+    }
+
+    applyIdMapping(outputArray, id_mapping);
+
+    context.created = createdArray;
+    context.payload = outputArray;
+    return context.payload;
+  });
+}
+
+function handleSingleCreate(model, req, createOptions, context, id_mapping) {
+  const values = req && req.apialize ? req.apialize.values : undefined;
+
+  return model.create(values, createOptions).then((created) => {
+    context.created = created;
+    const idValue = getIdFromInstance(created, id_mapping);
+    context.payload = { success: true, id: idValue };
+    return context.payload;
+  });
+}
+
+function create(model, options, modelOptions) {
+  if (!options) {
+    options = {};
+  }
+  if (!modelOptions) {
+    modelOptions = {};
+  }
+
   ensureFn(model, 'create');
 
-  const middleware = Array.isArray(options && options.middleware)
-    ? options.middleware
-    : [];
-  const allow_bulk_create = Object.prototype.hasOwnProperty.call(
-    options || {},
-    'allow_bulk_create'
-  )
-    ? !!options.allow_bulk_create
-    : false;
-  const id_mapping =
-    typeof (options && options.id_mapping) !== 'undefined'
-      ? options.id_mapping
-      : 'id';
-  const pre =
-    typeof (options && options.pre) !== 'undefined' ? options.pre : null;
-  const post =
-    typeof (options && options.post) !== 'undefined' ? options.post : null;
+  const middleware = extractMiddleware(options);
+  const allow_bulk_create = extractBooleanOption(
+    options,
+    'allow_bulk_create',
+    false
+  );
+  const id_mapping = extractOption(options, 'id_mapping', 'id');
+  const pre = extractOption(options, 'pre', null);
+  const post = extractOption(options, 'post', null);
 
   const inline = filterMiddlewareFns(middleware);
 
@@ -53,83 +118,41 @@ function create(model, options = {}, modelOptions = {}) {
         idMapping: id_mapping,
       },
       async function (context) {
-        // Check bulk create validation after pre-hooks (so pre-hooks can modify the body/settings)
         const rawBody = req && req.body;
-        if (Array.isArray(rawBody) && !allow_bulk_create) {
-          context.res
-            .status(400)
-            .json({ success: false, error: 'Cannot insert multiple records.' });
+        const isValidRequest = validateBulkCreateRequest(
+          rawBody,
+          allow_bulk_create,
+          context
+        );
+        if (!isValidRequest) {
           return;
         }
-        const mergedCreateOptions = {};
-        if (modelOptions && typeof modelOptions === 'object') {
-          for (const key in modelOptions) {
-            if (Object.prototype.hasOwnProperty.call(modelOptions, key)) {
-              mergedCreateOptions[key] = modelOptions[key];
-            }
-          }
-        }
-        if (
-          req &&
-          req.apialize &&
-          req.apialize.options &&
-          typeof req.apialize.options === 'object'
-        ) {
-          const reqOptions = req.apialize.options;
-          for (const key in reqOptions) {
-            if (Object.prototype.hasOwnProperty.call(reqOptions, key)) {
-              mergedCreateOptions[key] = reqOptions[key];
-            }
-          }
-        }
-
+        const mergedCreateOptions = mergeReqOptionsIntoModelOptions(
+          req,
+          modelOptions
+        );
         const createOptions = optionsWithTransaction(
           mergedCreateOptions,
           context.transaction
         );
-        // Array body -> bulk create in a single transaction
+
         if (Array.isArray(rawBody)) {
-          // Ensure bulkCreate is available only when needed
-          ensureFn(model, 'bulkCreate');
-          const bulkOptions = Object.assign({}, createOptions, {
-            returning: true,
-            validate: true,
-            individualHooks: true,
-          });
-          const createdArray = await model.bulkCreate(rawBody, bulkOptions);
-
-          const out = createdArray.map((inst) =>
-            inst && typeof inst.get === 'function'
-              ? inst.get({ plain: true })
-              : inst
+          return await handleBulkCreate(
+            model,
+            rawBody,
+            createOptions,
+            context,
+            id_mapping
           );
-
-          if (id_mapping && id_mapping !== 'id') {
-            for (let i = 0; i < out.length; i += 1) {
-              const row = out[i];
-              if (
-                row &&
-                Object.prototype.hasOwnProperty.call(row, id_mapping) &&
-                typeof row[id_mapping] !== 'undefined'
-              ) {
-                row.id = row[id_mapping];
-              }
-            }
-          }
-
-          context.created = createdArray;
-          context.payload = out;
-          return context.payload;
         }
 
-        const values = req && req.apialize ? req.apialize.values : undefined;
-        const created = await model.create(values, createOptions);
-        context.created = created;
-
-        const idValue = getIdFromInstance(created, id_mapping);
-
-        context.payload = { success: true, id: idValue };
-        return context.payload;
+        return await handleSingleCreate(
+          model,
+          req,
+          createOptions,
+          context,
+          id_mapping
+        );
       }
     );
 

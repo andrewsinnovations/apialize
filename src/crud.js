@@ -7,28 +7,70 @@ const patch = require('./patch');
 const destroy = require('./destroy');
 const search = require('./search');
 
-function crud(model, options = {}, modelOptions = {}) {
-  const { middleware = [], routes = {} } = options || {};
+function extractMiddleware(options) {
+  if (options && Array.isArray(options.middleware)) {
+    return options.middleware;
+  }
+  return [];
+}
+
+function extractRoutes(options) {
+  if (options && options.routes && typeof options.routes === 'object') {
+    return options.routes;
+  }
+  return {};
+}
+
+function collectMiddleware(baseMiddleware, routeMiddleware) {
+  const collected = [];
+
+  for (let i = 0; i < baseMiddleware.length; i++) {
+    collected.push(baseMiddleware[i]);
+  }
+
+  if (routeMiddleware && Array.isArray(routeMiddleware)) {
+    for (let i = 0; i < routeMiddleware.length; i++) {
+      collected.push(routeMiddleware[i]);
+    }
+  }
+
+  return collected;
+}
+
+function mountRoute(
+  router,
+  routeHandler,
+  model,
+  baseMiddleware,
+  routeMiddleware,
+  modelOptions
+) {
+  const combinedMiddleware = collectMiddleware(baseMiddleware, routeMiddleware);
+  const routeOptions = { middleware: combinedMiddleware };
+  const routeInstance = routeHandler(model, routeOptions, modelOptions);
+  router.use(routeInstance);
+}
+
+function crud(model, options, modelOptions) {
+  if (!options) {
+    options = {};
+  }
+  if (!modelOptions) {
+    modelOptions = {};
+  }
+
+  const middleware = extractMiddleware(options);
+  const routes = extractRoutes(options);
   const router = express.Router({ mergeParams: true });
-  const collect = (arr) => [...middleware, ...(arr || [])];
-  router.use(list(model, { middleware: collect(routes.list) }, modelOptions));
-  // Include search by default at '/search'. Use individual mounts if you need a custom path.
-  router.use(
-    search(model, { middleware: collect(routes.search) }, modelOptions)
-  );
-  router.use(
-    single(model, { middleware: collect(routes.single) }, modelOptions)
-  );
-  router.use(
-    create(model, { middleware: collect(routes.create) }, modelOptions)
-  );
-  router.use(
-    update(model, { middleware: collect(routes.update) }, modelOptions)
-  );
-  router.use(patch(model, { middleware: collect(routes.patch) }, modelOptions));
-  router.use(
-    destroy(model, { middleware: collect(routes.destroy) }, modelOptions)
-  );
+
+  mountRoute(router, list, model, middleware, routes.list, modelOptions);
+  mountRoute(router, search, model, middleware, routes.search, modelOptions);
+  mountRoute(router, single, model, middleware, routes.single, modelOptions);
+  mountRoute(router, create, model, middleware, routes.create, modelOptions);
+  mountRoute(router, update, model, middleware, routes.update, modelOptions);
+  mountRoute(router, patch, model, middleware, routes.patch, modelOptions);
+  mountRoute(router, destroy, model, middleware, routes.destroy, modelOptions);
+
   return router;
 }
 

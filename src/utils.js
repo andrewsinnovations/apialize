@@ -1,44 +1,59 @@
 const express = require('express');
 const { createHelpers } = require('./contextHelpers');
 
-function apializeContext(req, res, next) {
-  const existing =
-    req && req.apialize && typeof req.apialize === 'object' ? req.apialize : {};
-  const existingOptions =
-    existing && existing.options && typeof existing.options === 'object'
-      ? existing.options
-      : {};
-  const existingValues =
-    existing && existing.values && typeof existing.values === 'object'
-      ? existing.values
-      : {};
-  const existingWhere =
-    existingOptions &&
-    existingOptions.where &&
-    typeof existingOptions.where === 'object'
-      ? existingOptions.where
-      : {};
+function safeGetObject(source, fallback = {}) {
+  if (source && typeof source === 'object') {
+    return source;
+  }
+  return fallback;
+}
 
-  const mergedWhere = {};
-  for (const key in existingWhere) {
-    if (Object.prototype.hasOwnProperty.call(existingWhere, key)) {
-      mergedWhere[key] = existingWhere[key];
+function copyOwnProperties(source, target) {
+  for (const key in source) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      target[key] = source[key];
     }
   }
+}
+
+function isReservedQueryKey(key) {
+  if (key === 'api:page') {
+    return true;
+  }
+  if (key === 'api:page_size') {
+    return true;
+  }
+  if (key === 'api:order_by') {
+    return true;
+  }
+  if (key === 'api:order_dir') {
+    return true;
+  }
+  if (key.indexOf('.') !== -1) {
+    return true;
+  }
+  if (key.indexOf(':') !== -1) {
+    return true;
+  }
+  return false;
+}
+
+function apializeContext(req, res, next) {
+  const existing = safeGetObject(req && req.apialize);
+  const existingOptions = safeGetObject(existing.options);
+  const existingValues = safeGetObject(existing.values);
+  const existingWhere = safeGetObject(existingOptions.where);
+
+  const mergedWhere = {};
+  copyOwnProperties(existingWhere, mergedWhere);
 
   if (!req._apializeDisableQueryFilters) {
-    const query =
-      req && req.query && typeof req.query === 'object' ? req.query : {};
+    const query = safeGetObject(req && req.query);
     for (const key in query) {
-      if (!Object.prototype.hasOwnProperty.call(query, key)) continue;
-      if (
-        key === 'api:page' ||
-        key === 'api:page_size' ||
-        key === 'api:order_by' ||
-        key === 'api:order_dir' ||
-        key.indexOf('.') !== -1 ||
-        key.indexOf(':') !== -1
-      ) {
+      if (!Object.prototype.hasOwnProperty.call(query, key)) {
+        continue;
+      }
+      if (isReservedQueryKey(key)) {
         continue;
       }
       if (typeof mergedWhere[key] === 'undefined') {
@@ -59,17 +74,10 @@ function apializeContext(req, res, next) {
   options.where = mergedWhere;
 
   const values = {};
-  for (const key in existingValues) {
-    if (Object.prototype.hasOwnProperty.call(existingValues, key)) {
-      values[key] = existingValues[key];
-    }
-  }
-  const body = req && req.body && typeof req.body === 'object' ? req.body : {};
-  for (const key in body) {
-    if (Object.prototype.hasOwnProperty.call(body, key)) {
-      values[key] = body[key];
-    }
-  }
+  copyOwnProperties(existingValues, values);
+
+  const body = safeGetObject(req && req.body);
+  copyOwnProperties(body, values);
 
   const apialize = {};
   for (const key in existing) {
@@ -83,13 +91,11 @@ function apializeContext(req, res, next) {
   }
   apialize.options = options;
   apialize.values = values;
-  // Preserve the raw request body separately for operations that need
-  // access to the unmerged payload (e.g., batch create with array bodies).
+
   if (req && typeof req.body !== 'undefined') {
     apialize.body = req.body;
   }
 
-  // Add helper functions to apialize object (without model for now)
   const helpers = createHelpers(req);
   Object.assign(apialize, helpers);
 
@@ -110,8 +116,8 @@ function asyncHandler(fn) {
       if (result && typeof result.then === 'function') {
         result.catch(next);
       }
-    } catch (err) {
-      next(err);
+    } catch (error) {
+      next(error);
     }
   };
 }
@@ -128,68 +134,83 @@ module.exports = {
   defaultNotFound,
 };
 
-/**
- * Return only functions from a middleware array; tolerates non-arrays.
- */
-function filterMiddlewareFns(mw) {
+function filterMiddlewareFns(middlewareArray) {
   const result = [];
-  if (Array.isArray(mw)) {
-    for (let i = 0; i < mw.length; i += 1) {
-      if (typeof mw[i] === 'function') result.push(mw[i]);
+  if (Array.isArray(middlewareArray)) {
+    for (let i = 0; i < middlewareArray.length; i += 1) {
+      if (typeof middlewareArray[i] === 'function') {
+        result.push(middlewareArray[i]);
+      }
     }
   }
   return result;
 }
 
 function buildHandlers(middleware, handler) {
-  const inline = filterMiddlewareFns(middleware);
-  return [apializeContext, ...inline, asyncHandler(handler)];
+  const middlewareFunctions = filterMiddlewareFns(middleware);
+  const wrappedHandler = asyncHandler(handler);
+  return [apializeContext].concat(middlewareFunctions).concat([wrappedHandler]);
 }
 
 function getOwnershipWhere(req) {
-  const where =
-    req && req.apialize && req.apialize.options && req.apialize.options.where;
-  return where && typeof where === 'object' ? where : {};
+  if (
+    req &&
+    req.apialize &&
+    req.apialize.options &&
+    req.apialize.options.where
+  ) {
+    const where = req.apialize.options.where;
+    if (where && typeof where === 'object') {
+      return where;
+    }
+  }
+  return {};
 }
 
 function getProvidedValues(req) {
   if (req && req.apialize) {
-    // Prefer middleware-merged values when available; fall back to raw body
     if (req.apialize.values && typeof req.apialize.values === 'object') {
       return req.apialize.values;
     }
-    if (typeof req.apialize.body !== 'undefined') return req.apialize.body;
+    if (typeof req.apialize.body !== 'undefined') {
+      return req.apialize.body;
+    }
   }
-  if (req && req.body) return req.body;
+  if (req && req.body) {
+    return req.body;
+  }
   return {};
 }
 
-function getIdFromInstance(instance, idMapping) {
-  const key = idMapping || 'id';
-  let idValue;
+function tryGetValueFromInstance(instance, key) {
   if (instance && typeof instance.get === 'function') {
-    idValue = instance.get(key);
+    return instance.get(key);
   }
-  if (typeof idValue === 'undefined' && instance) {
-    if (typeof instance[key] !== 'undefined') {
-      idValue = instance[key];
-    } else if (
-      instance.dataValues &&
-      typeof instance.dataValues[key] !== 'undefined'
-    ) {
-      idValue = instance.dataValues[key];
-    }
+  if (instance && typeof instance[key] !== 'undefined') {
+    return instance[key];
   }
-  if (typeof idValue === 'undefined' && instance) {
-    if (typeof instance.id !== 'undefined') {
-      idValue = instance.id;
-    } else if (
-      instance.dataValues &&
-      typeof instance.dataValues.id !== 'undefined'
-    ) {
-      idValue = instance.dataValues.id;
-    }
+  if (
+    instance &&
+    instance.dataValues &&
+    typeof instance.dataValues[key] !== 'undefined'
+  ) {
+    return instance.dataValues[key];
   }
+  return undefined;
+}
+
+function getIdFromInstance(instance, idMapping) {
+  const primaryKey = idMapping || 'id';
+
+  let idValue = tryGetValueFromInstance(instance, primaryKey);
+  if (typeof idValue !== 'undefined') {
+    return idValue;
+  }
+
+  if (primaryKey !== 'id') {
+    idValue = tryGetValueFromInstance(instance, 'id');
+  }
+
   return idValue;
 }
 
@@ -201,14 +222,47 @@ function mergeReqOptionsIntoModelOptions(req, baseModelOptions) {
     req.apialize.options &&
     typeof req.apialize.options === 'object'
   ) {
-    const reqOpts = req.apialize.options;
-    for (const k in reqOpts) {
-      if (Object.prototype.hasOwnProperty.call(reqOpts, k)) {
-        merged[k] = reqOpts[k];
-      }
-    }
+    const requestOptions = req.apialize.options;
+    copyOwnProperties(requestOptions, merged);
   }
   return merged;
+}
+
+// Shared option extraction functions
+function extractOption(options, optionName, defaultValue) {
+  if (options && typeof options[optionName] !== 'undefined') {
+    return options[optionName];
+  }
+  return defaultValue;
+}
+
+function extractBooleanOption(options, optionName, defaultValue) {
+  if (options && Object.prototype.hasOwnProperty.call(options, optionName)) {
+    return !!options[optionName];
+  }
+  return defaultValue;
+}
+
+function extractMiddleware(options) {
+  if (options && Array.isArray(options.middleware)) {
+    return options.middleware;
+  }
+  return [];
+}
+
+// Shared where clause building function
+function buildWhereClause(ownershipWhere, idMapping, id) {
+  const where = Object.assign({}, ownershipWhere);
+  where[idMapping] = id;
+  return where;
+}
+
+// Instance conversion utility
+function convertInstanceToPlainObject(instance) {
+  if (instance && typeof instance.get === 'function') {
+    return instance.get({ plain: true });
+  }
+  return instance;
 }
 
 module.exports.filterMiddlewareFns = filterMiddlewareFns;
@@ -218,3 +272,8 @@ module.exports.getProvidedValues = getProvidedValues;
 module.exports.getIdFromInstance = getIdFromInstance;
 module.exports.mergeReqOptionsIntoModelOptions =
   mergeReqOptionsIntoModelOptions;
+module.exports.extractOption = extractOption;
+module.exports.extractBooleanOption = extractBooleanOption;
+module.exports.extractMiddleware = extractMiddleware;
+module.exports.buildWhereClause = buildWhereClause;
+module.exports.convertInstanceToPlainObject = convertInstanceToPlainObject;

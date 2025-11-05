@@ -1,79 +1,55 @@
 const { Op } = require('sequelize');
 
-/**
- * Apply additional where conditions to the existing where clause.
- * New conditions will overwrite existing conditions for the same keys.
- *
- * @param {Object} additionalWhere - The where conditions to add/merge
- * @returns {Object} The merged where clause
- */
-function applyWhere(additionalWhere) {
-  // 'this' refers to req.apialize when bound
-  const req = this._req;
-
+function ensureApializeStructure(req) {
   if (!req || !req.apialize) {
-    throw new Error('applyWhere must be called on req.apialize object');
+    throw new Error('Helper must be called on req.apialize object');
   }
 
-  // Ensure apialize structure exists
   if (!req.apialize.options) {
     req.apialize.options = {};
   }
+
   if (!req.apialize.options.where) {
     req.apialize.options.where = {};
   }
+}
+
+function applyWhere(additionalWhere) {
+  const req = this._req;
+
+  ensureApializeStructure(req);
 
   if (!additionalWhere || typeof additionalWhere !== 'object') {
     return req.apialize.options.where;
   }
 
-  // Simple overwrite merge - last condition wins
   Object.assign(req.apialize.options.where, additionalWhere);
   return req.apialize.options.where;
 }
 
-/**
- * Apply a Sequelize scope to the model and merge the scope's options
- * with the existing request options
- *
- * @param {string|Function} scope - The scope name or scope function
- * @param {...any} scopeArgs - Arguments to pass to the scope function
- * @returns {Object} The scoped model instance
- */
-function applyScope(scope, ...scopeArgs) {
-  // 'this' refers to req.apialize when bound
-  const req = this._req;
-  const model = this._model;
-
-  if (!model || !model.scope) {
-    throw new Error('Model does not support scopes');
-  }
-
-  // Apply the scope to get a scoped model instance
-  let scopedModel;
+function createScopedModel(model, scope, scopeArgs) {
   if (typeof scope === 'function') {
-    // Handle scope as a function
-    scopedModel = model.scope(scope(...scopeArgs));
-  } else {
-    // Handle scope as a string name
-    scopedModel =
-      scopeArgs.length > 0
-        ? model.scope({ method: [scope, ...scopeArgs] })
-        : model.scope(scope);
+    return model.scope(scope(...scopeArgs));
   }
 
-  // Get the scope's options
-  const scopeOptions = scopedModel._scope || {};
-
-  // Ensure apialize options exist
-  if (!req.apialize.options) {
-    req.apialize.options = {};
+  if (scopeArgs.length > 0) {
+    return model.scope({ method: [scope, ...scopeArgs] });
   }
 
-  // Merge scope options with existing options
-  const currentOptions = req.apialize.options;
+  return model.scope(scope);
+}
 
-  // Handle where clause merging
+function mergeIncludeOptions(currentInclude, scopeInclude) {
+  if (currentInclude) {
+    if (Array.isArray(currentInclude)) {
+      return [...currentInclude, ...scopeInclude];
+    }
+    return [currentInclude, ...scopeInclude];
+  }
+  return scopeInclude;
+}
+
+function mergeScopeOptions(currentOptions, scopeOptions) {
   if (scopeOptions.where) {
     currentOptions.where = {
       ...currentOptions.where,
@@ -81,71 +57,76 @@ function applyScope(scope, ...scopeArgs) {
     };
   }
 
-  // Handle include clause merging
   if (scopeOptions.include) {
-    if (currentOptions.include) {
-      currentOptions.include = Array.isArray(currentOptions.include)
-        ? [...currentOptions.include, ...scopeOptions.include]
-        : [currentOptions.include, ...scopeOptions.include];
-    } else {
-      currentOptions.include = scopeOptions.include;
-    }
+    currentOptions.include = mergeIncludeOptions(
+      currentOptions.include,
+      scopeOptions.include
+    );
   }
 
-  // Handle attributes
   if (scopeOptions.attributes) {
     currentOptions.attributes = scopeOptions.attributes;
   }
 
-  // Handle order
   if (scopeOptions.order) {
     currentOptions.order = scopeOptions.order;
   }
 
-  // Handle other scope options (limit, offset, etc.)
-  Object.keys(scopeOptions).forEach((key) => {
-    if (!['where', 'include', 'attributes', 'order'].includes(key)) {
+  const handledKeys = ['where', 'include', 'attributes', 'order'];
+  const otherScopeKeys = Object.keys(scopeOptions);
+
+  for (let i = 0; i < otherScopeKeys.length; i++) {
+    const key = otherScopeKeys[i];
+    if (!handledKeys.includes(key)) {
       currentOptions[key] = scopeOptions[key];
     }
-  });
+  }
+}
+
+function applyScope(scope, ...scopeArgs) {
+  const req = this._req;
+  const model = this._model;
+
+  if (!model || !model.scope) {
+    throw new Error('Model does not support scopes');
+  }
+
+  const scopedModel = createScopedModel(model, scope, scopeArgs);
+  const scopeOptions = scopedModel._scope || {};
+
+  ensureApializeStructure(req);
+
+  const currentOptions = req.apialize.options;
+  mergeScopeOptions(currentOptions, scopeOptions);
 
   return scopedModel;
 }
 
-/**
- * Apply multiple where conditions in sequence
- *
- * @param {Array} whereConditions - Array of where condition objects
- */
 function applyMultipleWhere(whereConditions) {
   if (!Array.isArray(whereConditions)) {
     throw new Error('whereConditions must be an array');
   }
 
-  whereConditions.forEach((whereCondition) => {
+  for (let i = 0; i < whereConditions.length; i++) {
+    const whereCondition = whereConditions[i];
     applyWhere.call(this, whereCondition);
-  });
+  }
 
   return this._req.apialize.options.where;
 }
 
-/**
- * Apply a where condition only if it doesn't already exist
- *
- * @param {Object} conditionalWhere - The where conditions to add if not present
- */
 function applyWhereIfNotExists(conditionalWhere) {
   const req = this._req;
 
-  if (!req?.apialize?.options?.where) {
-    return applyWhere.call(this, conditionalWhere);
-  }
+  ensureApializeStructure(req);
 
   const existingWhere = req.apialize.options.where;
   const filteredWhere = {};
 
-  // Only add conditions that don't already exist
-  for (const [key, value] of Object.entries(conditionalWhere)) {
+  const conditionalKeys = Object.keys(conditionalWhere);
+  for (let i = 0; i < conditionalKeys.length; i++) {
+    const key = conditionalKeys[i];
+    const value = conditionalWhere[key];
     if (!(key in existingWhere)) {
       filteredWhere[key] = value;
     }
@@ -158,73 +139,47 @@ function applyWhereIfNotExists(conditionalWhere) {
   return existingWhere;
 }
 
-/**
- * Apply multiple scopes in sequence
- *
- * @param {Array} scopes - Array of scope configurations
- */
 function applyScopes(scopes) {
-  scopes.forEach((scopeConfig) => {
+  for (let i = 0; i < scopes.length; i++) {
+    const scopeConfig = scopes[i];
+
     if (typeof scopeConfig === 'string') {
       applyScope.call(this, scopeConfig);
     } else if (typeof scopeConfig === 'object' && scopeConfig.name) {
-      applyScope.call(this, scopeConfig.name, ...(scopeConfig.args || []));
+      const scopeArgs = scopeConfig.args || [];
+      applyScope.call(this, scopeConfig.name, ...scopeArgs);
     } else if (typeof scopeConfig === 'function') {
       applyScope.call(this, scopeConfig);
     }
-  });
+  }
 }
 
-/**
- * Remove specific where conditions
- *
- * @param {Array|string} keysToRemove - Key(s) to remove from where clause
- */
 function removeWhere(keysToRemove) {
   const req = this._req;
 
-  if (!req?.apialize?.options?.where) {
-    return {};
-  }
+  ensureApializeStructure(req);
 
   const keys = Array.isArray(keysToRemove) ? keysToRemove : [keysToRemove];
   const where = req.apialize.options.where;
 
-  keys.forEach((key) => {
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
     delete where[key];
-  });
+  }
 
   return where;
 }
 
-/**
- * Replace the entire where clause
- *
- * @param {Object} newWhere - The new where clause to set
- */
 function replaceWhere(newWhere) {
   const req = this._req;
 
-  if (!req || !req.apialize) {
-    throw new Error('replaceWhere must be called on req.apialize object');
-  }
-
-  if (!req.apialize.options) {
-    req.apialize.options = {};
-  }
+  ensureApializeStructure(req);
 
   req.apialize.options.where = newWhere || {};
   return req.apialize.options.where;
 }
 
-/**
- * Create helper functions bound to a specific request and model
- *
- * @param {Object} req - The Express request object
- * @param {Object} model - The Sequelize model (optional, for scope functions)
- * @returns {Object} Object with bound helper functions
- */
-function createHelpers(req, model = null) {
+function createHelpers(req, model) {
   const context = {
     _req: req,
     _model: model,
@@ -238,7 +193,6 @@ function createHelpers(req, model = null) {
     replaceWhere: replaceWhere.bind(context),
   };
 
-  // Only add scope-related functions if model is available
   if (model) {
     helpers.applyScope = applyScope.bind(context);
     helpers.applyScopes = applyScopes.bind(context);

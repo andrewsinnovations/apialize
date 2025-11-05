@@ -16,23 +16,221 @@ const {
 } = require('./listUtils');
 const { executeSearchOperation } = require('./search');
 
-// Default configuration for list operation
 const LIST_DEFAULTS = {
   middleware: [],
-  allowFiltering: true, // allow non "api:" query params to become where filters
-  allowOrdering: true, // allow api:order_by / api:order_dir query params
-  metaShowFilters: false, // include applied filters in meta.filters
-  metaShowOrdering: false, // include applied ordering in meta.order
-  defaultPageSize: 100, // default page size when not specified in query or model config
-  defaultOrderBy: 'id', // default column to order by when no ordering is specified
-  defaultOrderDir: 'ASC', // default order direction when no ordering is specified
+  allowFiltering: true,
+  allowOrdering: true,
+  metaShowFilters: false,
+  metaShowOrdering: false,
+  defaultPageSize: 100,
+  defaultOrderBy: 'id',
+  defaultOrderDir: 'ASC',
   pre: null,
   post: null,
-  // relation_id_mapping allows mapping relation 'id' filters to custom fields
   relation_id_mapping: null,
 };
 
-// Convert list query parameters to search operation format
+function extractValidPage(query) {
+  const page = parseInt(query['api:page'], 10);
+  if (isNaN(page) || page < 1) {
+    return 1;
+  }
+  return page;
+}
+
+function calculateEffectivePageSize(modelCfg, listOptions) {
+  if (Number.isInteger(modelCfg.page_size) && modelCfg.page_size > 0) {
+    return modelCfg.page_size;
+  }
+  return listOptions.defaultPageSize;
+}
+
+function extractValidPageSize(query, effectivePageSize) {
+  const pageSize = parseInt(query['api:page_size'], 10);
+  if (isNaN(pageSize) || pageSize < 1) {
+    return effectivePageSize;
+  }
+  return pageSize;
+}
+
+function setupPagingParameters(query, modelCfg, listOptions) {
+  const page = extractValidPage(query);
+  const effectivePageSize = calculateEffectivePageSize(modelCfg, listOptions);
+  const pageSize = extractValidPageSize(query, effectivePageSize);
+
+  return {
+    page: page,
+    size: pageSize,
+  };
+}
+
+function extractRawOrderBy(query, modelCfg, allowOrdering) {
+  if (allowOrdering) {
+    return query['api:order_by'] || modelCfg.orderby;
+  }
+  return modelCfg.orderby;
+}
+
+function extractGlobalDirection(
+  query,
+  modelCfg,
+  allowOrdering,
+  defaultOrderDir
+) {
+  let direction;
+
+  if (allowOrdering) {
+    direction = query['api:order_dir'] || modelCfg.orderdir || defaultOrderDir;
+  } else {
+    direction = modelCfg.orderdir || defaultOrderDir;
+  }
+
+  return direction.toString().toUpperCase();
+}
+
+function parseOrderByField(field, globalDir) {
+  const trimmed = field.toString().trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let columnName;
+  let direction;
+
+  if (trimmed.charAt(0) === '-') {
+    columnName = trimmed.slice(1);
+    direction = 'DESC';
+  } else if (trimmed.charAt(0) === '+') {
+    columnName = trimmed.slice(1);
+    direction = 'ASC';
+  } else {
+    columnName = trimmed;
+    if (globalDir === 'DESC') {
+      direction = 'DESC';
+    } else {
+      direction = 'ASC';
+    }
+  }
+
+  return {
+    order_by: columnName,
+    direction: direction,
+  };
+}
+
+function buildOrderingArray(rawOrderBy, globalDir) {
+  if (!rawOrderBy) {
+    return null;
+  }
+
+  const splitFields = rawOrderBy.split(',');
+  const orderingArray = [];
+
+  for (let i = 0; i < splitFields.length; i++) {
+    const field = splitFields[i];
+    const parsedField = parseOrderByField(field, globalDir);
+    if (parsedField) {
+      orderingArray.push(parsedField);
+    }
+  }
+
+  if (orderingArray.length > 0) {
+    return orderingArray;
+  }
+  return null;
+}
+
+function setupOrderingParameters(query, modelCfg, listOptions) {
+  const rawOrderBy = extractRawOrderBy(
+    query,
+    modelCfg,
+    listOptions.allowOrdering
+  );
+  const globalDir = extractGlobalDirection(
+    query,
+    modelCfg,
+    listOptions.allowOrdering,
+    listOptions.defaultOrderDir
+  );
+
+  const orderingArray = buildOrderingArray(rawOrderBy, globalDir);
+
+  if (orderingArray) {
+    return orderingArray;
+  }
+
+  return [
+    {
+      order_by: listOptions.defaultOrderBy,
+      direction: listOptions.defaultOrderDir,
+    },
+  ];
+}
+
+function processInOperatorValue(value) {
+  const stringValue = String(value);
+  const splitValues = stringValue.split(',');
+  const trimmedValues = [];
+
+  for (let i = 0; i < splitValues.length; i++) {
+    const trimmed = splitValues[i].trim();
+    if (trimmed.length > 0) {
+      trimmedValues.push(trimmed);
+    }
+  }
+
+  return trimmedValues;
+}
+
+function processFilterValue(operator, value) {
+  if (operator === 'in' || operator === 'not_in') {
+    return processInOperatorValue(value);
+  }
+  return value;
+}
+
+function processFieldOperatorFilter(key, value, filtering) {
+  const lastColonIndex = key.lastIndexOf(':');
+  const fieldName = key.slice(0, lastColonIndex);
+  const operator = key.slice(lastColonIndex + 1);
+
+  if (!filtering[fieldName]) {
+    filtering[fieldName] = {};
+  }
+
+  const searchValue = processFilterValue(operator, value);
+  filtering[fieldName][operator] = searchValue;
+}
+
+function setupFilteringParameters(query, allowFiltering) {
+  const filtering = {};
+
+  if (!allowFiltering) {
+    return filtering;
+  }
+
+  const queryKeys = Object.keys(query);
+  for (let i = 0; i < queryKeys.length; i++) {
+    const key = queryKeys[i];
+    const value = query[key];
+
+    if (key.startsWith('api:')) {
+      continue;
+    }
+    if (value === undefined) {
+      continue;
+    }
+
+    if (key.includes(':')) {
+      processFieldOperatorFilter(key, value, filtering);
+    } else {
+      filtering[key] = value;
+    }
+  }
+
+  return filtering;
+}
+
 function convertListQueryToSearchBody(query, modelCfg, listOptions) {
   const searchBody = {
     filtering: {},
@@ -40,122 +238,106 @@ function convertListQueryToSearchBody(query, modelCfg, listOptions) {
     paging: {},
   };
 
-  // Convert pagination parameters
-  let page = parseInt(query['api:page'], 10);
-  if (isNaN(page) || page < 1) page = 1;
-  searchBody.paging.page = page;
-
-  const effectivePageSize =
-    Number.isInteger(modelCfg.page_size) && modelCfg.page_size > 0
-      ? modelCfg.page_size
-      : listOptions.defaultPageSize;
-
-  let pageSize = parseInt(query['api:page_size'], 10);
-  if (isNaN(pageSize) || pageSize < 1) pageSize = effectivePageSize;
-  searchBody.paging.size = pageSize;
-
-  // Convert ordering parameters
-  let rawOrderBy, globalDir;
-
-  if (listOptions.allowOrdering) {
-    rawOrderBy = query['api:order_by'] || modelCfg.orderby;
-    globalDir = (
-      query['api:order_dir'] ||
-      modelCfg.orderdir ||
-      listOptions.defaultOrderDir
-    )
-      .toString()
-      .toUpperCase();
-  } else {
-    // When ordering is disabled, only use model config (ignore query parameters)
-    rawOrderBy = modelCfg.orderby;
-    globalDir = (modelCfg.orderdir || listOptions.defaultOrderDir)
-      .toString()
-      .toUpperCase();
-  }
-
-  if (rawOrderBy) {
-    const splitFields = rawOrderBy.split(',');
-    const orderingArray = [];
-
-    for (const field of splitFields) {
-      const trimmed = field?.toString().trim();
-      if (!trimmed) continue;
-
-      let columnName, direction;
-      if (trimmed.charAt(0) === '-') {
-        columnName = trimmed.slice(1);
-        direction = 'DESC';
-      } else if (trimmed.charAt(0) === '+') {
-        columnName = trimmed.slice(1);
-        direction = 'ASC';
-      } else {
-        columnName = trimmed;
-        direction = globalDir === 'DESC' ? 'DESC' : 'ASC';
-      }
-
-      orderingArray.push({
-        order_by: columnName,
-        direction: direction,
-      });
-    }
-
-    if (orderingArray.length > 0) {
-      searchBody.ordering = orderingArray;
-    }
-  }
-
-  // If no ordering was set, use defaults
-  if (!searchBody.ordering) {
-    searchBody.ordering = [
-      {
-        order_by: listOptions.defaultOrderBy,
-        direction: listOptions.defaultOrderDir,
-      },
-    ];
-  }
-
-  // Convert filtering parameters
-  if (listOptions.allowFiltering) {
-    for (const [key, value] of Object.entries(query)) {
-      if (key.startsWith('api:')) continue;
-      if (value === undefined) continue;
-
-      // Handle field:operator format
-      if (key.includes(':')) {
-        const lastColonIndex = key.lastIndexOf(':');
-        const fieldName = key.slice(0, lastColonIndex);
-        const operator = key.slice(lastColonIndex + 1);
-
-        // Initialize field object if it doesn't exist
-        if (!searchBody.filtering[fieldName]) {
-          searchBody.filtering[fieldName] = {};
-        }
-
-        // Convert list operators to search operators and handle special cases
-        let searchValue = value;
-        if (operator === 'in' || operator === 'not_in') {
-          // Split comma-separated values for IN operations
-          searchValue = String(value)
-            .split(',')
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0);
-        }
-
-        searchBody.filtering[fieldName][operator] = searchValue;
-      } else {
-        // Simple equality filter (case-insensitive for strings will be handled by search logic)
-        searchBody.filtering[key] = value;
-      }
-    }
-  }
+  searchBody.paging = setupPagingParameters(query, modelCfg, listOptions);
+  searchBody.ordering = setupOrderingParameters(query, modelCfg, listOptions);
+  searchBody.filtering = setupFilteringParameters(
+    query,
+    listOptions.allowFiltering
+  );
 
   return searchBody;
 }
 
-function list(model, options = {}, modelOptions = {}) {
+function extractListOptions(options) {
+  return Object.assign({}, LIST_DEFAULTS, options);
+}
+
+function extractIdMapping(mergedOptions) {
+  return mergedOptions.id_mapping || 'id';
+}
+
+function filterMiddlewareFunctions(middleware) {
+  const inline = [];
+  for (let i = 0; i < middleware.length; i++) {
+    const fn = middleware[i];
+    if (typeof fn === 'function') {
+      inline.push(fn);
+    }
+  }
+  return inline;
+}
+
+function createFilteringMiddleware(allowFiltering) {
+  return function (req, _res, next) {
+    if (!allowFiltering) {
+      req._apializeDisableQueryFilters = true;
+    }
+    next();
+  };
+}
+
+function createSearchOptions(mergedOptions, idMapping) {
+  return {
+    defaultPageSize: mergedOptions.defaultPageSize,
+    defaultOrderBy: mergedOptions.defaultOrderBy,
+    defaultOrderDir: mergedOptions.defaultOrderDir,
+    metaShowOrdering: mergedOptions.metaShowOrdering,
+    id_mapping: idMapping,
+    relation_id_mapping: mergedOptions.relation_id_mapping,
+    pre: mergedOptions.pre,
+    post: mergedOptions.post,
+  };
+}
+
+function convertSearchFiltersToListFormat(searchBody) {
+  const filters = {};
+
+  if (!searchBody.filtering) {
+    return filters;
+  }
+
+  const filteringKeys = Object.keys(searchBody.filtering);
+  for (let i = 0; i < filteringKeys.length; i++) {
+    const key = filteringKeys[i];
+    const value = searchBody.filtering[key];
+
+    if (typeof value === 'object' && !Array.isArray(value)) {
+      const valueKeys = Object.keys(value);
+      for (let j = 0; j < valueKeys.length; j++) {
+        const op = valueKeys[j];
+        const val = value[op];
+        filters[`${key}:${op}`] = val;
+      }
+    } else {
+      filters[key] = value;
+    }
+  }
+
+  return filters;
+}
+
+function addListMetaFilters(
+  payload,
+  searchBody,
+  metaShowFilters,
+  allowFiltering
+) {
+  if (payload.meta && metaShowFilters && allowFiltering) {
+    payload.meta.filters = convertSearchFiltersToListFormat(searchBody);
+  }
+}
+
+function list(model, options, modelOptions) {
+  if (!options) {
+    options = {};
+  }
+  if (!modelOptions) {
+    modelOptions = {};
+  }
+
   ensureFn(model, 'findAndCountAll');
-  const mergedOptions = Object.assign({}, LIST_DEFAULTS, options);
+
+  const mergedOptions = extractListOptions(options);
   const middleware = mergedOptions.middleware;
   const allowFiltering = mergedOptions.allowFiltering;
   const allowOrdering = mergedOptions.allowOrdering;
@@ -169,47 +351,27 @@ function list(model, options = {}, modelOptions = {}) {
   const pre = mergedOptions.pre;
   const post = mergedOptions.post;
 
-  const idMapping = id_mapping || 'id';
-
-  const inline = [];
-  for (let i = 0; i < middleware.length; i++) {
-    const fn = middleware[i];
-    if (typeof fn === 'function') inline.push(fn);
-  }
+  const idMapping = extractIdMapping(mergedOptions);
+  const inline = filterMiddlewareFunctions(middleware);
   const router = express.Router({ mergeParams: true });
+  const filteringMiddleware = createFilteringMiddleware(allowFiltering);
 
   router.get(
     '/',
-    (req, _res, next) => {
-      if (!allowFiltering) req._apializeDisableQueryFilters = true;
-      next();
-    },
+    filteringMiddleware,
     apializeContext,
     ...inline,
     asyncHandler(async (req, res) => {
       const q = req.query || {};
       const modelCfg = (model && model.apialize) || {};
 
-      // Convert list query parameters to search body format
       const searchBody = convertListQueryToSearchBody(
         q,
         modelCfg,
         mergedOptions
       );
+      const searchOptions = createSearchOptions(mergedOptions, idMapping);
 
-      // Create search options that match list behavior
-      const searchOptions = {
-        defaultPageSize,
-        defaultOrderBy,
-        defaultOrderDir,
-        metaShowOrdering,
-        id_mapping: idMapping,
-        relation_id_mapping: relationIdMapping,
-        pre,
-        post,
-      };
-
-      // Execute the search operation with the converted parameters
       const payload = await executeSearchOperation(
         model,
         searchOptions,
@@ -219,26 +381,13 @@ function list(model, options = {}, modelOptions = {}) {
         searchBody
       );
 
-      // If search didn't send a response and we have a payload, modify it to match list format
       if (!res.headersSent && payload) {
-        // Add list-specific meta fields if needed
-        if (payload.meta && metaShowFilters && allowFiltering) {
-          // Convert search filters back to list format for meta display if needed
-          payload.meta.filters = {};
-          if (searchBody.filtering) {
-            for (const [key, value] of Object.entries(searchBody.filtering)) {
-              if (typeof value === 'object' && !Array.isArray(value)) {
-                // Convert back from search operator format to list format
-                for (const [op, val] of Object.entries(value)) {
-                  payload.meta.filters[`${key}:${op}`] = val;
-                }
-              } else {
-                payload.meta.filters[key] = value;
-              }
-            }
-          }
-        }
-
+        addListMetaFilters(
+          payload,
+          searchBody,
+          metaShowFilters,
+          allowFiltering
+        );
         res.json(payload);
       }
     })

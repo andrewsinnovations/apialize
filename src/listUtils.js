@@ -1,7 +1,9 @@
 const Sequelize = require('sequelize');
 
 function getModelAttributes(model) {
-  if (!model || !model.rawAttributes) return {};
+  if (!model || !model.rawAttributes) {
+    return {};
+  }
   return model.rawAttributes;
 }
 
@@ -10,14 +12,44 @@ function validateColumnExists(model, columnName) {
   return Object.prototype.hasOwnProperty.call(attributes, columnName);
 }
 
-function resolveIncludedAttribute(rootModel, includes, dottedPath) {
-  if (
-    !dottedPath ||
-    typeof dottedPath !== 'string' ||
-    !dottedPath.includes('.')
-  )
+function isValidDottedPath(dottedPath) {
+  if (!dottedPath || typeof dottedPath !== 'string') {
+    return false;
+  }
+  if (!dottedPath.includes('.')) {
+    return false;
+  }
+  return true;
+}
+
+function isValidIncludesArray(includes) {
+  if (!Array.isArray(includes) || includes.length === 0) {
+    return false;
+  }
+  return true;
+}
+
+function findIncludeByAlias(includes, alias) {
+  if (!Array.isArray(includes)) {
     return null;
-  if (!Array.isArray(includes) || !includes.length) return null;
+  }
+
+  for (let i = 0; i < includes.length; i++) {
+    const include = includes[i];
+    if (include && include.as === alias) {
+      return include;
+    }
+  }
+  return null;
+}
+
+function resolveIncludedAttribute(rootModel, includes, dottedPath) {
+  if (!isValidDottedPath(dottedPath)) {
+    return null;
+  }
+  if (!isValidIncludesArray(includes)) {
+    return null;
+  }
 
   const parts = dottedPath.split('.');
   const attrName = parts.pop();
@@ -26,10 +58,12 @@ function resolveIncludedAttribute(rootModel, includes, dottedPath) {
   const aliasChain = [];
   const includeChain = [];
 
-  for (const alias of parts) {
-    if (!Array.isArray(currIncludes)) return null;
-    const match = currIncludes.find((inc) => inc && inc.as === alias);
-    if (!match || !match.model) return null;
+  for (let i = 0; i < parts.length; i++) {
+    const alias = parts[i];
+    const match = findIncludeByAlias(currIncludes, alias);
+    if (!match || !match.model) {
+      return null;
+    }
     aliasChain.push(alias);
     currModel = match.model;
     currIncludes = match.include || [];
@@ -37,7 +71,10 @@ function resolveIncludedAttribute(rootModel, includes, dottedPath) {
   }
 
   const attrs = getModelAttributes(currModel);
-  if (!Object.prototype.hasOwnProperty.call(attrs, attrName)) return null;
+  if (!Object.prototype.hasOwnProperty.call(attrs, attrName)) {
+    return null;
+  }
+
   return {
     foundModel: currModel,
     attribute: attrs[attrName],
@@ -47,61 +84,272 @@ function resolveIncludedAttribute(rootModel, includes, dottedPath) {
   };
 }
 
+function isValidIntegerValue(value) {
+  return !isNaN(parseInt(value, 10));
+}
+
+function isValidFloatValue(value) {
+  return !isNaN(parseFloat(value));
+}
+
+function isValidBooleanValue(value) {
+  const validBooleans = ['true', 'false', '1', '0', 'yes', 'no'];
+  const stringValue = String(value).toLowerCase();
+  return validBooleans.includes(stringValue);
+}
+
+function isValidDateValue(value) {
+  return !isNaN(Date.parse(value));
+}
+
+function validateDataTypeByName(typeName, value) {
+  if (typeName === 'integer' || typeName === 'bigint') {
+    return isValidIntegerValue(value);
+  }
+  if (
+    typeName === 'float' ||
+    typeName === 'real' ||
+    typeName === 'double' ||
+    typeName === 'decimal'
+  ) {
+    return isValidFloatValue(value);
+  }
+  if (typeName === 'boolean') {
+    return isValidBooleanValue(value);
+  }
+  if (typeName === 'date' || typeName === 'dateonly') {
+    return isValidDateValue(value);
+  }
+  if (
+    typeName === 'string' ||
+    typeName === 'text' ||
+    typeName === 'char' ||
+    typeName === 'varchar'
+  ) {
+    return true;
+  }
+  return true;
+}
+
 function validateDataType(model, columnName, value) {
   const attributes = getModelAttributes(model);
   const attribute = attributes[columnName];
 
-  if (!attribute || !attribute.type) return true; // Allow if no type info
+  if (!attribute || !attribute.type) {
+    return true;
+  }
 
   const dataType = attribute.type;
   const typeName = dataType.constructor.name.toLowerCase();
 
   try {
-    switch (typeName) {
-      case 'integer':
-      case 'bigint':
-        return !isNaN(parseInt(value, 10));
-      case 'float':
-      case 'real':
-      case 'double':
-      case 'decimal':
-        return !isNaN(parseFloat(value));
-      case 'boolean':
-        return ['true', 'false', '1', '0', 'yes', 'no'].includes(
-          String(value).toLowerCase()
-        );
-      case 'date':
-      case 'dateonly':
-        return !isNaN(Date.parse(value));
-      case 'string':
-      case 'text':
-      case 'char':
-      case 'varchar':
-        return true; // Strings are always valid
-      default:
-        return true; // Allow unknown types
-    }
-  } catch (_err) {
-    return true; // Allow if validation fails
+    return validateDataTypeByName(typeName, value);
+  } catch (error) {
+    return true;
   }
 }
 
+function extractValidPage(query) {
+  const page = parseInt(query['api:page'], 10);
+  if (isNaN(page) || page < 1) {
+    return 1;
+  }
+  return page;
+}
+
+function calculateEffectivePageSize(modelCfg, defaultPageSize) {
+  if (Number.isInteger(modelCfg.page_size) && modelCfg.page_size > 0) {
+    return modelCfg.page_size;
+  }
+  return defaultPageSize;
+}
+
+function extractValidPageSize(query, effectivePageSize) {
+  const pageSize = parseInt(query['api:page_size'], 10);
+  if (isNaN(pageSize) || pageSize < 1) {
+    return effectivePageSize;
+  }
+  return pageSize;
+}
+
 function setupPagination(req, query, modelCfg, defaultPageSize) {
-  let page = parseInt(query['api:page'], 10);
-  if (isNaN(page) || page < 1) page = 1;
-
-  const effectivePageSize =
-    Number.isInteger(modelCfg.page_size) && modelCfg.page_size > 0
-      ? modelCfg.page_size
-      : defaultPageSize;
-
-  let pageSize = parseInt(query['api:page_size'], 10);
-  if (isNaN(pageSize) || pageSize < 1) pageSize = effectivePageSize;
+  const page = extractValidPage(query);
+  const effectivePageSize = calculateEffectivePageSize(
+    modelCfg,
+    defaultPageSize
+  );
+  const pageSize = extractValidPageSize(query, effectivePageSize);
 
   req.apialize.options.limit = pageSize;
   req.apialize.options.offset = (page - 1) * pageSize;
 
   return { page, pageSize };
+}
+
+function extractOrderByValue(query, modelCfg, allowOrdering) {
+  if (allowOrdering) {
+    return query['api:order_by'] || modelCfg.orderby;
+  }
+  return modelCfg.orderby;
+}
+
+function extractOrderDirection(query, modelCfg, allowOrdering) {
+  let direction;
+  if (allowOrdering) {
+    direction = query['api:order_dir'] || modelCfg.orderdir || 'ASC';
+  } else {
+    direction = modelCfg.orderdir || 'ASC';
+  }
+  return direction.toString().toUpperCase();
+}
+
+function parseOrderByFields(rawOrderBy) {
+  if (!rawOrderBy) {
+    return [];
+  }
+
+  const splitFields = rawOrderBy.split(',');
+  const fields = [];
+
+  for (let i = 0; i < splitFields.length; i++) {
+    const field = splitFields[i];
+    const trimmed = field != null ? String(field).trim() : '';
+    if (trimmed) {
+      fields.push(trimmed);
+    }
+  }
+
+  return fields;
+}
+
+function parseFieldDirection(field, globalDir) {
+  if (!field) {
+    return null;
+  }
+
+  let columnName;
+  let direction;
+
+  if (field.charAt(0) === '-') {
+    columnName = field.slice(1);
+    direction = 'DESC';
+  } else if (field.charAt(0) === '+') {
+    columnName = field.slice(1);
+    direction = 'ASC';
+  } else {
+    columnName = field;
+    if (globalDir === 'DESC') {
+      direction = 'DESC';
+    } else {
+      direction = 'ASC';
+    }
+  }
+
+  return { columnName, direction };
+}
+
+function getIncludesFromRequest(req) {
+  if (req.apialize.options && Array.isArray(req.apialize.options.include)) {
+    return req.apialize.options.include;
+  }
+  return [];
+}
+
+function sendBadRequestResponse(res, message) {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn(message);
+  }
+  res.status(400).json({ success: false, error: 'Bad request' });
+}
+
+function findRelationMapping(relationIdMapping, foundModel) {
+  if (!Array.isArray(relationIdMapping)) {
+    return null;
+  }
+
+  for (let i = 0; i < relationIdMapping.length; i++) {
+    const mapping = relationIdMapping[i];
+    if (mapping.model === foundModel) {
+      return mapping;
+    }
+    if (mapping.model && foundModel) {
+      if (mapping.model.name === foundModel.name) {
+        return mapping;
+      }
+      if (mapping.model.tableName === foundModel.tableName) {
+        return mapping;
+      }
+    }
+  }
+  return null;
+}
+
+function buildIncludeChainForOrder(resolved) {
+  if (Array.isArray(resolved.includeChain)) {
+    const chain = [];
+    for (let i = 0; i < resolved.includeChain.length; i++) {
+      const c = resolved.includeChain[i];
+      chain.push({ model: c.model, as: c.as });
+    }
+    return chain;
+  }
+
+  const parts = resolved.aliasPath.split('.');
+  return [
+    {
+      model: resolved.foundModel,
+      as: parts.slice(0, -1).join('.') || parts[0],
+    },
+  ];
+}
+
+function processOrderField(
+  field,
+  globalDir,
+  model,
+  includes,
+  req,
+  res,
+  relationIdMapping
+) {
+  const parsedField = parseFieldDirection(field, globalDir);
+  if (!parsedField) {
+    return null;
+  }
+
+  const { columnName, direction } = parsedField;
+
+  if (columnName.includes('.')) {
+    const resolved = resolveIncludedAttribute(model, includes, columnName);
+    if (!resolved) {
+      const message = `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`;
+      sendBadRequestResponse(res, message);
+      return false;
+    }
+
+    const parts = columnName.split('.');
+    let attr = parts[parts.length - 1];
+
+    if (attr === 'id') {
+      const relationMapping = findRelationMapping(
+        relationIdMapping,
+        resolved.foundModel
+      );
+      if (relationMapping && relationMapping.id_field) {
+        attr = relationMapping.id_field;
+      }
+    }
+
+    const chain = buildIncludeChainForOrder(resolved);
+    return [...chain, attr, direction];
+  } else {
+    if (!validateColumnExists(model, columnName)) {
+      const message = `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`;
+      sendBadRequestResponse(res, message);
+      return false;
+    }
+    return [columnName, direction];
+  }
 }
 
 function setupOrdering(
@@ -116,135 +364,117 @@ function setupOrdering(
   idMapping,
   relationIdMapping
 ) {
-  let rawOrderBy, globalDir;
-
-  if (allowOrdering) {
-    rawOrderBy = query['api:order_by'] || modelCfg.orderby;
-    globalDir = (query['api:order_dir'] || modelCfg.orderdir || 'ASC')
-      .toString()
-      .toUpperCase();
-  } else {
-    rawOrderBy = modelCfg.orderby;
-    globalDir = (modelCfg.orderdir || 'ASC').toString().toUpperCase();
-  }
+  const rawOrderBy = extractOrderByValue(query, modelCfg, allowOrdering);
+  const globalDir = extractOrderDirection(query, modelCfg, allowOrdering);
 
   if (rawOrderBy) {
-    const splitFields = rawOrderBy.split(',');
-    const fields = [];
-    for (let i = 0; i < splitFields.length; i++) {
-      const trimmed =
-        splitFields[i] != null ? String(splitFields[i]).trim() : '';
-      if (trimmed) fields.push(trimmed);
-    }
-
+    const fields = parseOrderByFields(rawOrderBy);
     const order = [];
-    const includes =
-      req.apialize.options && Array.isArray(req.apialize.options.include)
-        ? req.apialize.options.include
-        : [];
-    for (let i = 0; i < fields.length; i++) {
-      const f = fields[i];
-      if (!f) continue;
+    const includes = getIncludesFromRequest(req);
 
-      let columnName;
-      let direction;
-      if (f.charAt(0) === '-') {
-        columnName = f.slice(1);
-        direction = 'DESC';
-      } else if (f.charAt(0) === '+') {
-        columnName = f.slice(1);
-        direction = 'ASC';
-      } else {
-        columnName = f;
-        direction = globalDir === 'DESC' ? 'DESC' : 'ASC';
+    for (let i = 0; i < fields.length; i++) {
+      const field = fields[i];
+      if (!field) {
+        continue;
       }
 
-      // Support dotted-path for included attributes
-      if (columnName.includes('.')) {
-        const resolved = resolveIncludedAttribute(model, includes, columnName);
-        if (!resolved) {
-          if (process.env.NODE_ENV === 'development') {
-            console.warn(
-              `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`
-            );
-          }
-          res.status(400).json({ success: false, error: 'Bad request' });
-          return false;
-        }
-        const parts = columnName.split('.');
-        let attr = parts[parts.length - 1];
-
-        // Apply relation_id_mapping if configured and the attribute is 'id'
-        if (attr === 'id' && Array.isArray(relationIdMapping)) {
-          const relationMapping = relationIdMapping.find((mapping) => {
-            // Compare models by name, tableName, or reference equality
-            if (mapping.model === resolved.foundModel) return true;
-            if (mapping.model && resolved.foundModel) {
-              // Compare by model name
-              if (mapping.model.name === resolved.foundModel.name) return true;
-              // Compare by table name as fallback
-              if (mapping.model.tableName === resolved.foundModel.tableName)
-                return true;
-            }
-            return false;
-          });
-          if (relationMapping && relationMapping.id_field) {
-            attr = relationMapping.id_field;
-          }
-        }
-
-        const chain = Array.isArray(resolved.includeChain)
-          ? resolved.includeChain.map((c) => ({ model: c.model, as: c.as }))
-          : [
-              {
-                model: resolved.foundModel,
-                as: parts.slice(0, -1).join('.') || parts[0],
-              },
-            ];
-        order.push([...chain, attr, direction]);
-      } else {
-        // Validate column exists on root model
-        if (!validateColumnExists(model, columnName)) {
-          if (process.env.NODE_ENV === 'development') {
-            console.warn(
-              `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`
-            );
-          }
-          res.status(400).json({ success: false, error: 'Bad request' });
-          return false; // Indicate validation failed
-        }
-        order.push([columnName, direction]);
+      const orderEntry = processOrderField(
+        field,
+        globalDir,
+        model,
+        includes,
+        req,
+        res,
+        relationIdMapping
+      );
+      if (orderEntry === false) {
+        return false;
+      }
+      if (orderEntry) {
+        order.push(orderEntry);
       }
     }
-    if (order.length) req.apialize.options.order = order;
+
+    if (order.length) {
+      req.apialize.options.order = order;
+    }
   }
 
   if (!req.apialize.options.order) {
-    const effectiveDefaultOrderBy =
-      defaultOrderBy === 'id' && idMapping ? idMapping : defaultOrderBy;
+    let effectiveDefaultOrderBy = defaultOrderBy;
+    if (defaultOrderBy === 'id' && idMapping) {
+      effectiveDefaultOrderBy = idMapping;
+    }
     req.apialize.options.order = [[effectiveDefaultOrderBy, defaultOrderDir]];
   }
 
-  return true; // Indicate success
+  return true;
+}
+
+function getSequelizeOpFromModel(model) {
+  if (!model || !model.sequelize) {
+    return null;
+  }
+
+  if (model.sequelize.constructor && model.sequelize.constructor.Op) {
+    return model.sequelize.constructor.Op;
+  }
+
+  if (model.sequelize.Sequelize && model.sequelize.Sequelize.Op) {
+    return model.sequelize.Sequelize.Op;
+  }
+
+  return null;
 }
 
 function getSequelizeOp(model) {
+  const opFromModel = getSequelizeOpFromModel(model);
+  if (opFromModel) {
+    return opFromModel;
+  }
+
+  try {
+    return require('sequelize').Op;
+  } catch (error) {
+    return {};
+  }
+}
+
+function getFilteringIncludes(req) {
+  if (req.apialize.options && req.apialize.options.include) {
+    return req.apialize.options.include;
+  }
+  return [];
+}
+
+function getDatabaseDialect(model) {
   if (
     model &&
     model.sequelize &&
-    ((model.sequelize.constructor && model.sequelize.constructor.Op) ||
-      (model.sequelize.Sequelize && model.sequelize.Sequelize.Op))
+    typeof model.sequelize.getDialect === 'function'
   ) {
-    return (
-      (model.sequelize.constructor && model.sequelize.constructor.Op) ||
-      (model.sequelize.Sequelize && model.sequelize.Sequelize.Op)
-    );
+    return model.sequelize.getDialect();
   }
-  try {
-    return require('sequelize').Op;
-  } catch (_) {
-    return {};
+  return null;
+}
+
+function getCaseInsensitiveOperators(Op, dialect) {
+  const CI = dialect === 'postgres' ? Op.iLike || Op.like : Op.like;
+  const CInot = dialect === 'postgres' ? Op.notILike || Op.notLike : Op.notLike;
+  return { CI, CInot };
+}
+
+function parseFilterKey(key) {
+  let rawKey = key;
+  let operator = null;
+
+  if (rawKey.includes(':')) {
+    const idx = rawKey.lastIndexOf(':');
+    operator = rawKey.slice(idx + 1);
+    rawKey = rawKey.slice(0, idx);
   }
+
+  return { rawKey, operator };
 }
 
 function setupFiltering(
@@ -255,38 +485,39 @@ function setupFiltering(
   allowFiltering,
   relationIdMapping
 ) {
-  // appliedFiltersMeta is returned (for meta), dbFilters are merged into Sequelize where
   let appliedFiltersMeta = {};
   let appliedFiltersDb = {};
 
-  if (!allowFiltering) return appliedFiltersMeta;
+  if (!allowFiltering) {
+    return appliedFiltersMeta;
+  }
 
-  const includes =
-    req.apialize.options && req.apialize.options.include
-      ? req.apialize.options.include
-      : [];
+  const includes = getFilteringIncludes(req);
   const Op = getSequelizeOp(model);
-  const dialect =
-    model && model.sequelize && typeof model.sequelize.getDialect === 'function'
-      ? model.sequelize.getDialect()
-      : null;
-  const CI = dialect === 'postgres' ? Op.iLike || Op.like : Op.like;
-  const CInot = dialect === 'postgres' ? Op.notILike || Op.notLike : Op.notLike;
+  const dialect = getDatabaseDialect(model);
+  const { CI, CInot } = getCaseInsensitiveOperators(Op, dialect);
 
-  for (const [key, value] of Object.entries(query)) {
-    if (key.startsWith('api:')) continue;
-    if (value === undefined) continue;
+  function shouldSkipFilterKey(key, value) {
+    if (key.startsWith('api:')) {
+      return true;
+    }
+    if (value === undefined) {
+      return true;
+    }
+    return false;
+  }
 
-    let targetModel = model;
-    let rawKey = key;
-    let operator = null;
-    // Support 'field:operator' form
-    if (rawKey.includes(':')) {
-      const idx = rawKey.lastIndexOf(':');
-      operator = rawKey.slice(idx + 1);
-      rawKey = rawKey.slice(0, idx);
+  const queryKeys = Object.keys(query);
+  for (let i = 0; i < queryKeys.length; i++) {
+    const key = queryKeys[i];
+    const value = query[key];
+
+    if (shouldSkipFilterKey(key, value)) {
+      continue;
     }
 
+    let targetModel = model;
+    const { rawKey, operator } = parseFilterKey(key);
     let outKey = rawKey;
     let attribute;
 
@@ -472,6 +703,29 @@ function setupFiltering(
   return appliedFiltersMeta;
 }
 
+function convertResultRowsToPlainObjects(resultRows) {
+  if (!Array.isArray(resultRows)) {
+    return resultRows;
+  }
+
+  const rows = [];
+  for (let i = 0; i < resultRows.length; i++) {
+    const r = resultRows[i];
+    if (r && typeof r.get === 'function') {
+      rows.push(r.get({ plain: true }));
+    } else {
+      rows.push(r);
+    }
+  }
+  return rows;
+}
+
+function createDefaultNormalizeFunction() {
+  return function (x) {
+    return x;
+  };
+}
+
 async function buildResponse(
   result,
   page,
@@ -482,96 +736,136 @@ async function buildResponse(
   allowFiltering,
   req,
   idMapping,
-  normalizeRows // function injected at call site if not globally available
+  normalizeRows
 ) {
-  let rows;
-  if (Array.isArray(result.rows)) {
-    rows = [];
-    for (let i = 0; i < result.rows.length; i++) {
-      const r = result.rows[i];
-      if (r && typeof r.get === 'function') {
-        rows.push(r.get({ plain: true }));
-      } else {
-        rows.push(r);
-      }
-    }
-  } else {
-    rows = result.rows;
-  }
-
-  const normFn = normalizeRows || ((x) => x);
+  const rows = convertResultRowsToPlainObjects(result.rows);
+  const normFn = normalizeRows || createDefaultNormalizeFunction();
   const normalizedRows = await normFn(rows, idMapping);
   const totalPages = Math.max(1, Math.ceil(result.count / pageSize));
 
-  let orderOut;
-  if (metaShowOrdering) {
-    if (Array.isArray(req.apialize.options.order)) {
-      orderOut = [];
-      for (let i = 0; i < req.apialize.options.order.length; i++) {
-        const o = req.apialize.options.order[i];
-        if (Array.isArray(o)) {
-          // Handle formats: [field, dir] OR [ {model,as}, ..., attr, dir ]
-          const dir = (o[o.length - 1] || 'ASC').toString().toUpperCase();
-          // Find last string before dir as attribute
-          let attrIndex = -1;
-          for (let j = o.length - 2; j >= 0; j--) {
-            if (typeof o[j] === 'string') {
-              attrIndex = j;
-              break;
-            }
-          }
-          if (attrIndex === 0) {
-            // Simple [field, dir]
-            let field = o[0];
-            if (
-              typeof field === 'string' &&
-              field.startsWith('$') &&
-              field.endsWith('$')
-            ) {
-              field = field.slice(1, -1);
-            }
-            orderOut.push([field, dir]);
-          } else if (attrIndex > 0) {
-            // Nested include path: objects from 0..attrIndex-1, then attrIndex is attribute
-            const attr = o[attrIndex];
-            const aliases = [];
-            for (let k = 0; k < attrIndex; k++) {
-              const seg = o[k];
-              if (seg && typeof seg === 'object' && seg.as)
-                aliases.push(seg.as);
-            }
-            const field = aliases.length
-              ? `${aliases.join('.')}.${attr}`
-              : attr;
-            orderOut.push([field, dir]);
-          } else {
-            // Fallback: unknown format, push as-is
-            orderOut.push(o);
-          }
-        } else if (typeof o === 'string') {
-          orderOut.push([o, 'ASC']);
-        } else {
-          orderOut.push(o);
-        }
+  function cleanFieldName(field) {
+    if (
+      typeof field === 'string' &&
+      field.startsWith('$') &&
+      field.endsWith('$')
+    ) {
+      return field.slice(1, -1);
+    }
+    return field;
+  }
+
+  function findLastStringIndex(orderArray) {
+    for (let j = orderArray.length - 2; j >= 0; j--) {
+      if (typeof orderArray[j] === 'string') {
+        return j;
       }
+    }
+    return -1;
+  }
+
+  function extractAliasesFromOrderArray(orderArray, attrIndex) {
+    const aliases = [];
+    for (let k = 0; k < attrIndex; k++) {
+      const seg = orderArray[k];
+      if (seg && typeof seg === 'object' && seg.as) {
+        aliases.push(seg.as);
+      }
+    }
+    return aliases;
+  }
+
+  function processOrderArrayEntry(orderEntry) {
+    if (Array.isArray(orderEntry)) {
+      const dir = (orderEntry[orderEntry.length - 1] || 'ASC')
+        .toString()
+        .toUpperCase();
+      const attrIndex = findLastStringIndex(orderEntry);
+
+      if (attrIndex === 0) {
+        const field = cleanFieldName(orderEntry[0]);
+        return [field, dir];
+      } else if (attrIndex > 0) {
+        const attr = orderEntry[attrIndex];
+        const aliases = extractAliasesFromOrderArray(orderEntry, attrIndex);
+        const field = aliases.length ? `${aliases.join('.')}.${attr}` : attr;
+        return [field, dir];
+      } else {
+        return orderEntry;
+      }
+    } else if (typeof orderEntry === 'string') {
+      return [orderEntry, 'ASC'];
     } else {
-      orderOut = [];
+      return orderEntry;
     }
   }
 
-  const meta = {
-    page,
-    page_size: pageSize,
-    total_pages: totalPages,
-    count: result.count,
-  };
+  function buildOrderOutput(req) {
+    if (!Array.isArray(req.apialize.options.order)) {
+      return [];
+    }
 
-  if (metaShowOrdering) meta.order = orderOut;
-  if (metaShowFilters) meta.filters = allowFiltering ? appliedFilters : {};
+    const orderOut = [];
+    for (let i = 0; i < req.apialize.options.order.length; i++) {
+      const orderEntry = req.apialize.options.order[i];
+      const processedEntry = processOrderArrayEntry(orderEntry);
+      orderOut.push(processedEntry);
+    }
+    return orderOut;
+  }
+
+  let orderOut;
+  if (metaShowOrdering) {
+    orderOut = buildOrderOutput(req);
+  }
+
+  function buildMetaObject(
+    page,
+    pageSize,
+    totalPages,
+    count,
+    metaShowOrdering,
+    metaShowFilters,
+    orderOut,
+    appliedFilters,
+    allowFiltering
+  ) {
+    const meta = {
+      page: page,
+      page_size: pageSize,
+      total_pages: totalPages,
+      count: count,
+    };
+
+    if (metaShowOrdering) {
+      meta.order = orderOut;
+    }
+
+    if (metaShowFilters) {
+      if (allowFiltering) {
+        meta.filters = appliedFilters;
+      } else {
+        meta.filters = {};
+      }
+    }
+
+    return meta;
+  }
+
+  const meta = buildMetaObject(
+    page,
+    pageSize,
+    totalPages,
+    result.count,
+    metaShowOrdering,
+    metaShowFilters,
+    orderOut,
+    appliedFilters,
+    allowFiltering
+  );
 
   return {
     success: true,
-    meta,
+    meta: meta,
     data: normalizedRows,
   };
 }

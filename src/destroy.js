@@ -6,6 +6,9 @@ const {
   filterMiddlewareFns,
   buildHandlers,
   getOwnershipWhere,
+  extractMiddleware,
+  extractOption,
+  buildWhereClause,
 } = require('./utils');
 const {
   withTransactionAndHooks,
@@ -13,21 +16,65 @@ const {
   notFoundWithRollback,
 } = require('./operationUtils');
 
-function destroy(model, options = {}, modelOptions = {}) {
+function buildDestroyOptions(modelOptions, where, transaction) {
+  const txModelOptions = Object.assign({}, modelOptions, {
+    where: where,
+  });
+  return optionsWithTransaction(txModelOptions, transaction);
+}
+
+function executeDestroy(
+  model,
+  id,
+  id_mapping,
+  ownershipWhere,
+  modelOptions,
+  context
+) {
+  const where = buildWhereClause(ownershipWhere, id_mapping, id);
+  const destroyOptions = buildDestroyOptions(
+    modelOptions,
+    where,
+    context.transaction
+  );
+
+  return model.destroy(destroyOptions).then((affected) => {
+    if (!affected) {
+      return notFoundWithRollback(context);
+    }
+    context.payload = { success: true, id: id };
+    return context.payload;
+  });
+}
+
+function createDestroyHandler(handleDestroy) {
+  return function (req, res, next) {
+    return handleDestroy(req, res, next);
+  };
+}
+
+function attachDestroyRoute(router, middlewares) {
+  const routeArgs = ['/:id'];
+  for (let i = 0; i < middlewares.length; i++) {
+    routeArgs.push(middlewares[i]);
+  }
+  router.delete.apply(router, routeArgs);
+}
+
+function destroy(model, options, modelOptions) {
+  if (!options) {
+    options = {};
+  }
+  if (!modelOptions) {
+    modelOptions = {};
+  }
+
   ensureFn(model, 'destroy');
 
-  const middleware = Array.isArray(options.middleware)
-    ? options.middleware
-    : [];
-  const id_mapping = Object.prototype.hasOwnProperty.call(options, 'id_mapping')
-    ? options.id_mapping
-    : 'id';
-  const pre = Object.prototype.hasOwnProperty.call(options, 'pre')
-    ? options.pre
-    : null;
-  const post = Object.prototype.hasOwnProperty.call(options, 'post')
-    ? options.post
-    : null;
+  const middleware = extractMiddleware(options);
+  const id_mapping = extractOption(options, 'id_mapping', 'id');
+  const pre = extractOption(options, 'pre', null);
+  const post = extractOption(options, 'post', null);
 
   const inlineMiddleware = filterMiddlewareFns(middleware);
 
@@ -46,27 +93,17 @@ function destroy(model, options = {}, modelOptions = {}) {
         idMapping: id_mapping,
       },
       async function (context) {
-        // Extract ID and ownership after pre-hooks (so pre-hooks can modify them)
         const id = req.params.id;
         const ownershipWhere = getOwnershipWhere(req);
 
-        const where = Object.assign({}, ownershipWhere);
-        where[id_mapping] = id;
-
-        const txModelOptions = Object.assign({}, modelOptions, {
-          where: where,
-        });
-        const destroyOptions = optionsWithTransaction(
-          txModelOptions,
-          context.transaction
+        return await executeDestroy(
+          model,
+          id,
+          id_mapping,
+          ownershipWhere,
+          modelOptions,
+          context
         );
-
-        const affected = await model.destroy(destroyOptions);
-        if (!affected) {
-          return notFoundWithRollback(context);
-        }
-        context.payload = { success: true, id: id };
-        return context.payload;
       }
     );
 
@@ -75,10 +112,9 @@ function destroy(model, options = {}, modelOptions = {}) {
     }
   });
 
-  const middlewares = buildHandlers(inlineMiddleware, (req, res, next) =>
-    handleDestroy(req, res, next)
-  );
-  router.delete.apply(router, ['/:id'].concat(middlewares));
+  const destroyHandler = createDestroyHandler(handleDestroy);
+  const middlewares = buildHandlers(inlineMiddleware, destroyHandler);
+  attachDestroyRoute(router, middlewares);
 
   router.apialize = {};
   return router;

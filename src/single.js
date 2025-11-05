@@ -15,6 +15,13 @@ const optionsWithTransaction = operationUtils.optionsWithTransaction;
 const normalizeId = operationUtils.normalizeId;
 const notFoundWithRollback = operationUtils.notFoundWithRollback;
 
+function getErrorMessage(err) {
+  if (process.env.NODE_ENV === 'development') {
+    return String((err && err.message) || err);
+  }
+  return 'Internal Error';
+}
+
 function setupRelatedEndpoints(
   router,
   parentModel,
@@ -350,7 +357,7 @@ function setupRelatedEndpoints(
               console.error('[Apialize] Bulk delete error:', err);
               return res.status(500).json({
                 success: false,
-                error: String((err && err.message) || err),
+                error: getErrorMessage(err),
               });
             }
           })
@@ -360,9 +367,7 @@ function setupRelatedEndpoints(
     relatedRouter.use(function (err, _req, res, _next) {
       // eslint-disable-next-line no-console
       console.error('[Apialize] Related route error:', err);
-      res
-        .status(500)
-        .json({ success: false, error: String((err && err.message) || err) });
+      res.status(500).json({ success: false, error: getErrorMessage(err) });
     });
     router.use(`/:${parentParamName}/${endpointPath}`, relatedRouter);
   });

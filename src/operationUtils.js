@@ -2,7 +2,7 @@ const utils = require('./utils');
 const { createHelpers } = require('./contextHelpers');
 const defaultNotFound = utils.defaultNotFound;
 
-function buildContext(params) {
+function createBaseContext(params) {
   const ctx = {};
   ctx.req = params.req;
   ctx.request = params.req;
@@ -10,58 +10,89 @@ function buildContext(params) {
   ctx.model = params.model;
   ctx.options = params.options;
   ctx.modelOptions = params.modelOptions;
-  ctx.apialize = params.req && params.req.apialize;
   ctx.idMapping = params.idMapping;
   ctx.transaction = null;
   ctx.preResult = undefined;
   ctx.payload = null;
 
-  // Enhance req.apialize with model-aware helper functions if model is available
-  if (params.model && params.req && params.req.apialize) {
-    const helpers = createHelpers(params.req, params.model);
-    // Update the helper functions with model support
-    Object.assign(params.req.apialize, helpers);
-
-    // Also add helper functions directly to context for convenience
-    Object.assign(ctx, helpers);
-  } else if (params.req && params.req.apialize) {
-    // Add basic helpers (without model-dependent functions) to context
-    const helpers = createHelpers(params.req);
-    Object.assign(params.req.apialize, helpers);
-    Object.assign(ctx, helpers);
+  if (params.req && params.req.apialize) {
+    ctx.apialize = params.req.apialize;
   }
 
   return ctx;
 }
 
+function addHelpersToContext(ctx, params) {
+  if (params.model && params.req && params.req.apialize) {
+    const helpers = createHelpers(params.req, params.model);
+    Object.assign(params.req.apialize, helpers);
+    Object.assign(ctx, helpers);
+  } else if (params.req && params.req.apialize) {
+    const helpers = createHelpers(params.req);
+    Object.assign(params.req.apialize, helpers);
+    Object.assign(ctx, helpers);
+  }
+}
+
+function buildContext(params) {
+  const ctx = createBaseContext(params);
+  addHelpersToContext(ctx, params);
+  return ctx;
+}
+
 function hasSequelize(model) {
-  return !!(
-    model &&
-    model.sequelize &&
-    typeof model.sequelize.transaction === 'function'
-  );
+  if (!model) {
+    return false;
+  }
+  if (!model.sequelize) {
+    return false;
+  }
+  if (typeof model.sequelize.transaction !== 'function') {
+    return false;
+  }
+  return true;
 }
 
 function optionsWithTransaction(opts, t) {
   if (!t) {
-    return opts || {};
+    if (opts) {
+      return opts;
+    }
+    return {};
   }
-  const result = opts ? Object.assign({}, opts) : {};
+
+  let result;
+  if (opts) {
+    result = Object.assign({}, opts);
+  } else {
+    result = {};
+  }
+
   result.transaction = t;
   return result;
 }
 
-async function notFoundWithRollback(context) {
-  const t = context && context.transaction;
-  if (t && typeof t.rollback === 'function') {
+async function rollbackTransaction(transaction) {
+  if (transaction && typeof transaction.rollback === 'function') {
     try {
-      await t.rollback();
-    } catch (_) {}
+      await transaction.rollback();
+    } catch (error) {
+      // Ignore rollback errors
+    }
   }
+}
+
+function markContextAsRolledBack(context) {
   if (context) {
     context._rolledBack = true;
     context._responseSent = true;
   }
+}
+
+async function notFoundWithRollback(context) {
+  const transaction = context && context.transaction;
+  await rollbackTransaction(transaction);
+  markContextAsRolledBack(context);
   return defaultNotFound(context.res);
 }
 
@@ -85,173 +116,276 @@ function normalizeRows(rows, idMapping) {
   if (!Array.isArray(rows)) {
     return rows;
   }
+
   const normalized = [];
-  for (let i = 0; i < rows.length; i += 1) {
-    normalized.push(normalizeId(rows[i], idMapping));
+  for (let i = 0; i < rows.length; i++) {
+    const normalizedRow = normalizeId(rows[i], idMapping);
+    normalized.push(normalizedRow);
   }
   return normalized;
 }
 
-// Helper function to identify foreign key fields using Sequelize associations
+function isValidBelongsToAssociation(association) {
+  if (association.associationType !== 'BelongsTo') {
+    return false;
+  }
+  if (!association.foreignKey) {
+    return false;
+  }
+  if (!association.target) {
+    return false;
+  }
+  return true;
+}
+
+function findMappingForTargetModel(relationIdMapping, targetModel) {
+  for (let i = 0; i < relationIdMapping.length; i++) {
+    const mapping = relationIdMapping[i];
+    if (!mapping.model || !mapping.id_field) {
+      continue;
+    }
+
+    if (mapping.model === targetModel) {
+      return mapping;
+    }
+    if (mapping.model.name === targetModel.name) {
+      return mapping;
+    }
+    if (mapping.model.tableName === targetModel.tableName) {
+      return mapping;
+    }
+  }
+  return null;
+}
+
+function processSequelizeAssociations(model, relationIdMapping, fkMappings) {
+  if (!model.associations || typeof model.associations !== 'object') {
+    return;
+  }
+
+  const associationNames = Object.keys(model.associations);
+  for (let i = 0; i < associationNames.length; i++) {
+    const associationName = associationNames[i];
+    const association = model.associations[associationName];
+
+    if (!isValidBelongsToAssociation(association)) {
+      continue;
+    }
+
+    const fkField = association.foreignKey;
+    const targetModel = association.target;
+    const mapping = findMappingForTargetModel(relationIdMapping, targetModel);
+
+    if (mapping) {
+      fkMappings[fkField] = {
+        model: mapping.model,
+        id_field: mapping.id_field,
+        pk_field: 'id',
+        association: associationName,
+      };
+    }
+  }
+}
+
 function identifyForeignKeyFields(model, relationIdMapping) {
   if (!model || !Array.isArray(relationIdMapping)) {
     return {};
   }
 
   const fkMappings = {};
+  processSequelizeAssociations(model, relationIdMapping, fkMappings);
 
-  // First try to use Sequelize associations (more accurate)
-  if (model.associations && typeof model.associations === 'object') {
-    for (const [associationName, association] of Object.entries(
-      model.associations
-    )) {
-      // Only look at BelongsTo associations since they define foreign keys on this model
-      if (
-        association.associationType === 'BelongsTo' &&
-        association.foreignKey &&
-        association.target
-      ) {
-        const fkField = association.foreignKey;
-        const targetModel = association.target;
-
-        // Find matching relation_id_mapping for this target model
-        const mapping = relationIdMapping.find((m) => {
-          if (!m.model || !m.id_field) return false;
-          // Compare by reference, name, or tableName
-          return (
-            m.model === targetModel ||
-            m.model.name === targetModel.name ||
-            m.model.tableName === targetModel.tableName
-          );
-        });
-
-        if (mapping) {
-          fkMappings[fkField] = {
-            model: mapping.model,
-            id_field: mapping.id_field,
-            pk_field: 'id', // Assume primary key is 'id' for lookups
-            association: associationName,
-          };
-        }
-      }
-    }
+  function generatePossibleForeignKeyNames(modelName) {
+    const lowerModelName = modelName.toLowerCase();
+    return [
+      `${lowerModelName}_id`,
+      `${lowerModelName}Id`,
+      `${lowerModelName}_key`,
+      `${lowerModelName}Key`,
+    ];
   }
 
-  // Add pattern-based detection for any unmapped relations (in addition to association-based)
-  if (model.rawAttributes) {
+  function addPatternBasedForeignKeys(model, relationIdMapping, fkMappings) {
+    if (!model.rawAttributes) {
+      return;
+    }
+
     const attributes = model.rawAttributes;
 
-    for (const mapping of relationIdMapping) {
-      if (!mapping.model || !mapping.id_field) continue;
+    for (let i = 0; i < relationIdMapping.length; i++) {
+      const mapping = relationIdMapping[i];
+      if (!mapping.model || !mapping.id_field) {
+        continue;
+      }
 
       const relatedModelName =
         mapping.model.name || mapping.model.tableName || '';
-      const lowerModelName = relatedModelName.toLowerCase();
+      const possibleFkNames = generatePossibleForeignKeyNames(relatedModelName);
 
-      // Check for common foreign key patterns: model_id, modelId, model_key, etc.
-      const possibleFkNames = [
-        `${lowerModelName}_id`,
-        `${lowerModelName}Id`,
-        `${lowerModelName}_key`,
-        `${lowerModelName}Key`,
-      ];
-
-      for (const fkName of possibleFkNames) {
+      for (let j = 0; j < possibleFkNames.length; j++) {
+        const fkName = possibleFkNames[j];
         if (attributes[fkName] && !fkMappings[fkName]) {
           fkMappings[fkName] = {
             model: mapping.model,
             id_field: mapping.id_field,
             pk_field: 'id',
-            association: null, // No association found, using pattern matching
+            association: null,
           };
         }
       }
     }
   }
 
+  addPatternBasedForeignKeys(model, relationIdMapping, fkMappings);
   return fkMappings;
 }
 
-// Async function to replace foreign key values with external IDs
+function isValidMappingInput(rows, relationIdMapping) {
+  if (!Array.isArray(rows)) {
+    return false;
+  }
+  if (!Array.isArray(relationIdMapping)) {
+    return false;
+  }
+  if (relationIdMapping.length === 0) {
+    return false;
+  }
+  return true;
+}
+
+function getModelForAssociations(sourceModel, relationIdMapping) {
+  if (sourceModel) {
+    return sourceModel;
+  }
+
+  for (let i = 0; i < relationIdMapping.length; i++) {
+    const mapping = relationIdMapping[i];
+    if (mapping.model) {
+      return mapping.model;
+    }
+  }
+  return null;
+}
+
 async function mapForeignKeyValues(rows, relationIdMapping, sourceModel) {
-  if (
-    !Array.isArray(rows) ||
-    !Array.isArray(relationIdMapping) ||
-    relationIdMapping.length === 0
-  ) {
+  if (!isValidMappingInput(rows, relationIdMapping)) {
     return rows;
   }
 
-  // Use the source model if provided, otherwise fall back to first mapping model
-  let modelForAssociations = sourceModel;
+  const modelForAssociations = getModelForAssociations(
+    sourceModel,
+    relationIdMapping
+  );
   if (!modelForAssociations) {
-    const firstMapping = relationIdMapping.find((m) => m.model);
-    if (!firstMapping || !firstMapping.model) {
-      return rows;
-    }
-    modelForAssociations = firstMapping.model;
+    return rows;
   }
 
-  // Get foreign key mappings using association-aware detection
+  function checkIfRowHasField(rows, fkField) {
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row && typeof row === 'object' && row.hasOwnProperty(fkField)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function filterMappingsByExistingFields(allFkMappings, rows) {
+    const fkMappings = {};
+    const mappingKeys = Object.keys(allFkMappings);
+
+    for (let i = 0; i < mappingKeys.length; i++) {
+      const fkField = mappingKeys[i];
+      const mapping = allFkMappings[fkField];
+
+      if (checkIfRowHasField(rows, fkField)) {
+        fkMappings[fkField] = mapping;
+      }
+    }
+
+    return fkMappings;
+  }
+
   const allFkMappings = identifyForeignKeyFields(
     modelForAssociations,
     relationIdMapping
   );
+  const fkMappings = filterMappingsByExistingFields(allFkMappings, rows);
 
-  // Filter to only include fields that actually exist in the data
-  const fkMappings = {};
-  for (const [fkField, mapping] of Object.entries(allFkMappings)) {
-    // Check if any row has this field
-    const hasField = rows.some(
-      (row) => row && typeof row === 'object' && row.hasOwnProperty(fkField)
-    );
-    if (hasField) {
-      fkMappings[fkField] = mapping;
-    }
-  }
-
-  // If no foreign keys to map, return original rows
   if (Object.keys(fkMappings).length === 0) {
     return rows;
   }
 
-  try {
-    // Create a map of lookups we need to perform
+  function getModelKey(mapping) {
+    return mapping.model.name || mapping.model.tableName;
+  }
+
+  function initializeLookupEntry(mapping) {
+    return {
+      model: mapping.model,
+      id_field: mapping.id_field,
+      pk_field: mapping.pk_field,
+      values: new Set(),
+    };
+  }
+
+  function collectForeignKeyValues(rows, fkMappings) {
     const lookupsNeeded = {};
 
-    // Collect all unique foreign key values that need mapping
-    for (const row of rows) {
-      if (!row || typeof row !== 'object') continue;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || typeof row !== 'object') {
+        continue;
+      }
 
-      for (const [fkField, mapping] of Object.entries(fkMappings)) {
+      const mappingKeys = Object.keys(fkMappings);
+      for (let j = 0; j < mappingKeys.length; j++) {
+        const fkField = mappingKeys[j];
+        const mapping = fkMappings[fkField];
+
         if (row[fkField] != null) {
-          const modelKey = mapping.model.name || mapping.model.tableName;
+          const modelKey = getModelKey(mapping);
           if (!lookupsNeeded[modelKey]) {
-            lookupsNeeded[modelKey] = {
-              model: mapping.model,
-              id_field: mapping.id_field,
-              pk_field: mapping.pk_field,
-              values: new Set(),
-            };
+            lookupsNeeded[modelKey] = initializeLookupEntry(mapping);
           }
           lookupsNeeded[modelKey].values.add(row[fkField]);
         }
       }
     }
 
-    // Perform bulk lookups for each model
-    const lookupResults = {};
-    for (const [modelKey, lookup] of Object.entries(lookupsNeeded)) {
+    return lookupsNeeded;
+  }
+
+  try {
+    const lookupsNeeded = collectForeignKeyValues(rows, fkMappings);
+
+    function getSequelizeOperator(model) {
+      if (model.sequelize?.constructor?.Op) {
+        return model.sequelize.constructor.Op;
+      }
+      if (model.sequelize?.Sequelize?.Op) {
+        return model.sequelize.Sequelize.Op;
+      }
+      return require('sequelize').Op;
+    }
+
+    function createIdMapping(records, pkField, idField) {
+      const mapping = {};
+      for (let i = 0; i < records.length; i++) {
+        const record = records[i];
+        mapping[record[pkField]] = record[idField];
+      }
+      return mapping;
+    }
+
+    async function performSingleModelLookup(lookup, modelKey) {
       const values = Array.from(lookup.values);
-      if (values.length === 0) continue;
+      if (values.length === 0) {
+        return {};
+      }
 
       try {
-        // Use the Op from the model's Sequelize instance
-        const Op =
-          lookup.model.sequelize?.constructor?.Op ||
-          lookup.model.sequelize?.Sequelize?.Op ||
-          require('sequelize').Op;
-
+        const Op = getSequelizeOperator(lookup.model);
         const records = await lookup.model.findAll({
           where: {
             [lookup.pk_field]: { [Op.in]: values },
@@ -260,12 +394,7 @@ async function mapForeignKeyValues(rows, relationIdMapping, sourceModel) {
           raw: true,
         });
 
-        // Create mapping from internal ID to external ID
-        lookupResults[modelKey] = {};
-        for (const record of records) {
-          lookupResults[modelKey][record[lookup.pk_field]] =
-            record[lookup.id_field];
-        }
+        return createIdMapping(records, lookup.pk_field, lookup.id_field);
       } catch (lookupError) {
         throw new Error(
           `[Apialize] Failed to lookup external IDs for ${modelKey}: ${lookupError.message}`
@@ -273,32 +402,73 @@ async function mapForeignKeyValues(rows, relationIdMapping, sourceModel) {
       }
     }
 
-    // Apply mappings to rows
-    const mappedRows = [];
-    for (const row of rows) {
-      if (!row || typeof row !== 'object') {
-        mappedRows.push(row);
-        continue;
+    async function performBulkLookups(lookupsNeeded) {
+      const lookupResults = {};
+      const modelKeys = Object.keys(lookupsNeeded);
+
+      for (let i = 0; i < modelKeys.length; i++) {
+        const modelKey = modelKeys[i];
+        const lookup = lookupsNeeded[modelKey];
+        lookupResults[modelKey] = await performSingleModelLookup(
+          lookup,
+          modelKey
+        );
       }
 
-      const mappedRow = { ...row };
-
-      for (const [fkField, mapping] of Object.entries(fkMappings)) {
-        if (mappedRow[fkField] != null) {
-          const modelKey = mapping.model.name || mapping.model.tableName;
-          const lookupMap = lookupResults[modelKey] || {};
-          const externalId = lookupMap[mappedRow[fkField]];
-
-          if (externalId != null) {
-            mappedRow[fkField] = externalId;
-          }
-          // If no external ID found, keep the original value
-        }
-      }
-
-      mappedRows.push(mappedRow);
+      return lookupResults;
     }
 
+    const lookupResults = await performBulkLookups(lookupsNeeded);
+
+    function applyMappingToSingleField(
+      mappedRow,
+      fkField,
+      mapping,
+      lookupResults
+    ) {
+      if (mappedRow[fkField] == null) {
+        return;
+      }
+
+      const modelKey = mapping.model.name || mapping.model.tableName;
+      const lookupMap = lookupResults[modelKey] || {};
+      const externalId = lookupMap[mappedRow[fkField]];
+
+      if (externalId != null) {
+        mappedRow[fkField] = externalId;
+      }
+    }
+
+    function applyAllMappingsToRow(row, fkMappings, lookupResults) {
+      if (!row || typeof row !== 'object') {
+        return row;
+      }
+
+      const mappedRow = Object.assign({}, row);
+      const mappingKeys = Object.keys(fkMappings);
+
+      for (let i = 0; i < mappingKeys.length; i++) {
+        const fkField = mappingKeys[i];
+        const mapping = fkMappings[fkField];
+        applyMappingToSingleField(mappedRow, fkField, mapping, lookupResults);
+      }
+
+      return mappedRow;
+    }
+
+    function applyMappingsToAllRows(rows, fkMappings, lookupResults) {
+      const mappedRows = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const mappedRow = applyAllMappingsToRow(row, fkMappings, lookupResults);
+        mappedRows.push(mappedRow);
+      }
+
+      return mappedRows;
+    }
+
+    const mappedRows = applyMappingsToAllRows(rows, fkMappings, lookupResults);
     return mappedRows;
   } catch (error) {
     throw new Error(`[Apialize] Foreign key mapping failed: ${error.message}`);

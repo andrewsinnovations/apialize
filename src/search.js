@@ -1,4 +1,10 @@
-const { express, apializeContext, ensureFn, asyncHandler } = require('./utils');
+const {
+  express,
+  apializeContext,
+  ensureFn,
+  asyncHandler,
+  mergeReqOptionsIntoModelOptions,
+} = require('./utils');
 const {
   withTransactionAndHooks,
   normalizeRows,
@@ -13,38 +19,132 @@ const {
 } = require('./listUtils');
 
 function getSequelizeOp(model) {
-  // Prefer the Op from the model's Sequelize instance to avoid symbol mismatches
-  const fromModel =
-    model &&
-    model.sequelize &&
-    ((model.sequelize.constructor && model.sequelize.constructor.Op) ||
-      (model.sequelize.Sequelize && model.sequelize.Sequelize.Op));
-  if (fromModel) return fromModel;
+  if (model && model.sequelize) {
+    if (model.sequelize.constructor && model.sequelize.constructor.Op) {
+      return model.sequelize.constructor.Op;
+    }
+    if (model.sequelize.Sequelize && model.sequelize.Sequelize.Op) {
+      return model.sequelize.Sequelize.Op;
+    }
+  }
+
   try {
     return require('sequelize').Op;
-  } catch (_) {
+  } catch (error) {
     return {};
   }
 }
 
-// Defaults intentionally mirror list() where sensible so responses align
 const SEARCH_DEFAULTS = {
   middleware: [],
   defaultPageSize: 100,
   defaultOrderBy: 'id',
   defaultOrderDir: 'ASC',
-  metaShowOrdering: false, // keep parity with list option name
+  metaShowOrdering: false,
   pre: null,
   post: null,
-  // id_mapping supported like other operations
   id_mapping: 'id',
-  // relation_id_mapping allows mapping relation 'id' filters to custom fields
   relation_id_mapping: null,
-  // configurable mount path for the POST route
   path: '/search',
 };
 
-// Convert a single key/value or { op: val } object to a Sequelize where fragment
+function getDatabaseDialect(model) {
+  if (
+    model &&
+    model.sequelize &&
+    typeof model.sequelize.getDialect === 'function'
+  ) {
+    return model.sequelize.getDialect();
+  }
+  return null;
+}
+
+function getCaseInsensitiveOperators(dialect, Op) {
+  const isPostgres = dialect === 'postgres';
+  const caseInsensitiveLike = isPostgres ? Op.iLike || Op.like : Op.like;
+  const caseInsensitiveNotLike = isPostgres
+    ? Op.notILike || Op.notLike
+    : Op.notLike;
+
+  return {
+    like: caseInsensitiveLike,
+    notLike: caseInsensitiveNotLike,
+  };
+}
+
+function findRelationMapping(relationIdMapping, foundModel) {
+  if (!Array.isArray(relationIdMapping)) {
+    return null;
+  }
+
+  return relationIdMapping.find((mapping) => {
+    if (mapping.model === foundModel) {
+      return true;
+    }
+
+    if (mapping.model && foundModel) {
+      if (mapping.model.name === foundModel.name) {
+        return true;
+      }
+      if (mapping.model.tableName === foundModel.tableName) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+}
+
+function buildAliasPath(resolved, actualColumn) {
+  const aliasPrefix = resolved.aliasPath.split('.').slice(0, -1).join('.');
+
+  if (aliasPrefix) {
+    return `${aliasPrefix}.${actualColumn}`;
+  }
+
+  return actualColumn;
+}
+
+function resolveIncludedModelColumn(model, includes, key, relationIdMapping) {
+  const resolved = resolveIncludedAttribute(model, includes, key);
+  if (!resolved) {
+    return { error: `Invalid column '${key}'` };
+  }
+
+  const parts = key.split('.');
+  let actualColumn = parts[parts.length - 1];
+  let outKey;
+  let validateColumn = actualColumn;
+  let attribute = resolved.attribute;
+
+  if (actualColumn === 'id') {
+    const relationMapping = findRelationMapping(
+      relationIdMapping,
+      resolved.foundModel
+    );
+
+    if (relationMapping && relationMapping.id_field) {
+      actualColumn = relationMapping.id_field;
+      const newAliasPath = buildAliasPath(resolved, actualColumn);
+      outKey = `$${newAliasPath}$`;
+      validateColumn = actualColumn;
+      const attrs = getModelAttributes(resolved.foundModel);
+      attribute = attrs && attrs[actualColumn];
+    } else {
+      outKey = `$${resolved.aliasPath}$`;
+    }
+  } else {
+    outKey = `$${resolved.aliasPath}$`;
+  }
+
+  return {
+    outKey,
+    validateModel: resolved.foundModel,
+    validateColumn,
+    attribute,
+  };
+}
+
 function buildFieldPredicate(
   model,
   key,
@@ -53,246 +153,397 @@ function buildFieldPredicate(
   includes,
   relationIdMapping
 ) {
-  const dialect =
-    model &&
-    model.sequelize &&
-    typeof model.sequelize.getDialectx === 'function'
-      ? model.sequelize.getDialect()
-      : null;
-  const CI = dialect === 'postgres' ? Op.iLike || Op.like : Op.like;
-  const CInot = dialect === 'postgres' ? Op.notILike || Op.notLike : Op.notLike;
+  const dialect = getDatabaseDialect(model);
+  const operators = getCaseInsensitiveOperators(dialect, Op);
 
-  // Support dotted path for included models using $alias.attr$ syntax
   let outKey = key;
   let validateModel = model;
   let validateColumn = key;
   let attribute;
+
   if (typeof key === 'string' && key.includes('.')) {
-    const resolved = resolveIncludedAttribute(model, includes, key);
-    if (!resolved) {
-      return { error: `Invalid column '${key}'` };
+    const resolved = resolveIncludedModelColumn(
+      model,
+      includes,
+      key,
+      relationIdMapping
+    );
+
+    if (resolved.error) {
+      return resolved;
     }
 
-    // Apply relation_id_mapping if configured and the column is 'id'
-    const parts = key.split('.');
-    let actualColumn = parts[parts.length - 1];
-    if (actualColumn === 'id' && Array.isArray(relationIdMapping)) {
-      const relationMapping = relationIdMapping.find((mapping) => {
-        // Compare models by name, tableName, or reference equality
-        if (mapping.model === resolved.foundModel) return true;
-        if (mapping.model && resolved.foundModel) {
-          // Compare by model name
-          if (mapping.model.name === resolved.foundModel.name) return true;
-          // Compare by table name as fallback
-          if (mapping.model.tableName === resolved.foundModel.tableName)
-            return true;
-        }
-        return false;
-      });
-      if (relationMapping && relationMapping.id_field) {
-        actualColumn = relationMapping.id_field;
-        // Update the alias path to use the mapped field
-        const aliasPrefix = resolved.aliasPath
-          .split('.')
-          .slice(0, -1)
-          .join('.');
-        const newAliasPath = aliasPrefix
-          ? `${aliasPrefix}.${actualColumn}`
-          : actualColumn;
-        outKey = `$${newAliasPath}$`;
-        // Update validation column for the mapped field
-        validateColumn = actualColumn;
-        const attrs = getModelAttributes(resolved.foundModel);
-        attribute = attrs && attrs[actualColumn];
-      } else {
-        outKey = `$${resolved.aliasPath}$`;
-        validateColumn = actualColumn;
-        attribute = resolved.attribute;
-      }
-    } else {
-      outKey = `$${resolved.aliasPath}$`;
-      validateColumn = actualColumn;
-      attribute = resolved.attribute;
-    }
-    validateModel = resolved.foundModel;
+    outKey = resolved.outKey;
+    validateModel = resolved.validateModel;
+    validateColumn = resolved.validateColumn;
+    attribute = resolved.attribute;
   } else {
     const attrs = getModelAttributes(validateModel);
     attribute = attrs && attrs[validateColumn];
   }
 
-  // If the value is an object, map known operators
   if (rawVal && typeof rawVal === 'object' && !Array.isArray(rawVal)) {
-    if (!validateColumnExists(validateModel, validateColumn))
-      return { error: `Invalid column '${key}'` };
-    const out = {};
-    const ops = {};
-    const map = {
-      // equality and inequality with common synonyms
-      eq: Op.eq,
-      '=': Op.eq,
-      ieq: CI,
-      neq: Op.ne,
-      '!=': Op.ne,
-      // comparisons and synonyms
-      gt: Op.gt,
-      '>': Op.gt,
-      gte: Op.gte,
-      '>=': Op.gte,
-      lt: Op.lt,
-      '<': Op.lt,
-      lte: Op.lte,
-      '<=': Op.lte,
-      in: Op.in,
-      not_in: Op.notIn,
-      contains: Op.like,
-      icontains: CI,
-      not_contains: Op.notLike,
-      not_icontains: CInot,
-      starts_with: Op.like,
-      ends_with: Op.like,
-      not_starts_with: Op.notLike,
-      not_ends_with: Op.notLike,
-      is_true: Op.eq,
-      is_false: Op.eq,
-    };
-    for (const k of Object.keys(rawVal)) {
-      const v = rawVal[k];
-      if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
-      if (k === 'contains' || k === 'not_contains') ops[map[k]] = `%${v}%`;
-      else if (k === 'icontains' || k === 'not_icontains')
-        ops[map[k]] = `%${v}%`;
-      else if (k === 'starts_with' || k === 'not_starts_with')
-        ops[map[k]] = `${v}%`;
-      else if (k === 'ends_with' || k === 'not_ends_with')
-        ops[map[k]] = `%${v}`;
-      else if (k === 'is_true') ops[map[k]] = true;
-      else if (k === 'is_false') ops[map[k]] = false;
-      else ops[map[k]] = v;
-    }
-    if (Reflect.ownKeys(ops).length === 0) return {};
-    if (!Array.isArray(rawVal.in) && rawVal.in !== undefined) {
-      if (
-        !validateDataType(
-          validateModel,
-          validateColumn,
-          (rawVal && rawVal.in && rawVal.in[0]) || rawVal.in
-        )
-      ) {
-        return { error: `Invalid value for '${key}'` };
-      }
-    }
-    out[outKey] = ops;
-    return out;
+    return buildObjectPredicate(
+      rawVal,
+      key,
+      outKey,
+      validateModel,
+      validateColumn,
+      Op,
+      operators
+    );
   }
 
-  // Equality fallback (case-insensitive for strings)
-  if (!validateColumnExists(validateModel, validateColumn))
-    return { error: `Invalid column '${key}'` };
-  if (!validateDataType(validateModel, validateColumn, rawVal))
-    return { error: `Invalid value for '${key}'` };
-  const typeName =
-    attribute && attribute.type && attribute.type.constructor
-      ? String(attribute.type.constructor.name).toLowerCase()
-      : null;
-  if (typeName && ['string', 'text', 'char', 'varchar'].includes(typeName)) {
-    return { [outKey]: { [CI]: rawVal } };
+  return buildEqualityPredicate(
+    rawVal,
+    key,
+    outKey,
+    validateModel,
+    validateColumn,
+    attribute,
+    operators
+  );
+}
+
+function getOperatorMapping(Op, operators) {
+  return {
+    eq: Op.eq,
+    '=': Op.eq,
+    ieq: operators.like,
+    neq: Op.ne,
+    '!=': Op.ne,
+    gt: Op.gt,
+    '>': Op.gt,
+    gte: Op.gte,
+    '>=': Op.gte,
+    lt: Op.lt,
+    '<': Op.lt,
+    lte: Op.lte,
+    '<=': Op.lte,
+    in: Op.in,
+    not_in: Op.notIn,
+    contains: Op.like,
+    icontains: operators.like,
+    not_contains: Op.notLike,
+    not_icontains: operators.notLike,
+    starts_with: Op.like,
+    ends_with: Op.like,
+    not_starts_with: Op.notLike,
+    not_ends_with: Op.notLike,
+    is_true: Op.eq,
+    is_false: Op.eq,
+  };
+}
+
+function transformOperatorValue(operatorKey, value) {
+  if (operatorKey === 'contains' || operatorKey === 'not_contains') {
+    return `%${value}%`;
   }
+  if (operatorKey === 'icontains' || operatorKey === 'not_icontains') {
+    return `%${value}%`;
+  }
+  if (operatorKey === 'starts_with' || operatorKey === 'not_starts_with') {
+    return `${value}%`;
+  }
+  if (operatorKey === 'ends_with' || operatorKey === 'not_ends_with') {
+    return `%${value}`;
+  }
+  if (operatorKey === 'is_true') {
+    return true;
+  }
+  if (operatorKey === 'is_false') {
+    return false;
+  }
+  return value;
+}
+
+function buildObjectPredicate(
+  rawVal,
+  key,
+  outKey,
+  validateModel,
+  validateColumn,
+  Op,
+  operators
+) {
+  if (!validateColumnExists(validateModel, validateColumn)) {
+    return { error: `Invalid column '${key}'` };
+  }
+
+  const operatorMapping = getOperatorMapping(Op, operators);
+  const sequelizeOperators = {};
+
+  for (const operatorKey of Object.keys(rawVal)) {
+    const value = rawVal[operatorKey];
+
+    if (!Object.prototype.hasOwnProperty.call(operatorMapping, operatorKey)) {
+      continue;
+    }
+
+    const sequelizeOp = operatorMapping[operatorKey];
+    const transformedValue = transformOperatorValue(operatorKey, value);
+    sequelizeOperators[sequelizeOp] = transformedValue;
+  }
+
+  if (Reflect.ownKeys(sequelizeOperators).length === 0) {
+    return {};
+  }
+
+  if (!Array.isArray(rawVal.in) && rawVal.in !== undefined) {
+    const valueToValidate = (rawVal && rawVal.in && rawVal.in[0]) || rawVal.in;
+    if (!validateDataType(validateModel, validateColumn, valueToValidate)) {
+      return { error: `Invalid value for '${key}'` };
+    }
+  }
+
+  return { [outKey]: sequelizeOperators };
+}
+
+function isStringType(attribute) {
+  if (!attribute || !attribute.type || !attribute.type.constructor) {
+    return false;
+  }
+
+  const typeName = String(attribute.type.constructor.name).toLowerCase();
+  const stringTypes = ['string', 'text', 'char', 'varchar'];
+
+  return stringTypes.includes(typeName);
+}
+
+function buildEqualityPredicate(
+  rawVal,
+  key,
+  outKey,
+  validateModel,
+  validateColumn,
+  attribute,
+  operators
+) {
+  if (!validateColumnExists(validateModel, validateColumn)) {
+    return { error: `Invalid column '${key}'` };
+  }
+
+  if (!validateDataType(validateModel, validateColumn, rawVal)) {
+    return { error: `Invalid value for '${key}'` };
+  }
+
+  if (isStringType(attribute)) {
+    return { [outKey]: { [operators.like]: rawVal } };
+  }
+
   return { [outKey]: rawVal };
 }
 
-function buildWhere(model, filters, Op, includes, relationIdMapping) {
-  if (!filters || typeof filters !== 'object') return {};
-
-  // Explicit boolean arrays
-  if (Array.isArray(filters.and)) {
-    const parts = [];
-    for (const item of filters.and) {
-      const sub = buildWhere(model, item, Op, includes, relationIdMapping);
-      if (sub && Object.keys(sub).length) parts.push(sub);
+function mergeObjectProperties(target, source) {
+  for (const key of Object.keys(source)) {
+    if (
+      target[key] &&
+      typeof target[key] === 'object' &&
+      typeof source[key] === 'object'
+    ) {
+      target[key] = Object.assign({}, target[key], source[key]);
+    } else {
+      target[key] = source[key];
     }
-    // Flatten AND into a single object when possible to avoid relying on Op.and
-    const merged = {};
-    const orClauses = [];
-    for (const p of parts) {
-      if (p[Op.or]) {
-        // collect OR arrays
-        const arr = Array.isArray(p[Op.or]) ? p[Op.or] : [p[Op.or]];
-        orClauses.push(...arr);
-        const { [Op.or]: _omit, ...rest } = p;
-        for (const k of Object.keys(rest)) {
-          if (
-            merged[k] &&
-            typeof merged[k] === 'object' &&
-            typeof rest[k] === 'object'
-          ) {
-            merged[k] = Object.assign({}, merged[k], rest[k]);
-          } else {
-            merged[k] = rest[k];
-          }
-        }
-      } else {
-        for (const k of Object.keys(p)) {
-          if (
-            merged[k] &&
-            typeof merged[k] === 'object' &&
-            typeof p[k] === 'object'
-          ) {
-            merged[k] = Object.assign({}, merged[k], p[k]);
-          } else {
-            merged[k] = p[k];
-          }
-        }
-      }
-    }
-    if (orClauses.length) merged[Op.or] = orClauses;
-    return merged;
   }
-  if (Array.isArray(filters.or)) {
-    const parts = [];
-    for (const item of filters.or) {
-      const sub = buildWhere(model, item, Op, includes, relationIdMapping);
-      if (sub && Object.keys(sub).length) parts.push(sub);
+}
+
+function processAndFilters(filters, model, Op, includes, relationIdMapping) {
+  const parts = [];
+
+  for (const item of filters.and) {
+    const subWhere = buildWhere(model, item, Op, includes, relationIdMapping);
+    if (subWhere && Object.keys(subWhere).length) {
+      parts.push(subWhere);
     }
-    return parts.length ? { [Op.or]: parts } : {};
   }
 
-  // Implicit AND across object keys
+  const merged = {};
+  const orClauses = [];
+
+  for (const part of parts) {
+    if (part[Op.or]) {
+      const orArray = Array.isArray(part[Op.or]) ? part[Op.or] : [part[Op.or]];
+      orClauses.push(...orArray);
+
+      const { [Op.or]: omitted, ...rest } = part;
+      mergeObjectProperties(merged, rest);
+    } else {
+      mergeObjectProperties(merged, part);
+    }
+  }
+
+  if (orClauses.length) {
+    merged[Op.or] = orClauses;
+  }
+
+  return merged;
+}
+
+function processOrFilters(filters, model, Op, includes, relationIdMapping) {
+  const parts = [];
+
+  for (const item of filters.or) {
+    const subWhere = buildWhere(model, item, Op, includes, relationIdMapping);
+    if (subWhere && Object.keys(subWhere).length) {
+      parts.push(subWhere);
+    }
+  }
+
+  if (parts.length === 0) {
+    return {};
+  }
+
+  return { [Op.or]: parts };
+}
+
+function processImplicitAndFilters(
+  filters,
+  model,
+  Op,
+  includes,
+  relationIdMapping
+) {
   const keys = Object.keys(filters);
   const andParts = [];
-  for (const k of keys) {
-    if (k === 'and' || k === 'or') continue; // handled above if present (non-array forms ignored)
-    const v = filters[k];
-    if (k === 'and' && Array.isArray(v)) continue;
-    if (k === 'or' && Array.isArray(v)) continue;
-    const pred = buildFieldPredicate(
+
+  for (const key of keys) {
+    if (key === 'and' || key === 'or') {
+      continue;
+    }
+
+    const value = filters[key];
+
+    if (key === 'and' && Array.isArray(value)) {
+      continue;
+    }
+    if (key === 'or' && Array.isArray(value)) {
+      continue;
+    }
+
+    const predicate = buildFieldPredicate(
       model,
-      k,
-      v,
+      key,
+      value,
       Op,
       includes,
       relationIdMapping
     );
-    if (pred && pred.error) return { __error: pred.error };
-    if (pred && Object.keys(pred).length) andParts.push(pred);
-  }
-  if (andParts.length === 0) return {};
-  if (andParts.length === 1) return andParts[0];
-  // Merge multiple field predicates into one object (deep merge per-field)
-  const merged = {};
-  for (const p of andParts) {
-    for (const k of Object.keys(p)) {
-      if (
-        merged[k] &&
-        typeof merged[k] === 'object' &&
-        typeof p[k] === 'object'
-      ) {
-        merged[k] = Object.assign({}, merged[k], p[k]);
-      } else {
-        merged[k] = p[k];
-      }
+
+    if (predicate && predicate.error) {
+      return { __error: predicate.error };
+    }
+
+    if (predicate && Object.keys(predicate).length) {
+      andParts.push(predicate);
     }
   }
+
+  if (andParts.length === 0) {
+    return {};
+  }
+
+  if (andParts.length === 1) {
+    return andParts[0];
+  }
+
+  const merged = {};
+  for (const part of andParts) {
+    mergeObjectProperties(merged, part);
+  }
+
   return merged;
+}
+
+function buildWhere(model, filters, Op, includes, relationIdMapping) {
+  if (!filters || typeof filters !== 'object') {
+    return {};
+  }
+
+  if (Array.isArray(filters.and)) {
+    return processAndFilters(filters, model, Op, includes, relationIdMapping);
+  }
+
+  if (Array.isArray(filters.or)) {
+    return processOrFilters(filters, model, Op, includes, relationIdMapping);
+  }
+
+  return processImplicitAndFilters(
+    filters,
+    model,
+    Op,
+    includes,
+    relationIdMapping
+  );
+}
+
+function normalizeOrderingItems(ordering) {
+  if (!ordering) {
+    return [];
+  }
+
+  if (Array.isArray(ordering)) {
+    return ordering;
+  }
+
+  return [ordering];
+}
+
+function extractOrderColumn(item) {
+  return item.order_by || item.orderby || item.column || item.field;
+}
+
+function normalizeOrderDirection(item, defaultOrderDir) {
+  const direction = item.direction || item.dir || defaultOrderDir || 'ASC';
+  return String(direction).toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+}
+
+function resolveOrderColumnName(column, idMapping) {
+  if (column === 'id' && idMapping) {
+    return idMapping;
+  }
+  return column;
+}
+
+function buildIncludeChain(resolved, parts) {
+  if (Array.isArray(resolved.includeChain)) {
+    return resolved.includeChain.map((c) => ({ model: c.model, as: c.as }));
+  }
+
+  return [
+    {
+      model: resolved.foundModel,
+      as: parts.slice(0, -1).join('.') || parts[0],
+    },
+  ];
+}
+
+function processIncludedOrderColumn(
+  model,
+  columnName,
+  includes,
+  relationIdMapping
+) {
+  const resolved = resolveIncludedAttribute(model, includes || [], columnName);
+  if (!resolved) {
+    return { error: `Invalid order column '${columnName}'` };
+  }
+
+  const parts = columnName.split('.');
+  let attribute = parts[parts.length - 1];
+
+  if (attribute === 'id') {
+    const relationMapping = findRelationMapping(
+      relationIdMapping,
+      resolved.foundModel
+    );
+    if (relationMapping && relationMapping.id_field) {
+      attribute = relationMapping.id_field;
+    }
+  }
+
+  const includeChain = buildIncludeChain(resolved, parts);
+  return { includeChain, attribute };
 }
 
 function buildOrdering(
@@ -304,73 +555,74 @@ function buildOrdering(
   includes,
   relationIdMapping
 ) {
-  let items = ordering;
-  if (!items) items = [];
-  if (!Array.isArray(items)) items = [items];
-  const out = [];
+  const items = normalizeOrderingItems(ordering);
+  const orderClauses = [];
+
   for (const item of items) {
-    if (!item || typeof item !== 'object') continue;
-    const col = item.order_by || item.orderby || item.column || item.field;
-    if (!col) continue;
-    const dir =
-      String(
-        item.direction || item.dir || defaultOrderDir || 'ASC'
-      ).toUpperCase() === 'DESC'
-        ? 'DESC'
-        : 'ASC';
-    const colName = col === 'id' && idMapping ? idMapping : col;
-    if (typeof colName === 'string' && colName.includes('.')) {
-      const resolved = resolveIncludedAttribute(model, includes || [], colName);
-      if (!resolved) {
-        return { error: `Invalid order column '${colName}'` };
-      }
-      const parts = colName.split('.');
-      let attr = parts[parts.length - 1];
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
 
-      // Apply relation_id_mapping if configured and the attribute is 'id'
-      if (attr === 'id' && Array.isArray(relationIdMapping)) {
-        const relationMapping = relationIdMapping.find((mapping) => {
-          // Compare models by name, tableName, or reference equality
-          if (mapping.model === resolved.foundModel) return true;
-          if (mapping.model && resolved.foundModel) {
-            // Compare by model name
-            if (mapping.model.name === resolved.foundModel.name) return true;
-            // Compare by table name as fallback
-            if (mapping.model.tableName === resolved.foundModel.tableName)
-              return true;
-          }
-          return false;
-        });
-        if (relationMapping && relationMapping.id_field) {
-          attr = relationMapping.id_field;
-        }
+    const column = extractOrderColumn(item);
+    if (!column) {
+      continue;
+    }
+
+    const direction = normalizeOrderDirection(item, defaultOrderDir);
+    const columnName = resolveOrderColumnName(column, idMapping);
+
+    if (typeof columnName === 'string' && columnName.includes('.')) {
+      const result = processIncludedOrderColumn(
+        model,
+        columnName,
+        includes,
+        relationIdMapping
+      );
+
+      if (result.error) {
+        return result;
       }
 
-      const chain = Array.isArray(resolved.includeChain)
-        ? resolved.includeChain.map((c) => ({ model: c.model, as: c.as }))
-        : [
-            {
-              model: resolved.foundModel,
-              as: parts.slice(0, -1).join('.') || parts[0],
-            },
-          ];
-      out.push([...chain, attr, dir]);
+      orderClauses.push([...result.includeChain, result.attribute, direction]);
     } else {
-      if (!validateColumnExists(model, colName)) {
-        return { error: `Invalid order column '${colName}'` };
+      if (!validateColumnExists(model, columnName)) {
+        return { error: `Invalid order column '${columnName}'` };
       }
-      out.push([colName, dir]);
+      orderClauses.push([columnName, direction]);
     }
   }
-  if (!out.length) {
-    const eff =
-      defaultOrderBy === 'id' && idMapping ? idMapping : defaultOrderBy;
-    out.push([eff, defaultOrderDir || 'ASC']);
+
+  if (orderClauses.length === 0) {
+    const effectiveOrderBy = resolveOrderColumnName(defaultOrderBy, idMapping);
+    orderClauses.push([effectiveOrderBy, defaultOrderDir || 'ASC']);
   }
-  return out;
+
+  return orderClauses;
 }
 
-// Internal search function that can be reused by both search and list operations
+function extractSearchParameters(body) {
+  return {
+    filters: body.filtering || {},
+    ordering: body.ordering || null,
+    paging: body.paging || {},
+  };
+}
+
+function extractMergedOptions(searchOptions) {
+  const merged = Object.assign({}, SEARCH_DEFAULTS, searchOptions || {});
+
+  return {
+    defaultPageSize: merged.defaultPageSize,
+    defaultOrderBy: merged.defaultOrderBy,
+    defaultOrderDir: merged.defaultOrderDir,
+    metaShowOrdering: !!merged.metaShowOrdering,
+    idMapping: merged.id_mapping || 'id',
+    relationIdMapping: merged.relation_id_mapping,
+    pre: merged.pre,
+    post: merged.post,
+  };
+}
+
 async function executeSearchOperation(
   model,
   searchOptions,
@@ -379,85 +631,44 @@ async function executeSearchOperation(
   res,
   body = {}
 ) {
-  const merged = Object.assign({}, SEARCH_DEFAULTS, searchOptions || {});
-  const defaultPageSize = merged.defaultPageSize;
-  const defaultOrderBy = merged.defaultOrderBy;
-  const defaultOrderDir = merged.defaultOrderDir;
-  const metaShowOrdering = !!merged.metaShowOrdering;
-  const idMapping = merged.id_mapping || 'id';
-  const relationIdMapping = merged.relation_id_mapping;
-  const pre = merged.pre;
-  const post = merged.post;
+  const options = extractMergedOptions(searchOptions);
+  const { filters, ordering, paging } = extractSearchParameters(body);
 
-  const filters = body.filtering || {};
-  const ordering = body.ordering || null;
-  const paging = body.paging || {};
-
-  // Start with modelOptions, then merge any req.apialize.options from middleware
-  const mergedReqOptions = Object.assign({}, modelOptions);
-  if (req.apialize.options && typeof req.apialize.options === 'object') {
-    for (const k of Object.keys(req.apialize.options)) {
-      mergedReqOptions[k] = req.apialize.options[k];
-    }
-  }
+  const mergedReqOptions = mergeReqOptionsIntoModelOptions(req, modelOptions);
   req.apialize.options = mergedReqOptions;
 
-  // Build where with Op from the model's Sequelize
   const Op = getSequelizeOp(model);
 
   return await withTransactionAndHooks(
     {
       model,
-      options: { ...searchOptions, pre, post },
+      options: { ...searchOptions, pre: options.pre, post: options.post },
       req,
       res,
       modelOptions,
-      idMapping,
+      idMapping: options.idMapping,
       useReqOptionsTransaction: true,
     },
     async (context) => {
-      // Paging (after pre-hooks so they can modify pagination)
-      let page = parseInt(paging.page, 10);
-      if (isNaN(page) || page < 1) page = 1;
-      let pageSize = parseInt(paging.size ?? paging.page_size, 10);
-      if (isNaN(pageSize) || pageSize < 1) pageSize = defaultPageSize;
+      const { page, pageSize } = processPaging(paging, options.defaultPageSize);
       req.apialize.options.limit = pageSize;
       req.apialize.options.offset = (page - 1) * pageSize;
 
-      // Get includes from current req.apialize.options and any model scope state
-      // This runs after pre-hooks, ensuring we see any scoped includes applied in hooks
-      let includes = req.apialize.options.include || [];
+      const includes = getIncludesFromContext(req, model);
 
-      // If model has scoped includes that aren't in req.apialize.options, merge them
-      if (model && model._scope && model._scope.include) {
-        const scopeIncludes = Array.isArray(model._scope.include)
-          ? model._scope.include
-          : [model._scope.include];
-        includes = Array.isArray(includes)
-          ? [...includes, ...scopeIncludes]
-          : [...scopeIncludes, includes];
-      }
-
-      // Build where using current includes state (after pre-hooks have run)
       const whereTree = buildWhere(
         model,
         filters || {},
         Op,
         includes,
-        relationIdMapping
+        options.relationIdMapping
       );
       if (whereTree && whereTree.__error) {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn(
-            `[Apialize] Search bad request: ${whereTree.__error}. Body:`,
-            JSON.stringify(body, null, 2),
-            `URL: ${req.originalUrl}`
-          );
-        }
+        logBadRequest('Search bad request', whereTree.__error, body, req);
         context.res.status(400).json({ success: false, error: 'Bad request' });
         return;
       }
-      // Use Reflect.ownKeys so we don't drop symbol-keyed operators like Op.or
+
       if (Reflect.ownKeys(whereTree).length) {
         req.apialize.options.where = Object.assign(
           {},
@@ -466,37 +677,31 @@ async function executeSearchOperation(
         );
       }
 
-      // Build ordering (also use current includes state after pre-hooks)
-      const orderArr = buildOrdering(
+      const orderArray = buildOrdering(
         model,
         ordering,
-        defaultOrderBy,
-        defaultOrderDir,
-        idMapping,
+        options.defaultOrderBy,
+        options.defaultOrderDir,
+        options.idMapping,
         includes,
-        relationIdMapping
+        options.relationIdMapping
       );
-      if (orderArr && orderArr.error) {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn(
-            `[Apialize] Search bad request: ${orderArr.error}. Body:`,
-            JSON.stringify(body, null, 2),
-            `URL: ${req.originalUrl}`
-          );
-        }
+
+      if (orderArray && orderArray.error) {
+        logBadRequest('Search bad request', orderArray.error, body, req);
         context.res.status(400).json({ success: false, error: 'Bad request' });
         return;
       }
-      req.apialize.options.order = orderArr;
+
+      req.apialize.options.order = orderArray;
 
       const result = await model.findAndCountAll(req.apialize.options);
 
-      // Create a normalizer function that includes foreign key mapping
       const normalizeRowsFn = async (rows, idMappingParam) => {
         return await normalizeRowsWithForeignKeys(
           rows,
           idMappingParam,
-          relationIdMapping,
+          options.relationIdMapping,
           model
         );
       };
@@ -507,40 +712,97 @@ async function executeSearchOperation(
         pageSize,
         undefined,
         false,
-        metaShowOrdering,
+        options.metaShowOrdering,
         false,
         req,
-        idMapping,
+        options.idMapping,
         normalizeRowsFn
       );
+
       context.payload = response;
       return context.payload;
     }
   );
 }
 
+function processPaging(paging, defaultPageSize) {
+  let page = parseInt(paging.page, 10);
+  if (isNaN(page) || page < 1) {
+    page = 1;
+  }
+
+  let pageSize = parseInt(paging.size ?? paging.page_size, 10);
+  if (isNaN(pageSize) || pageSize < 1) {
+    pageSize = defaultPageSize;
+  }
+
+  return { page, pageSize };
+}
+
+function getIncludesFromContext(req, model) {
+  let includes = req.apialize.options.include || [];
+
+  if (model && model._scope && model._scope.include) {
+    const scopeIncludes = Array.isArray(model._scope.include)
+      ? model._scope.include
+      : [model._scope.include];
+
+    if (Array.isArray(includes)) {
+      includes = [...includes, ...scopeIncludes];
+    } else {
+      includes = [...scopeIncludes, includes];
+    }
+  }
+
+  return includes;
+}
+
+function logBadRequest(message, error, body, req) {
+  if (process.env.NODE_ENV === 'development') {
+    console.warn(
+      `[Apialize] ${message}: ${error}. Body:`,
+      JSON.stringify(body, null, 2),
+      `URL: ${req.originalUrl}`
+    );
+  }
+}
+
+function getMiddlewareFunctions(middleware) {
+  if (!Array.isArray(middleware)) {
+    return [];
+  }
+
+  return middleware.filter((fn) => typeof fn === 'function');
+}
+
+function normalizePath(path) {
+  const basePath = (typeof path === 'string' && path.trim()) || '/search';
+
+  if (basePath.startsWith('/')) {
+    return basePath;
+  }
+
+  return `/${basePath}`;
+}
+
+function disableQueryFilters(req, res, next) {
+  req._apializeDisableQueryFilters = true;
+  next();
+}
+
 function search(model, options = {}, modelOptions = {}) {
   ensureFn(model, 'findAndCountAll');
   const merged = Object.assign({}, SEARCH_DEFAULTS, options || {});
-  const middleware = Array.isArray(merged.middleware) ? merged.middleware : [];
 
-  const inline = middleware.filter((fn) => typeof fn === 'function');
+  const middlewareFunctions = getMiddlewareFunctions(merged.middleware);
   const router = express.Router({ mergeParams: true });
-
-  // ensure path starts with '/'
-  const basePath =
-    (typeof merged.path === 'string' && merged.path.trim()) || '/search';
-  const mountPath = basePath.startsWith('/') ? basePath : `/${basePath}`;
+  const mountPath = normalizePath(merged.path);
 
   router.post(
     mountPath,
-    // Disable query-string auto filters; search uses body exclusively
-    (req, _res, next) => {
-      req._apializeDisableQueryFilters = true;
-      next();
-    },
+    disableQueryFilters,
     apializeContext,
-    ...inline,
+    ...middlewareFunctions,
     asyncHandler(async (req, res) => {
       const body = (req && req.body) || {};
 
