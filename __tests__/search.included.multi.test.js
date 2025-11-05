@@ -107,8 +107,8 @@ describe('search: multi-level include filtering', () => {
     const res = await request(app)
       .post('/albums/search')
       .send({
-        filters: { 'artist.label.name': 'warner' },
-        ordering: { orderby: 'id', direction: 'ASC' },
+        filtering: { 'artist.label.name': 'warner' },
+        ordering: { order_by: 'id', direction: 'ASC' },
       });
 
     expect(res.status).toBe(200);

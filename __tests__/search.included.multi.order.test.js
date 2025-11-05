@@ -107,9 +107,9 @@ describe('search: multi-level include ordering (three levels)', () => {
       .post('/albums/search')
       .send({
         ordering: [
-          { orderby: 'artist.label.name', direction: 'DESC' },
-          { orderby: 'artist.name', direction: 'ASC' },
-          { orderby: 'title', direction: 'ASC' },
+          { order_by: 'artist.label.name', direction: 'DESC' },
+          { order_by: 'artist.name', direction: 'ASC' },
+          { order_by: 'title', direction: 'ASC' },
         ],
       });
 

@@ -104,7 +104,7 @@ describe('list: multi-level include filtering and ordering', () => {
     await seed(Label, Artist, Album);
 
     const res = await request(app).get(
-      '/albums?artist.label.name=warner&api:orderby=artist.label.name,artist.name'
+      '/albums?artist.label.name=warner&api:order_by=artist.label.name,artist.name'
     );
     expect(res.status).toBe(200);
     // Only prince albums (label Warner), ordered by label then artist

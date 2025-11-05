@@ -77,7 +77,7 @@ describe('search operation: included models filtering', () => {
     // Equality match on included model attribute
     const res1 = await request(app)
       .post('/albums/search')
-      .send({ filters: { 'artist.name': 'Ludwig van Beethoven' } });
+      .send({ filtering: { 'artist.name': 'Ludwig van Beethoven' } });
 
     expect(res1.status).toBe(200);
     expect(titles(res1)).toEqual(['Symphony No. 5', 'Symphony No. 9']);
@@ -85,7 +85,7 @@ describe('search operation: included models filtering', () => {
     // Case-insensitive contains on included attribute
     const res2 = await request(app)
       .post('/albums/search')
-      .send({ filters: { 'artist.name': { icontains: 'mozart' } } });
+      .send({ filtering: { 'artist.name': { icontains: 'mozart' } } });
 
     expect(res2.status).toBe(200);
     expect(titles(res2)).toEqual(['Requiem']);

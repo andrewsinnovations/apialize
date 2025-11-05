@@ -55,15 +55,15 @@ describe('model.apialize default page_size + ordering', () => {
     expect(names[names.length - 1]).toBe('n24');
   });
 
-  test('query api:pagesize overrides model default', async () => {
-    const res = await request(app).get('/items?api:pagesize=3');
+  test('query api:page_size overrides model default', async () => {
+    const res = await request(app).get('/items?api:page_size=3');
     expect(res.body.meta.page_size).toBe(3);
     expect(res.body.data.length).toBe(3);
   });
 
   test('model default order overwritten by query orderby + orderdir', async () => {
     const res = await request(app).get(
-      '/items?api:orderby=+score,-name&api:orderdir=ASC'
+      '/items?api:order_by=+score,-name&api:order_dir=ASC'
     );
     // Expect score ASC then name DESC (because -name) among ties
     const combos = res.body.data.map((r) => `${r.score}:${r.name}`);

@@ -126,7 +126,7 @@ describe('search operation: predicate coverage', () => {
     const res = await request(app)
       .post('/items/search')
       .send({
-        filters: { category: 'electronics', active: { is_true: true } },
+        filtering: { category: 'electronics', active: { is_true: true } },
       });
     expect(res.status).toBe(200);
     expect(res.body.meta.count).toBe(2);
@@ -174,13 +174,13 @@ describe('search operation: predicate coverage', () => {
     ]);
 
     const body = {
-      filters: {
+      filtering: {
         and: [
           { category: 'electronics' },
           { or: [{ price: { lt: 300 } }, { score: { gte: 9 } }] },
         ],
       },
-      ordering: { orderby: 'price', direction: 'asc' },
+      ordering: { order_by: 'price', direction: 'asc' },
     };
     const res = await request(app).post('/items/search').send(body);
     expect(res.status).toBe(200);
@@ -234,13 +234,13 @@ describe('search operation: predicate coverage', () => {
     // contains (SQLite LIKE is case-insensitive by default for ASCII)
     const res1 = await request(app)
       .post('/items/search')
-      .send({ filters: { name: { contains: 'Display' } } });
+      .send({ filtering: { name: { contains: 'Display' } } });
     expect(names(res1)).toEqual(['4k Display', 'display stand', 'On Display']);
 
     // icontains
     const res2 = await request(app)
       .post('/items/search')
-      .send({ filters: { name: { icontains: 'display' } } });
+      .send({ filtering: { name: { icontains: 'display' } } });
     expect(names(res2)).toEqual(['4k Display', 'display stand', 'On Display']);
 
     // object operator variant is optional; suffix already covers icontains semantics reliably across dialects
@@ -248,12 +248,12 @@ describe('search operation: predicate coverage', () => {
     // anchors
     const res4 = await request(app)
       .post('/items/search')
-      .send({ filters: { name: { starts_with: 'dis' } } });
+      .send({ filtering: { name: { starts_with: 'dis' } } });
     expect(names(res4)).toEqual(['display stand']);
 
     const res5 = await request(app)
       .post('/items/search')
-      .send({ filters: { name: { ends_with: 'tor' } } });
+      .send({ filtering: { name: { ends_with: 'tor' } } });
     expect(names(res5)).toEqual(['Monitor']);
   });
 
@@ -301,8 +301,8 @@ describe('search operation: predicate coverage', () => {
     const r1 = await request(app)
       .post('/items/search')
       .send({
-        filters: { name: { not_contains: 'Auto' } },
-        ordering: { orderby: 'id', direction: 'asc' },
+        filtering: { name: { not_contains: 'Auto' } },
+        ordering: { order_by: 'id', direction: 'asc' },
       });
     expect(names(r1)).toEqual(['Manual Bike', 'Router']);
 
@@ -310,8 +310,8 @@ describe('search operation: predicate coverage', () => {
     const r2 = await request(app)
       .post('/items/search')
       .send({
-        filters: { name: { not_icontains: 'auto' } },
-        ordering: { orderby: 'id', direction: 'asc' },
+        filtering: { name: { not_icontains: 'auto' } },
+        ordering: { order_by: 'id', direction: 'asc' },
       });
     expect(names(r2)).toEqual(['Manual Bike', 'Router']);
 
@@ -319,8 +319,8 @@ describe('search operation: predicate coverage', () => {
     const r3 = await request(app)
       .post('/items/search')
       .send({
-        filters: { name: { not_starts_with: 'Auto' } },
-        ordering: { orderby: 'id', direction: 'asc' },
+        filtering: { name: { not_starts_with: 'Auto' } },
+        ordering: { order_by: 'id', direction: 'asc' },
       });
     expect(names(r3)).toEqual(['Manual Bike', 'Router']);
 
@@ -328,8 +328,8 @@ describe('search operation: predicate coverage', () => {
     const r4 = await request(app)
       .post('/items/search')
       .send({
-        filters: { name: { not_ends_with: 'er' } },
-        ordering: { orderby: 'id', direction: 'asc' },
+        filtering: { name: { not_ends_with: 'er' } },
+        ordering: { order_by: 'id', direction: 'asc' },
       });
     expect(names(r4)).toEqual([
       'Auto Wrench',
@@ -385,7 +385,7 @@ describe('search operation: predicate coverage', () => {
     const res = await request(app)
       .post('/items/search')
       .send({
-        filters: {
+        filtering: {
           or: [
             { name: { icontains: 'auto' } },
             { category: { icontains: 'auto' } },
@@ -433,7 +433,7 @@ describe('search operation: predicate coverage', () => {
 
     const eqRes = await request(app)
       .post('/items/search')
-      .send({ filters: { category: 'B' } });
+      .send({ filtering: { category: 'B' } });
     expect(names(eqRes)).toEqual(['B']);
   });
 
@@ -471,7 +471,7 @@ describe('search operation: predicate coverage', () => {
 
     const neRes = await request(app)
       .post('/items/search')
-      .send({ filters: { category: { neq: 'B' } } });
+      .send({ filtering: { category: { neq: 'B' } } });
     // Note: In some CI/Windows SQLite runners this operator-object form can behave flakily.
     // The suffix variant is covered in the next test and is stable across dialects.
     expect(names(neRes)).toEqual(['A', 'C']);
@@ -513,14 +513,14 @@ describe('search operation: predicate coverage', () => {
     const inRes = await request(app)
       .post('/items/search')
       .send({
-        filters: { category: { in: ['A', 'C'] } },
-        ordering: { orderby: 'id', direction: 'asc' },
+        filtering: { category: { in: ['A', 'C'] } },
+        ordering: { order_by: 'id', direction: 'asc' },
       });
     expect(names(inRes)).toEqual(['A', 'C']);
 
     const notInRes = await request(app)
       .post('/items/search')
-      .send({ filters: { category: { not_in: ['A', 'C'] } } });
+      .send({ filtering: { category: { not_in: ['A', 'C'] } } });
     expect(names(notInRes)).toEqual(['B']);
   });
 
@@ -550,12 +550,12 @@ describe('search operation: predicate coverage', () => {
 
     const tRes = await request(app)
       .post('/items/search')
-      .send({ filters: { active: true } });
+      .send({ filtering: { active: true } });
     expect(names(tRes)).toEqual(['T1']);
 
     const rawRes = await request(app)
       .post('/items/search')
-      .send({ filters: { active: false } });
+      .send({ filtering: { active: false } });
     expect(names(rawRes)).toEqual(['T2']);
   });
 
@@ -601,8 +601,8 @@ describe('search operation: predicate coverage', () => {
 
     const body = {
       ordering: [
-        { orderby: 'category', direction: 'asc' },
-        { orderby: 'price', direction: 'desc' },
+        { order_by: 'category', direction: 'asc' },
+        { order_by: 'price', direction: 'desc' },
       ],
       paging: { page: 2, size: 2 },
     };
@@ -636,7 +636,7 @@ describe('search operation: predicate coverage', () => {
 
     const res = await request(app)
       .post('/items/search')
-      .send({ filters: { notARealColumn: 'foo' } });
+      .send({ filtering: { notARealColumn: 'foo' } });
     expect(res.status).toBe(400);
     expect(res.body).toMatchObject({ success: false, error: 'Bad request' });
   });

@@ -55,7 +55,7 @@ describe('search operation: ieq operator and default case-insensitive equality',
 
     const res = await request(app)
       .post('/items/search')
-      .send({ filters: { name: 'alpha' }, ordering: { orderby: 'id' } });
+      .send({ filtering: { name: 'alpha' }, ordering: { order_by: 'id' } });
     expect(res.status).toBe(200);
     expect(names(res)).toEqual(['Alpha', 'alpha']);
   });
@@ -69,8 +69,8 @@ describe('search operation: ieq operator and default case-insensitive equality',
     const res = await request(app)
       .post('/items/search')
       .send({
-        filters: { name: { ieq: 'ALPHA' } },
-        ordering: { orderby: 'id' },
+        filtering: { name: { ieq: 'ALPHA' } },
+        ordering: { order_by: 'id' },
       });
     expect(res.status).toBe(200);
     expect(names(res)).toEqual(['Alpha', 'alpha']);

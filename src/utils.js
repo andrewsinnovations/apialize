@@ -33,9 +33,9 @@ function apializeContext(req, res, next) {
       if (!Object.prototype.hasOwnProperty.call(query, key)) continue;
       if (
         key === 'api:page' ||
-        key === 'api:pagesize' ||
-        key === 'api:orderby' ||
-        key === 'api:orderdir' ||
+        key === 'api:page_size' ||
+        key === 'api:order_by' ||
+        key === 'api:order_dir' ||
         key.indexOf('.') !== -1 ||
         key.indexOf(':') !== -1
       ) {

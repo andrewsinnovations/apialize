@@ -116,14 +116,14 @@ describe('list operation: comprehensive options coverage', () => {
     ]);
 
     // Single field DESC using sign
-    const res1 = await request(app).get('/items?api:orderby=-name');
+    const res1 = await request(app).get('/items?api:order_by=-name');
     expect(res1.status).toBe(200);
     expect(names(res1)).toEqual(['Zeta', 'Alpha', 'Alpha']);
     expect(res1.body.meta.order).toEqual([['name', 'DESC']]);
 
     // Multiple fields with global ASC direction: category asc, then name asc
     const res2 = await request(app).get(
-      '/items?api:orderby=category,name&api:orderdir=ASC'
+      '/items?api:order_by=category,name&api:order_dir=ASC'
     );
     expect(res2.status).toBe(200);
     expect(names(res2)).toEqual(['Alpha', 'Zeta', 'Alpha']); // A: Alpha, Zeta; then B: Alpha
@@ -141,7 +141,7 @@ describe('list operation: comprehensive options coverage', () => {
       { external_id: 'u1', name: 'A', category: 'A', score: 1 },
     ]);
 
-    const res = await request(app).get('/items?api:orderby=invalidField');
+    const res = await request(app).get('/items?api:order_by=invalidField');
     expect(res.status).toBe(400);
     expect(res.body).toMatchObject({ success: false, error: 'Bad request' });
   });
@@ -238,7 +238,7 @@ describe('list operation: comprehensive options coverage', () => {
 
     // not_icontains excludes anything containing 'auto' (case-insensitive)
     const r1 = await request(app).get(
-      '/items?name:not_icontains=auto&api:orderby=id'
+      '/items?name:not_icontains=auto&api:order_by=id'
     );
     expect(r1.status).toBe(200);
     expect(names(r1)).toEqual([
@@ -260,7 +260,7 @@ describe('list operation: comprehensive options coverage', () => {
 
     // neq on category
     const r4 = await request(app).get(
-      '/items?category:neq=electronics&api:orderby=id'
+      '/items?category:neq=electronics&api:order_by=id'
     );
     expect(r4.status).toBe(200);
     expect(names(r4)).toEqual([
@@ -272,7 +272,7 @@ describe('list operation: comprehensive options coverage', () => {
 
     // not_in on category
     const r5 = await request(app).get(
-      '/items?category:not_in=tools,vehicles&api:orderby=id'
+      '/items?category:not_in=tools,vehicles&api:order_by=id'
     );
     expect(r5.status).toBe(200);
     expect(names(r5)).toEqual([
@@ -296,7 +296,7 @@ describe('list operation: comprehensive options coverage', () => {
       { external_id: 'u5', name: 'N5', category: 'A', score: 5 },
     ]);
 
-    // No api:pagesize specified -> uses model apialize page_size (2)
+    // No api:page_size specified -> uses model apialize page_size (2)
     const page1 = await request(app).get('/items?api:page=1');
     expect(page1.status).toBe(200);
     expect(page1.body.meta.page).toBe(1);
@@ -312,7 +312,7 @@ describe('list operation: comprehensive options coverage', () => {
 
     // Explicit pagesize overrides model config
     const page2size3 = await request(app).get(
-      '/items?api:page=2&api:pagesize=3'
+      '/items?api:page=2&api:page_size=3'
     );
     expect(page2size3.status).toBe(200);
     expect(page2size3.body.meta.page).toBe(2);
@@ -322,7 +322,7 @@ describe('list operation: comprehensive options coverage', () => {
 
     // Out-of-range page returns empty data but preserves meta
     const page3size3 = await request(app).get(
-      '/items?api:page=3&api:pagesize=3'
+      '/items?api:page=3&api:page_size=3'
     );
     expect(page3size3.status).toBe(200);
     expect(page3size3.body.meta.page).toBe(3);
@@ -361,7 +361,7 @@ describe('list operation: comprehensive options coverage', () => {
       { external_id: 'u3', name: 'Charlie', category: 'C', score: 3 },
     ]);
 
-    const resOrd = await request(app2).get('/items?api:orderby=id'); // should be ignored
+    const resOrd = await request(app2).get('/items?api:order_by=id'); // should be ignored
     expect(resOrd.status).toBe(200);
     // Uses model.apialize orderby DESC by name -> Charlie, Bravo, Alpha
     expect(names(resOrd)).toEqual(['Charlie', 'Bravo', 'Alpha']);
@@ -383,7 +383,7 @@ describe('list operation: comprehensive options coverage', () => {
       { external_id: 'c-uuid', name: 'Cee', category: 'B', score: 3 },
     ]);
 
-    // With no api:orderby, list should use defaultOrderBy external_id ASC
+    // With no api:order_by, list should use defaultOrderBy external_id ASC
     const res = await request(app).get('/items');
     expect(res.status).toBe(200);
     expect(names(res)).toEqual(['Aye', 'Bee', 'Cee']);
@@ -415,7 +415,7 @@ describe('list operation: comprehensive options coverage', () => {
       { external_id: 'c', name: 'Cee', category: 'B', score: 3 },
     ]);
 
-    // With no api:orderby, list should order by external_id ASC because id_mapping is external_id
+    // With no api:order_by, list should order by external_id ASC because id_mapping is external_id
     const res = await request(app).get('/items');
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);

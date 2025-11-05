@@ -76,14 +76,14 @@ describe('list operation: included models filtering (dotted paths)', () => {
 
     // Default equality on string is case-insensitive: lower-case query matches 'Prince'
     const res = await request(app).get(
-      '/albums?artist.name=prince&api:orderby=id'
+      '/albums?artist.name=prince&api:order_by=id'
     );
     expect(res.status).toBe(200);
     expect(titles(res)).toEqual(['Purple Rain', '1999']);
 
     // Explicit case-insensitive equality operator also works
     const res2 = await request(app).get(
-      '/albums?artist.name:ieq=PRINCE&api:orderby=id'
+      '/albums?artist.name:ieq=PRINCE&api:order_by=id'
     );
     expect(res2.status).toBe(200);
     expect(titles(res2)).toEqual(['Purple Rain', '1999']);

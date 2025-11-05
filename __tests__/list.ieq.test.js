@@ -54,7 +54,7 @@ describe('list operation: default case-insensitive equality and ieq operator', (
     await seed(Item);
 
     // name=alpha should match both 'Alpha' and 'alpha' (case-insensitive equality)
-    const res = await request(app).get('/items?name=alpha&api:orderby=id');
+    const res = await request(app).get('/items?name=alpha&api:order_by=id');
     expect(res.status).toBe(200);
     expect(names(res)).toEqual(['Alpha', 'alpha']);
   });
@@ -65,7 +65,7 @@ describe('list operation: default case-insensitive equality and ieq operator', (
     const { Item, app } = ctx;
     await seed(Item);
 
-    const res = await request(app).get('/items?name:ieq=ALPHA&api:orderby=id');
+    const res = await request(app).get('/items?name:ieq=ALPHA&api:order_by=id');
     expect(res.status).toBe(200);
     expect(names(res)).toEqual(['Alpha', 'alpha']);
   });

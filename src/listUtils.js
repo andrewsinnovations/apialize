@@ -95,7 +95,7 @@ function setupPagination(req, query, modelCfg, defaultPageSize) {
       ? modelCfg.page_size
       : defaultPageSize;
 
-  let pageSize = parseInt(query['api:pagesize'], 10);
+  let pageSize = parseInt(query['api:page_size'], 10);
   if (isNaN(pageSize) || pageSize < 1) pageSize = effectivePageSize;
 
   req.apialize.options.limit = pageSize;
@@ -119,8 +119,8 @@ function setupOrdering(
   let rawOrderBy, globalDir;
 
   if (allowOrdering) {
-    rawOrderBy = query['api:orderby'] || modelCfg.orderby;
-    globalDir = (query['api:orderdir'] || modelCfg.orderdir || 'ASC')
+    rawOrderBy = query['api:order_by'] || modelCfg.orderby;
+    globalDir = (query['api:order_dir'] || modelCfg.orderdir || 'ASC')
       .toString()
       .toUpperCase();
   } else {

@@ -241,7 +241,7 @@ describe('Foreign Key Mapping with relation_id_mapping', () => {
       );
 
       const response = await request(app).post('/songs/search').send({
-        filters: {}, // Get all songs
+        filtering: {}, // Get all songs
       });
 
       expect(response.status).toBe(200);
@@ -269,7 +269,7 @@ describe('Foreign Key Mapping with relation_id_mapping', () => {
       const response = await request(app)
         .post('/songs/search')
         .send({
-          filters: {
+          filtering: {
             title: { contains: 'Symphony No. 5' },
           },
         });

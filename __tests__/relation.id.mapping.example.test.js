@@ -124,7 +124,7 @@ describe('relation_id_mapping usage example', () => {
     const res = await request(app)
       .post('/songs/search')
       .send({
-        filters: { 'artist.id': 'asdf1234' },
+        filtering: { 'artist.id': 'asdf1234' },
       });
 
     expect(res.status).toBe(200);

@@ -79,8 +79,8 @@ describe('search ordering by included attribute', () => {
       .post('/albums/search')
       .send({
         ordering: [
-          { orderby: 'artist.name', direction: 'DESC' },
-          { orderby: 'title', direction: 'ASC' },
+          { order_by: 'artist.name', direction: 'DESC' },
+          { order_by: 'title', direction: 'ASC' },
         ],
       });
     expect(res.status).toBe(200);

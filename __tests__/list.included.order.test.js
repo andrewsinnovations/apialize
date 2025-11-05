@@ -75,7 +75,7 @@ describe('list ordering by included attribute', () => {
     const { Artist, Album, app } = ctx;
     await seed(Artist, Album);
 
-    const res = await request(app).get('/albums?api:orderby=artist.name,title');
+    const res = await request(app).get('/albums?api:order_by=artist.name,title');
     expect(res.status).toBe(200);
     // Beethoven first, then Prince (ordered by title within artist)
     expect(titles(res)).toEqual(['Symphony No. 5', '1999', 'Purple Rain']);

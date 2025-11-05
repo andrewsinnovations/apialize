@@ -172,7 +172,7 @@ describe('relation_id_mapping feature', () => {
       const res1 = await request(app)
         .post('/songs/search')
         .send({
-          filters: { 'artist.id': 'artist-beethoven' },
+          filtering: { 'artist.id': 'artist-beethoven' },
         });
 
       expect(res1.status).toBe(200);
@@ -186,7 +186,7 @@ describe('relation_id_mapping feature', () => {
       const res2 = await request(app)
         .post('/songs/search')
         .send({
-          filters: { 'artist.id': 'artist-mozart' },
+          filtering: { 'artist.id': 'artist-mozart' },
         });
 
       expect(res2.status).toBe(200);
@@ -223,7 +223,7 @@ describe('relation_id_mapping feature', () => {
       const res = await request(app)
         .post('/songs/search')
         .send({
-          filters: { 'album.id': 'album-sym5' },
+          filtering: { 'album.id': 'album-sym5' },
         });
 
       expect(res.status).toBe(200);
@@ -262,7 +262,7 @@ describe('relation_id_mapping feature', () => {
       const res = await request(app)
         .post('/songs/search')
         .send({
-          filters: {
+          filtering: {
             'album.id': {
               in: ['album-sym5', 'album-req'],
             },
@@ -306,7 +306,7 @@ describe('relation_id_mapping feature', () => {
       const res = await request(app)
         .post('/songs/search')
         .send({
-          ordering: [{ orderby: 'artist.id', direction: 'DESC' }],
+          ordering: [{ order_by: 'artist.id', direction: 'DESC' }],
         });
 
       expect(res.status).toBe(200);
@@ -350,7 +350,7 @@ describe('relation_id_mapping feature', () => {
       const res1 = await request(app)
         .post('/songs/search')
         .send({
-          filters: { 'artist.id': 'artist-beethoven' },
+          filtering: { 'artist.id': 'artist-beethoven' },
         });
 
       expect(res1.status).toBe(200);
@@ -364,7 +364,7 @@ describe('relation_id_mapping feature', () => {
       const res2 = await request(app)
         .post('/songs/search')
         .send({
-          filters: { 'album.id': 1 }, // Using numeric ID since Album mapping not configured
+          filtering: { 'album.id': 1 }, // Using numeric ID since Album mapping not configured
         });
 
       expect(res2.status).toBe(200);
@@ -403,7 +403,7 @@ describe('relation_id_mapping feature', () => {
       const res = await request(app)
         .post('/songs/search')
         .send({
-          filters: { 'artist.name': 'Ludwig van Beethoven' },
+          filtering: { 'artist.name': 'Ludwig van Beethoven' },
         });
 
       expect(res.status).toBe(200);
@@ -557,7 +557,7 @@ describe('relation_id_mapping feature', () => {
 
       // Order by artist.id should use artist.external_id
       const res = await request(app).get('/songs').query({
-        'api:orderby': '-artist.id', // DESC order by external_id
+        'api:order_by': '-artist.id', // DESC order by external_id
       });
 
       expect(res.status).toBe(200);
@@ -633,7 +633,7 @@ describe('relation_id_mapping feature', () => {
       const res = await request(app)
         .post('/songs/search')
         .send({
-          filters: { 'artist.id': 1 }, // Should use numeric id since mapping is invalid
+          filtering: { 'artist.id': 1 }, // Should use numeric id since mapping is invalid
         });
 
       expect(res.status).toBe(200);
@@ -667,7 +667,7 @@ describe('relation_id_mapping feature', () => {
       const res = await request(app)
         .post('/songs/search')
         .send({
-          filters: { 'artist.id': 'some-value' },
+          filtering: { 'artist.id': 'some-value' },
         });
 
       expect(res.status).toBe(400);
@@ -707,7 +707,7 @@ describe('relation_id_mapping feature', () => {
       const res = await request(app)
         .post('/songs/search')
         .send({
-          filters: {
+          filtering: {
             'artist.id': 'artist-beethoven',
             'album.id': 'album-sym5',
           },

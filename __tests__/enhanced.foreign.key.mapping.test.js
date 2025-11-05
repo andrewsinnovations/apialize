@@ -192,7 +192,7 @@ describe('Enhanced foreign key mapping with Sequelize associations', () => {
     const response = await request(app)
       .post('/songs/search')
       .send({
-        filters: { title: 'Imagine' },
+        filtering: { title: 'Imagine' },
       });
 
     expect(response.status).toBe(200);

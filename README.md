@@ -307,7 +307,7 @@ For related model filtering and ordering, see the `relation_id_mapping` option d
 
 Pagination & ordering precedence (within `list()`):
 
-1. Query parameters (`api:pagesize`, `api:orderby`, `api:orderdir`)
+1. Query parameters (`api:page_size`, `api:order_by`, `api:order_dir`)
 2. Model defaults (`page_size`, `orderby`, `orderdir` on `model.apialize` – only these pagination/ordering keys are used)
 3. Hard‑coded fallbacks: page_size 100, ordering by `id` ascending.
 
@@ -335,9 +335,9 @@ Bad request (invalid filter/order column or type): `400 { success: false, error:
 Every ordinary query parameter becomes a simple equality in `where` (unless already set by earlier middleware). For string attributes, equality is case-insensitive by default (translated to `ILIKE` on Postgres, `LIKE` elsewhere without wildcards). Reserved keys are NOT turned into filters:
 
 - `api:page` – 1‑based page (default 1)
-- `api:pagesize` – page size (default 100)
-- `api:orderby` – comma separated field list. Supports `-field` for DESC, `+field` for ASC, plain field uses global direction.
-- `api:orderdir` – fallback direction (`ASC` | `DESC`) applied to fields without an explicit `+`/`-` (default `ASC`).
+- `api:page_size` – page size (default 100)
+- `api:order_by` – comma separated field list. Supports `-field` for DESC, `+field` for ASC, plain field uses global direction.
+- `api:order_dir` – fallback direction (`ASC` | `DESC`) applied to fields without an explicit `+`/`-` (default `ASC`).
 
 Pagination sets `limit` & `offset`. Ordering translates to a Sequelize `order` array like `[["score","DESC"],["name","ASC"]]`. Response structure:
 
@@ -350,7 +350,7 @@ Pagination sets `limit` & `offset`. Ordering translates to a Sequelize `order` a
 ```
 
 Example (filter + pagination + ordering):  
-`GET /items?type=fruit&api:page=2&api:pagesize=25&api:orderby=-score,name` =>
+`GET /items?type=fruit&api:page=2&api:page_size=25&api:order_by=-score,name` =>
 
 ```js
 model.findAndCountAll({
@@ -364,7 +364,7 @@ model.findAndCountAll({
 });
 ```
 
-If you don't supply `api:orderby`, results default to ascending by `id` (ensuring stable pagination): `ORDER BY id ASC`.
+If you don't supply `api:order_by`, results default to ascending by `id` (ensuring stable pagination): `ORDER BY id ASC`.
 
 The applied ordering is echoed back in `meta.order` as an array of `[field, direction]` pairs.
 
@@ -372,10 +372,10 @@ Ordering examples:
 
 | Query                                | Resulting order          |
 | ------------------------------------ | ------------------------ |
-| `api:orderby=name`                   | name ASC                 |
-| `api:orderby=name&api:orderdir=DESC` | name DESC                |
-| `api:orderby=-score,name`            | score DESC then name ASC |
-| `api:orderby=-score,+name`           | score DESC then name ASC |
+| `api:order_by=name`                     | name ASC                 |
+| `api:order_by=name&api:order_dir=DESC`  | name DESC                |
+| `api:order_by=-score,name`              | score DESC then name ASC |
+| `api:order_by=-score,+name`             | score DESC then name ASC |
 
 ### Filtering on included models (dotted paths)
 
@@ -430,14 +430,14 @@ app.use(
 // Now artist.id filters will use artist.external_id instead of artist.id
 // GET /songs?artist.id=artist-beethoven   // Uses artist.external_id
 // GET /songs?album.id=album-symphony-5    // Uses album.external_id
-// GET /songs?api:orderby=artist.id        // Orders by artist.external_id
+// GET /songs?api:order_by=artist.id        // Orders by artist.external_id
 ```
 
 The mapping applies to:
 
 - **Equality filters**: `?artist.id=value` → `artist.external_id = value`
 - **Operator filters**: `?artist.id:in=val1,val2` → `artist.external_id IN (val1, val2)`
-- **Ordering**: `?api:orderby=artist.id` → `ORDER BY artist.external_id`
+- **Ordering**: `?api:order_by=artist.id` → `ORDER BY artist.external_id`
 - **Foreign key flattening**: Foreign key values in response data are replaced with mapped ID values
 
 #### Foreign key flattening in responses
@@ -586,7 +586,7 @@ app.use(
 // GET /albums?artist.label.name=warner
 
 // Order: first by label name, then by artist name
-// GET /albums?api:orderby=artist.label.name,artist.name
+// GET /albums?api:order_by=artist.label.name,artist.name
 ```
 
 Complex operators via middleware:
@@ -620,7 +620,7 @@ Examples:
 - `GET /items?name:icontains=display` → case-insensitive substring match
 - `GET /items?score:gte=2` → numeric comparison
 - `GET /items?category:in=A,B` → set membership (comma-separated)
-- `GET /items?name:not_icontains=auto&api:orderby=id` → excludes case-insensitive matches, ordered by id
+- `GET /items?name:not_icontains=auto&api:order_by=id` → excludes case-insensitive matches, ordered by id
 - `GET /items?name:starts_with=dis` → prefix match
 - `GET /items?name:ends_with=lay` → suffix match
 - `GET /items?category:not_in=tools,vehicles` → not in set

@@ -310,7 +310,7 @@ function buildOrdering(
   const out = [];
   for (const item of items) {
     if (!item || typeof item !== 'object') continue;
-    const col = item.orderby || item.column || item.field;
+    const col = item.order_by || item.orderby || item.column || item.field;
     if (!col) continue;
     const dir =
       String(
@@ -402,7 +402,7 @@ function search(model, options = {}, modelOptions = {}) {
     ...inline,
     asyncHandler(async (req, res) => {
       const body = (req && req.body) || {};
-      const filters = body.filters || {};
+      const filters = body.filtering || {};
       const ordering = body.ordering || null;
       const paging = body.paging || {};
 

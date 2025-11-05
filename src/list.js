@@ -19,7 +19,7 @@ const {
 const LIST_DEFAULTS = {
   middleware: [],
   allowFiltering: true, // allow non "api:" query params to become where filters
-  allowOrdering: true, // allow api:orderby / api:orderdir query params
+  allowOrdering: true, // allow api:order_by / api:order_dir query params
   metaShowFilters: false, // include applied filters in meta.filters
   metaShowOrdering: false, // include applied ordering in meta.order
   defaultPageSize: 100, // default page size when not specified in query or model config
