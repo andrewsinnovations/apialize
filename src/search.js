@@ -370,10 +370,16 @@ function buildOrdering(
   return out;
 }
 
-function search(model, options = {}, modelOptions = {}) {
-  ensureFn(model, 'findAndCountAll');
-  const merged = Object.assign({}, SEARCH_DEFAULTS, options || {});
-  const middleware = Array.isArray(merged.middleware) ? merged.middleware : [];
+// Internal search function that can be reused by both search and list operations
+async function executeSearchOperation(
+  model,
+  searchOptions,
+  modelOptions,
+  req,
+  res,
+  body = {}
+) {
+  const merged = Object.assign({}, SEARCH_DEFAULTS, searchOptions || {});
   const defaultPageSize = merged.defaultPageSize;
   const defaultOrderBy = merged.defaultOrderBy;
   const defaultOrderDir = merged.defaultOrderDir;
@@ -382,6 +388,145 @@ function search(model, options = {}, modelOptions = {}) {
   const relationIdMapping = merged.relation_id_mapping;
   const pre = merged.pre;
   const post = merged.post;
+
+  const filters = body.filtering || {};
+  const ordering = body.ordering || null;
+  const paging = body.paging || {};
+
+  // Start with modelOptions, then merge any req.apialize.options from middleware
+  const mergedReqOptions = Object.assign({}, modelOptions);
+  if (req.apialize.options && typeof req.apialize.options === 'object') {
+    for (const k of Object.keys(req.apialize.options)) {
+      mergedReqOptions[k] = req.apialize.options[k];
+    }
+  }
+  req.apialize.options = mergedReqOptions;
+
+  // Build where with Op from the model's Sequelize
+  const Op = getSequelizeOp(model);
+
+  return await withTransactionAndHooks(
+    {
+      model,
+      options: { ...searchOptions, pre, post },
+      req,
+      res,
+      modelOptions,
+      idMapping,
+      useReqOptionsTransaction: true,
+    },
+    async (context) => {
+      // Paging (after pre-hooks so they can modify pagination)
+      let page = parseInt(paging.page, 10);
+      if (isNaN(page) || page < 1) page = 1;
+      let pageSize = parseInt(paging.size ?? paging.page_size, 10);
+      if (isNaN(pageSize) || pageSize < 1) pageSize = defaultPageSize;
+      req.apialize.options.limit = pageSize;
+      req.apialize.options.offset = (page - 1) * pageSize;
+
+      // Get includes from current req.apialize.options and any model scope state
+      // This runs after pre-hooks, ensuring we see any scoped includes applied in hooks
+      let includes = req.apialize.options.include || [];
+
+      // If model has scoped includes that aren't in req.apialize.options, merge them
+      if (model && model._scope && model._scope.include) {
+        const scopeIncludes = Array.isArray(model._scope.include)
+          ? model._scope.include
+          : [model._scope.include];
+        includes = Array.isArray(includes)
+          ? [...includes, ...scopeIncludes]
+          : [...scopeIncludes, includes];
+      }
+
+      // Build where using current includes state (after pre-hooks have run)
+      const whereTree = buildWhere(
+        model,
+        filters || {},
+        Op,
+        includes,
+        relationIdMapping
+      );
+      if (whereTree && whereTree.__error) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(
+            `[Apialize] Search bad request: ${whereTree.__error}. Body:`,
+            JSON.stringify(body, null, 2),
+            `URL: ${req.originalUrl}`
+          );
+        }
+        context.res
+          .status(400)
+          .json({ success: false, error: 'Bad request' });
+        return;
+      }
+      // Use Reflect.ownKeys so we don't drop symbol-keyed operators like Op.or
+      if (Reflect.ownKeys(whereTree).length) {
+        req.apialize.options.where = Object.assign(
+          {},
+          req.apialize.options.where || {},
+          whereTree
+        );
+      }
+
+      // Build ordering (also use current includes state after pre-hooks)
+      const orderArr = buildOrdering(
+        model,
+        ordering,
+        defaultOrderBy,
+        defaultOrderDir,
+        idMapping,
+        includes,
+        relationIdMapping
+      );
+      if (orderArr && orderArr.error) {
+        if (process.env.NODE_ENV === 'development') {
+          console.warn(
+            `[Apialize] Search bad request: ${orderArr.error}. Body:`,
+            JSON.stringify(body, null, 2),
+            `URL: ${req.originalUrl}`
+          );
+        }
+        context.res
+          .status(400)
+          .json({ success: false, error: 'Bad request' });
+        return;
+      }
+      req.apialize.options.order = orderArr;
+
+      const result = await model.findAndCountAll(req.apialize.options);
+
+      // Create a normalizer function that includes foreign key mapping
+      const normalizeRowsFn = async (rows, idMappingParam) => {
+        return await normalizeRowsWithForeignKeys(
+          rows,
+          idMappingParam,
+          relationIdMapping,
+          model
+        );
+      };
+
+      const response = await buildResponse(
+        result,
+        page,
+        pageSize,
+        undefined,
+        false,
+        metaShowOrdering,
+        false,
+        req,
+        idMapping,
+        normalizeRowsFn
+      );
+      context.payload = response;
+      return context.payload;
+    }
+  );
+}
+
+function search(model, options = {}, modelOptions = {}) {
+  ensureFn(model, 'findAndCountAll');
+  const merged = Object.assign({}, SEARCH_DEFAULTS, options || {});
+  const middleware = Array.isArray(merged.middleware) ? merged.middleware : [];
 
   const inline = middleware.filter((fn) => typeof fn === 'function');
   const router = express.Router({ mergeParams: true });
@@ -402,138 +547,16 @@ function search(model, options = {}, modelOptions = {}) {
     ...inline,
     asyncHandler(async (req, res) => {
       const body = (req && req.body) || {};
-      const filters = body.filtering || {};
-      const ordering = body.ordering || null;
-      const paging = body.paging || {};
 
-      // Start with modelOptions, then merge any req.apialize.options from middleware
-      const mergedReqOptions = Object.assign({}, modelOptions);
-      if (req.apialize.options && typeof req.apialize.options === 'object') {
-        for (const k of Object.keys(req.apialize.options)) {
-          mergedReqOptions[k] = req.apialize.options[k];
-        }
-      }
-      req.apialize.options = mergedReqOptions;
-
-      // Build where with Op from the model's Sequelize
-      const Op = getSequelizeOp(model);
-
-      const payload = await withTransactionAndHooks(
-        {
-          model,
-          options: { ...options, pre, post },
-          req,
-          res,
-          modelOptions,
-          idMapping,
-          useReqOptionsTransaction: true,
-        },
-        async (context) => {
-          // Paging (after pre-hooks so they can modify pagination)
-          let page = parseInt(paging.page, 10);
-          if (isNaN(page) || page < 1) page = 1;
-          let pageSize = parseInt(paging.size ?? paging.page_size, 10);
-          if (isNaN(pageSize) || pageSize < 1) pageSize = defaultPageSize;
-          req.apialize.options.limit = pageSize;
-          req.apialize.options.offset = (page - 1) * pageSize;
-
-          // Get includes from current req.apialize.options and any model scope state
-          // This runs after pre-hooks, ensuring we see any scoped includes applied in hooks
-          let includes = req.apialize.options.include || [];
-
-          // If model has scoped includes that aren't in req.apialize.options, merge them
-          if (model && model._scope && model._scope.include) {
-            const scopeIncludes = Array.isArray(model._scope.include)
-              ? model._scope.include
-              : [model._scope.include];
-            includes = Array.isArray(includes)
-              ? [...includes, ...scopeIncludes]
-              : [...scopeIncludes, includes];
-          }
-
-          // Build where using current includes state (after pre-hooks have run)
-          const whereTree = buildWhere(
-            model,
-            filters || {},
-            Op,
-            includes,
-            relationIdMapping
-          );
-          if (whereTree && whereTree.__error) {
-            if (process.env.NODE_ENV === 'development') {
-              console.warn(
-                `[Apialize] Search bad request: ${whereTree.__error}. Body:`,
-                JSON.stringify(body, null, 2),
-                `URL: ${req.originalUrl}`
-              );
-            }
-            context.res
-              .status(400)
-              .json({ success: false, error: 'Bad request' });
-            return;
-          }
-          // Use Reflect.ownKeys so we don't drop symbol-keyed operators like Op.or
-          if (Reflect.ownKeys(whereTree).length) {
-            req.apialize.options.where = Object.assign(
-              {},
-              req.apialize.options.where || {},
-              whereTree
-            );
-          }
-
-          // Build ordering (also use current includes state after pre-hooks)
-          const orderArr = buildOrdering(
-            model,
-            ordering,
-            defaultOrderBy,
-            defaultOrderDir,
-            idMapping,
-            includes,
-            relationIdMapping
-          );
-          if (orderArr && orderArr.error) {
-            if (process.env.NODE_ENV === 'development') {
-              console.warn(
-                `[Apialize] Search bad request: ${orderArr.error}. Body:`,
-                JSON.stringify(body, null, 2),
-                `URL: ${req.originalUrl}`
-              );
-            }
-            context.res
-              .status(400)
-              .json({ success: false, error: 'Bad request' });
-            return;
-          }
-          req.apialize.options.order = orderArr;
-
-          const result = await model.findAndCountAll(req.apialize.options);
-
-          // Create a normalizer function that includes foreign key mapping
-          const normalizeRowsFn = async (rows, idMappingParam) => {
-            return await normalizeRowsWithForeignKeys(
-              rows,
-              idMappingParam,
-              relationIdMapping,
-              model
-            );
-          };
-
-          const response = await buildResponse(
-            result,
-            page,
-            pageSize,
-            undefined,
-            false,
-            metaShowOrdering,
-            false,
-            req,
-            idMapping,
-            normalizeRowsFn
-          );
-          context.payload = response;
-          return context.payload;
-        }
+      const payload = await executeSearchOperation(
+        model,
+        options,
+        modelOptions,
+        req,
+        res,
+        body
       );
+      
       if (!res.headersSent) {
         res.json(payload);
       }
@@ -545,3 +568,4 @@ function search(model, options = {}, modelOptions = {}) {
 }
 
 module.exports = search;
+module.exports.executeSearchOperation = executeSearchOperation;
