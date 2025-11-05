@@ -226,8 +226,11 @@ function setupRelatedEndpoints(
     }
 
     if (operations.indexOf('get') !== -1) {
-      const { options: getOptions, modelOptions: getModelOptions, id_mapping: relatedIdMapping } =
-        resolveOpConfig('get');
+      const {
+        options: getOptions,
+        modelOptions: getModelOptions,
+        id_mapping: relatedIdMapping,
+      } = resolveOpConfig('get');
       const childSingleOptions = Object.assign({}, getOptions);
       // Use a parameter name that matches the actual URL parameter for this model
       const relatedParamName = relatedModel.name.toLowerCase() + 'Id';

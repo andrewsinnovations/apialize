@@ -1,5 +1,9 @@
 const { express, apializeContext, ensureFn, asyncHandler } = require('./utils');
-const { withTransactionAndHooks, normalizeRows } = require('./operationUtils');
+const {
+  withTransactionAndHooks,
+  normalizeRows,
+  normalizeRowsWithForeignKeys,
+} = require('./operationUtils');
 const {
   validateColumnExists,
   validateDataType,
@@ -41,9 +45,18 @@ const SEARCH_DEFAULTS = {
 };
 
 // Convert a single key/value or { op: val } object to a Sequelize where fragment
-function buildFieldPredicate(model, key, rawVal, Op, includes, relationIdMapping) {
+function buildFieldPredicate(
+  model,
+  key,
+  rawVal,
+  Op,
+  includes,
+  relationIdMapping
+) {
   const dialect =
-    model && model.sequelize && typeof model.sequelize.getDialectx === 'function'
+    model &&
+    model.sequelize &&
+    typeof model.sequelize.getDialectx === 'function'
       ? model.sequelize.getDialect()
       : null;
   const CI = dialect === 'postgres' ? Op.iLike || Op.like : Op.like;
@@ -59,27 +72,33 @@ function buildFieldPredicate(model, key, rawVal, Op, includes, relationIdMapping
     if (!resolved) {
       return { error: `Invalid column '${key}'` };
     }
-    
+
     // Apply relation_id_mapping if configured and the column is 'id'
     const parts = key.split('.');
     let actualColumn = parts[parts.length - 1];
     if (actualColumn === 'id' && Array.isArray(relationIdMapping)) {
-      const relationMapping = relationIdMapping.find(mapping => {
+      const relationMapping = relationIdMapping.find((mapping) => {
         // Compare models by name, tableName, or reference equality
         if (mapping.model === resolved.foundModel) return true;
         if (mapping.model && resolved.foundModel) {
           // Compare by model name
           if (mapping.model.name === resolved.foundModel.name) return true;
           // Compare by table name as fallback
-          if (mapping.model.tableName === resolved.foundModel.tableName) return true;
+          if (mapping.model.tableName === resolved.foundModel.tableName)
+            return true;
         }
         return false;
       });
       if (relationMapping && relationMapping.id_field) {
         actualColumn = relationMapping.id_field;
         // Update the alias path to use the mapped field
-        const aliasPrefix = resolved.aliasPath.split('.').slice(0, -1).join('.');
-        const newAliasPath = aliasPrefix ? `${aliasPrefix}.${actualColumn}` : actualColumn;
+        const aliasPrefix = resolved.aliasPath
+          .split('.')
+          .slice(0, -1)
+          .join('.');
+        const newAliasPath = aliasPrefix
+          ? `${aliasPrefix}.${actualColumn}`
+          : actualColumn;
         outKey = `$${newAliasPath}$`;
         // Update validation column for the mapped field
         validateColumn = actualColumn;
@@ -140,9 +159,12 @@ function buildFieldPredicate(model, key, rawVal, Op, includes, relationIdMapping
       const v = rawVal[k];
       if (!Object.prototype.hasOwnProperty.call(map, k)) continue;
       if (k === 'contains' || k === 'not_contains') ops[map[k]] = `%${v}%`;
-      else if (k === 'icontains' || k === 'not_icontains') ops[map[k]] = `%${v}%`;
-      else if (k === 'starts_with' || k === 'not_starts_with') ops[map[k]] = `${v}%`;
-      else if (k === 'ends_with' || k === 'not_ends_with') ops[map[k]] = `%${v}`;
+      else if (k === 'icontains' || k === 'not_icontains')
+        ops[map[k]] = `%${v}%`;
+      else if (k === 'starts_with' || k === 'not_starts_with')
+        ops[map[k]] = `${v}%`;
+      else if (k === 'ends_with' || k === 'not_ends_with')
+        ops[map[k]] = `%${v}`;
       else if (k === 'is_true') ops[map[k]] = true;
       else if (k === 'is_false') ops[map[k]] = false;
       else ops[map[k]] = v;
@@ -242,7 +264,14 @@ function buildWhere(model, filters, Op, includes, relationIdMapping) {
     const v = filters[k];
     if (k === 'and' && Array.isArray(v)) continue;
     if (k === 'or' && Array.isArray(v)) continue;
-    const pred = buildFieldPredicate(model, k, v, Op, includes, relationIdMapping);
+    const pred = buildFieldPredicate(
+      model,
+      k,
+      v,
+      Op,
+      includes,
+      relationIdMapping
+    );
     if (pred && pred.error) return { __error: pred.error };
     if (pred && Object.keys(pred).length) andParts.push(pred);
   }
@@ -297,17 +326,18 @@ function buildOrdering(
       }
       const parts = colName.split('.');
       let attr = parts[parts.length - 1];
-      
+
       // Apply relation_id_mapping if configured and the attribute is 'id'
       if (attr === 'id' && Array.isArray(relationIdMapping)) {
-        const relationMapping = relationIdMapping.find(mapping => {
+        const relationMapping = relationIdMapping.find((mapping) => {
           // Compare models by name, tableName, or reference equality
           if (mapping.model === resolved.foundModel) return true;
           if (mapping.model && resolved.foundModel) {
             // Compare by model name
             if (mapping.model.name === resolved.foundModel.name) return true;
             // Compare by table name as fallback
-            if (mapping.model.tableName === resolved.foundModel.tableName) return true;
+            if (mapping.model.tableName === resolved.foundModel.tableName)
+              return true;
           }
           return false;
         });
@@ -315,10 +345,15 @@ function buildOrdering(
           attr = relationMapping.id_field;
         }
       }
-      
+
       const chain = Array.isArray(resolved.includeChain)
         ? resolved.includeChain.map((c) => ({ model: c.model, as: c.as }))
-        : [{ model: resolved.foundModel, as: parts.slice(0, -1).join('.') || parts[0] }];
+        : [
+            {
+              model: resolved.foundModel,
+              as: parts.slice(0, -1).join('.') || parts[0],
+            },
+          ];
       out.push([...chain, attr, dir]);
     } else {
       if (!validateColumnExists(model, colName)) {
@@ -405,19 +440,25 @@ function search(model, options = {}, modelOptions = {}) {
           // Get includes from current req.apialize.options and any model scope state
           // This runs after pre-hooks, ensuring we see any scoped includes applied in hooks
           let includes = req.apialize.options.include || [];
-          
+
           // If model has scoped includes that aren't in req.apialize.options, merge them
           if (model && model._scope && model._scope.include) {
-            const scopeIncludes = Array.isArray(model._scope.include) 
-              ? model._scope.include 
+            const scopeIncludes = Array.isArray(model._scope.include)
+              ? model._scope.include
               : [model._scope.include];
-            includes = Array.isArray(includes) 
+            includes = Array.isArray(includes)
               ? [...includes, ...scopeIncludes]
               : [...scopeIncludes, includes];
           }
-          
+
           // Build where using current includes state (after pre-hooks have run)
-          const whereTree = buildWhere(model, filters || {}, Op, includes, relationIdMapping);
+          const whereTree = buildWhere(
+            model,
+            filters || {},
+            Op,
+            includes,
+            relationIdMapping
+          );
           if (whereTree && whereTree.__error) {
             if (process.env.NODE_ENV === 'development') {
               console.warn(
@@ -426,7 +467,9 @@ function search(model, options = {}, modelOptions = {}) {
                 `URL: ${req.originalUrl}`
               );
             }
-            context.res.status(400).json({ success: false, error: 'Bad request' });
+            context.res
+              .status(400)
+              .json({ success: false, error: 'Bad request' });
             return;
           }
           // Use Reflect.ownKeys so we don't drop symbol-keyed operators like Op.or
@@ -456,13 +499,26 @@ function search(model, options = {}, modelOptions = {}) {
                 `URL: ${req.originalUrl}`
               );
             }
-            context.res.status(400).json({ success: false, error: 'Bad request' });
+            context.res
+              .status(400)
+              .json({ success: false, error: 'Bad request' });
             return;
           }
           req.apialize.options.order = orderArr;
 
           const result = await model.findAndCountAll(req.apialize.options);
-          const response = buildResponse(
+
+          // Create a normalizer function that includes foreign key mapping
+          const normalizeRowsFn = async (rows, idMappingParam) => {
+            return await normalizeRowsWithForeignKeys(
+              rows,
+              idMappingParam,
+              relationIdMapping,
+              model
+            );
+          };
+
+          const response = await buildResponse(
             result,
             page,
             pageSize,
@@ -472,7 +528,7 @@ function search(model, options = {}, modelOptions = {}) {
             false,
             req,
             idMapping,
-            normalizeRows
+            normalizeRowsFn
           );
           context.payload = response;
           return context.payload;

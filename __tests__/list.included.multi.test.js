@@ -50,7 +50,15 @@ async function buildAppAndModels() {
     list(
       Album,
       { metaShowOrdering: true },
-      { include: [{ model: Artist, as: 'artist', include: [{ model: Label, as: 'label' }] }] }
+      {
+        include: [
+          {
+            model: Artist,
+            as: 'artist',
+            include: [{ model: Label, as: 'label' }],
+          },
+        ],
+      }
     )
   );
 
@@ -76,11 +84,18 @@ async function seed(Label, Artist, Album) {
   ]);
 }
 
-function titles(res) { return res.body.data.map((r) => r.title); }
+function titles(res) {
+  return res.body.data.map((r) => r.title);
+}
 
 describe('list: multi-level include filtering and ordering', () => {
   let sequelize;
-  afterEach(async () => { if (sequelize) { await sequelize.close(); sequelize = null; } });
+  afterEach(async () => {
+    if (sequelize) {
+      await sequelize.close();
+      sequelize = null;
+    }
+  });
 
   test('filter by artist.label.name and order by artist.label.name then artist.name', async () => {
     const ctx = await buildAppAndModels();
@@ -88,10 +103,15 @@ describe('list: multi-level include filtering and ordering', () => {
     const { Label, Artist, Album, app } = ctx;
     await seed(Label, Artist, Album);
 
-    const res = await request(app).get('/albums?artist.label.name=warner&api:orderby=artist.label.name,artist.name');
+    const res = await request(app).get(
+      '/albums?artist.label.name=warner&api:orderby=artist.label.name,artist.name'
+    );
     expect(res.status).toBe(200);
     // Only prince albums (label Warner), ordered by label then artist
     expect(titles(res)).toEqual(['1999', 'Purple Rain']);
-    expect(res.body.meta.order).toEqual([["artist.label.name","ASC"],["artist.name","ASC"]]);
+    expect(res.body.meta.order).toEqual([
+      ['artist.label.name', 'ASC'],
+      ['artist.name', 'ASC'],
+    ]);
   });
 });

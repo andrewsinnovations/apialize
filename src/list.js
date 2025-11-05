@@ -1,5 +1,9 @@
 const { express, apializeContext, ensureFn, asyncHandler } = require('./utils');
-const { withTransactionAndHooks, normalizeRows } = require('./operationUtils');
+const {
+  withTransactionAndHooks,
+  normalizeRows,
+  normalizeRowsWithForeignKeys,
+} = require('./operationUtils');
 const {
   getModelAttributes,
   validateColumnExists,
@@ -107,11 +111,29 @@ function list(model, options = {}, modelOptions = {}) {
           );
           if (!orderingValid) return; // Response already sent
 
-          const appliedFilters = setupFiltering(req, res, model, q, allowFiltering, relationIdMapping);
+          const appliedFilters = setupFiltering(
+            req,
+            res,
+            model,
+            q,
+            allowFiltering,
+            relationIdMapping
+          );
           if (appliedFilters === false) return; // Response already sent
 
           const result = await model.findAndCountAll(req.apialize.options);
-          const response = buildResponse(
+
+          // Create a normalizer function that includes foreign key mapping
+          const normalizeRowsFn = async (rows, idMappingParam) => {
+            return await normalizeRowsWithForeignKeys(
+              rows,
+              idMappingParam,
+              relationIdMapping,
+              model
+            );
+          };
+
+          const response = await buildResponse(
             result,
             page,
             pageSize,
@@ -121,7 +143,7 @@ function list(model, options = {}, modelOptions = {}) {
             allowFiltering,
             req,
             idMapping,
-            normalizeRows
+            normalizeRowsFn
           );
           context.payload = response;
           return context.payload;

@@ -138,34 +138,70 @@ User.addScope('byTenant', (tenantId) => ({ where: { tenant_id: tenantId } }));
 User.addScope('featured', { where: { is_featured: true } });
 
 // Apply single scope
-app.use('/users', list(User, {}, { 
-  scopes: ['active'] // Only show active users
-}));
+app.use(
+  '/users',
+  list(
+    User,
+    {},
+    {
+      scopes: ['active'], // Only show active users
+    }
+  )
+);
 
 // Apply multiple scopes (combined with AND logic)
-app.use('/users', list(User, {}, { 
-  scopes: ['active', 'featured'] // Only show active AND featured users
-}));
+app.use(
+  '/users',
+  list(
+    User,
+    {},
+    {
+      scopes: ['active', 'featured'], // Only show active AND featured users
+    }
+  )
+);
 
 // Apply parameterized scopes
-app.use('/users', single(User, {}, { 
-  scopes: [
-    'active',
-    { name: 'byTenant', args: [req.user.tenantId] } // Parameterized scope
-  ]
-}));
+app.use(
+  '/users',
+  single(
+    User,
+    {},
+    {
+      scopes: [
+        'active',
+        { name: 'byTenant', args: [req.user.tenantId] }, // Parameterized scope
+      ],
+    }
+  )
+);
 
 // Works with write operations to restrict which records can be modified
-app.use('/users', update(User, {}, { 
-  scopes: ['active'] // Only allow updates to active users (404 if inactive)
-}));
+app.use(
+  '/users',
+  update(
+    User,
+    {},
+    {
+      scopes: ['active'], // Only allow updates to active users (404 if inactive)
+    }
+  )
+);
 
-app.use('/users', destroy(User, {}, { 
-  scopes: ['byTenant', 'active'] // Only allow deletion of active users in tenant
-}));
+app.use(
+  '/users',
+  destroy(
+    User,
+    {},
+    {
+      scopes: ['byTenant', 'active'], // Only allow deletion of active users in tenant
+    }
+  )
+);
 ```
 
 **Key behaviors:**
+
 - **Applied before pre-hooks**: Scopes are applied first, then pre-hooks can add additional filtering
 - **All operations**: Works with `list`, `single`, `create`, `update`, `patch`, `destroy`, and `search`
 - **Combinable**: Can be combined with other `modelOptions` like `attributes`, `include`, etc.
@@ -175,15 +211,22 @@ app.use('/users', destroy(User, {}, {
 
 ```js
 // Example: Multi-tenant application with role-based access
-app.use('/documents', list(Document, {}, { 
-  scopes: [
-    { name: 'byTenant', args: [req.user.tenantId] },
-    'published',
-    { name: 'byAccessLevel', args: [req.user.role] }
-  ],
-  attributes: ['id', 'title', 'created_at'],
-  include: [{ model: User, as: 'author', attributes: ['name'] }]
-}));
+app.use(
+  '/documents',
+  list(
+    Document,
+    {},
+    {
+      scopes: [
+        { name: 'byTenant', args: [req.user.tenantId] },
+        'published',
+        { name: 'byAccessLevel', args: [req.user.role] },
+      ],
+      attributes: ['id', 'title', 'created_at'],
+      include: [{ model: User, as: 'author', attributes: ['name'] }],
+    }
+  )
+);
 ```
 
 - `list(model, options?, modelOptions?)`
@@ -365,17 +408,24 @@ Configuration:
 
 ```js
 // Configure list with relation_id_mapping
-app.use('/songs', list(Song, {
-  relation_id_mapping: [
-    { model: Artist, id_field: 'external_id' },
-    { model: Album, id_field: 'external_id' }
-  ]
-}, {
-  include: [
-    { model: Artist, as: 'artist' },
-    { model: Album, as: 'album' }
-  ]
-}));
+app.use(
+  '/songs',
+  list(
+    Song,
+    {
+      relation_id_mapping: [
+        { model: Artist, id_field: 'external_id' },
+        { model: Album, id_field: 'external_id' },
+      ],
+    },
+    {
+      include: [
+        { model: Artist, as: 'artist' },
+        { model: Album, as: 'album' },
+      ],
+    }
+  )
+);
 
 // Now artist.id filters will use artist.external_id instead of artist.id
 // GET /songs?artist.id=artist-beethoven   // Uses artist.external_id
@@ -384,20 +434,129 @@ app.use('/songs', list(Song, {
 ```
 
 The mapping applies to:
+
 - **Equality filters**: `?artist.id=value` → `artist.external_id = value`
 - **Operator filters**: `?artist.id:in=val1,val2` → `artist.external_id IN (val1, val2)`
 - **Ordering**: `?api:orderby=artist.id` → `ORDER BY artist.external_id`
+- **Foreign key flattening**: Foreign key values in response data are replaced with mapped ID values
 
-Only affects `.id` field references; other fields like `artist.name` work normally. Can be combined with regular `id_mapping` for the root model:
+#### Foreign key flattening in responses
+
+When `relation_id_mapping` is configured, apialize automatically replaces foreign key values in response data with their corresponding mapped ID values. This provides consistency when using external IDs throughout your API:
 
 ```js
-app.use('/songs', list(Song, {
-  id_mapping: 'external_id',              // Root model uses external_id for id
-  relation_id_mapping: [                  // Related models also use external_id for id
-    { model: Artist, id_field: 'external_id' },
-    { model: Album, id_field: 'external_id' }
-  ]
-}));
+// Configure with relation_id_mapping
+app.use(
+  '/albums',
+  list(Album, {
+    relation_id_mapping: [{ model: Artist, id_field: 'external_id' }],
+  })
+);
+
+// Example response data transformation:
+// Database: { id: 1, title: 'Symphony No. 5', artist_id: 123 }
+// Response: { id: 1, title: 'Symphony No. 5', artist_id: 'artist-beethoven' }
+```
+
+**Automatic foreign key detection:**
+Foreign keys are automatically detected using common naming patterns and replaced with external IDs:
+
+- `{model_name}_id` → Uses the model's `id_field` value
+- `{model_name}Id` → Camel case variant
+- `{model_name}_key` → Alternative suffix pattern
+- `{model_name}Key` → Camel case key variant
+
+```js
+// Multiple foreign key mapping example
+app.use(
+  '/songs',
+  list(Song, {
+    relation_id_mapping: [
+      { model: Artist, id_field: 'external_id' },
+      { model: Album, id_field: 'external_id' },
+    ],
+  })
+);
+
+// Response transformation:
+// Database: { id: 1, title: 'Track 1', artist_id: 123, album_id: 456 }
+// Response: { id: 1, title: 'Track 1', artist_id: 'artist-beethoven', album_id: 'album-symphony-5' }
+```
+
+**How it works:**
+
+1. **Detection**: Identifies foreign key fields by matching patterns against configured models
+2. **Bulk lookup**: Efficiently fetches all needed external IDs in batch queries
+3. **Replacement**: Substitutes internal IDs with external IDs in the response data
+4. **Error handling**: Gracefully handles missing mappings by keeping original values
+
+Only affects `.id` field references and foreign key mappings; other fields like `artist.name` work normally. Can be combined with regular `id_mapping` for the root model:
+
+```js
+app.use(
+  '/songs',
+  list(Song, {
+    id_mapping: 'external_id', // Root model uses external_id for id
+    relation_id_mapping: [
+      // Related models also use external_id for id
+      { model: Artist, id_field: 'external_id' },
+      { model: Album, id_field: 'external_id' },
+    ],
+  })
+);
+```
+
+#### Complete example: Music streaming API with external IDs
+
+```js
+// Models with both internal IDs and external IDs
+const Artist = sequelize.define('Artist', {
+  id: { type: DataTypes.INTEGER, primaryKey: true },
+  external_id: { type: DataTypes.STRING, unique: true }, // e.g. 'artist-beethoven'
+  name: DataTypes.STRING,
+});
+
+const Album = sequelize.define('Album', {
+  id: { type: DataTypes.INTEGER, primaryKey: true },
+  external_id: { type: DataTypes.STRING, unique: true }, // e.g. 'album-symphony-5'
+  title: DataTypes.STRING,
+  artist_id: DataTypes.INTEGER, // Foreign key to artist
+});
+
+const Song = sequelize.define('Song', {
+  id: { type: DataTypes.INTEGER, primaryKey: true },
+  external_id: { type: DataTypes.STRING, unique: true }, // e.g. 'song-movement-1'
+  title: DataTypes.STRING,
+  album_id: DataTypes.INTEGER, // Foreign key to album
+  artist_id: DataTypes.INTEGER, // Foreign key to artist
+});
+
+// Configure API with relation_id_mapping
+app.use(
+  '/songs',
+  list(Song, {
+    id_mapping: 'external_id',
+    relation_id_mapping: [
+      { model: Artist, id_field: 'external_id' },
+      { model: Album, id_field: 'external_id' },
+    ],
+  })
+);
+
+// API behavior examples:
+// GET /songs?artist.id=artist-beethoven
+// → Filters by artist.external_id = 'artist-beethoven'
+
+// GET /songs
+// → Response includes foreign key flattening:
+// [
+//   {
+//     "id": "song-movement-1",           // Root model uses external_id
+//     "title": "Symphony No. 5 - Movement 1",
+//     "artist_id": "artist-beethoven",   // Flattened from internal 123 → external_id
+//     "album_id": "album-symphony-5"     // Flattened from internal 456 → external_id
+//   }
+// ]
 ```
 
 #### Multi-level filtering and ordering (list)
@@ -413,7 +572,11 @@ app.use(
     { metaShowOrdering: true },
     {
       include: [
-        { model: Artist, as: 'artist', include: [{ model: Label, as: 'label' }] },
+        {
+          model: Artist,
+          as: 'artist',
+          include: [{ model: Label, as: 'label' }],
+        },
       ],
     }
   )
@@ -653,27 +816,30 @@ Apply additional where conditions to the existing where clause. New conditions o
 
 ```js
 // In pre/post hooks
-app.use('/items', list(Item, {
-  pre: async (context) => {
-    // Simple where conditions - use context directly for convenience
-    context.applyWhere({ 
-      tenant_id: context.req.user.tenantId,
-      status: 'active'
-    });
-    
-    // With Sequelize operators
-    const { Op } = require('sequelize');
-    context.applyWhere({
-      price: { [Op.gt]: 0 },
-      created_at: { [Op.gte]: new Date('2024-01-01') }
-    });
-    
-    // Later calls overwrite earlier ones for the same keys
-    context.applyWhere({ status: 'published' }); // status becomes 'published'
-    
-    return { tenantFiltered: true };
-  }
-}));
+app.use(
+  '/items',
+  list(Item, {
+    pre: async (context) => {
+      // Simple where conditions - use context directly for convenience
+      context.applyWhere({
+        tenant_id: context.req.user.tenantId,
+        status: 'active',
+      });
+
+      // With Sequelize operators
+      const { Op } = require('sequelize');
+      context.applyWhere({
+        price: { [Op.gt]: 0 },
+        created_at: { [Op.gte]: new Date('2024-01-01') },
+      });
+
+      // Later calls overwrite earlier ones for the same keys
+      context.applyWhere({ status: 'published' }); // status becomes 'published'
+
+      return { tenantFiltered: true };
+    },
+  })
+);
 
 // In middleware (req.apialize helpers are automatically available)
 const tenantMiddleware = (req, res, next) => {
@@ -681,12 +847,16 @@ const tenantMiddleware = (req, res, next) => {
   next();
 };
 
-app.use('/items', list(Item, {
-  middleware: [tenantMiddleware]
-}));
+app.use(
+  '/items',
+  list(Item, {
+    middleware: [tenantMiddleware],
+  })
+);
 ```
 
 **Behavior:**
+
 - Last condition wins for the same key
 - Simple and predictable overwrite behavior
 - Available in middleware, pre hooks, and post hooks
@@ -694,12 +864,12 @@ app.use('/items', list(Item, {
 
 ```js
 // Instead of multiple calls, build complex conditions explicitly
-req.apialize.applyWhere({ 
+req.apialize.applyWhere({
   [Op.and]: [
     { price: { [Op.gte]: 100 } },
     { price: { [Op.lte]: 500 } },
-    { category: 'electronics' }
-  ]
+    { category: 'electronics' },
+  ],
 });
 ```
 
@@ -710,25 +880,28 @@ Apply Sequelize scopes to modify query options (only available when model is pre
 ```js
 // Define scopes in your model
 Item.addScope('byTenant', (tenantId) => ({
-  where: { tenant_id: tenantId }
+  where: { tenant_id: tenantId },
 }));
 
 Item.addScope('activeOnly', {
-  where: { status: 'active' }
+  where: { status: 'active' },
 });
 
 // Use in pre hooks
-app.use('/items', list(Item, {
-  pre: async (context) => {
-    // Apply parameterized scope - use context directly
-    context.applyScope('byTenant', context.req.user.tenantId);
-    
-    // Apply simple scope
-    context.applyScope('activeOnly');
-    
-    return { scopesApplied: true };
-  }
-}));
+app.use(
+  '/items',
+  list(Item, {
+    pre: async (context) => {
+      // Apply parameterized scope - use context directly
+      context.applyScope('byTenant', context.req.user.tenantId);
+
+      // Apply simple scope
+      context.applyScope('activeOnly');
+
+      return { scopesApplied: true };
+    },
+  })
+);
 ```
 
 #### `context.applyWhereIfNotExists(conditionalWhere)`
@@ -736,17 +909,20 @@ app.use('/items', list(Item, {
 Apply where conditions only if they don't already exist:
 
 ```js
-app.use('/items', list(Item, {
-  pre: async (context) => {
-    // Always apply tenant filtering
-    context.applyWhere({ tenant_id: context.req.user.tenantId });
-    
-    // Only apply default status if user hasn't specified one
-    context.applyWhereIfNotExists({ status: 'active' });
-    
-    return { conditionalFiltersApplied: true };
-  }
-}));
+app.use(
+  '/items',
+  list(Item, {
+    pre: async (context) => {
+      // Always apply tenant filtering
+      context.applyWhere({ tenant_id: context.req.user.tenantId });
+
+      // Only apply default status if user hasn't specified one
+      context.applyWhereIfNotExists({ status: 'active' });
+
+      return { conditionalFiltersApplied: true };
+    },
+  })
+);
 ```
 
 #### `context.applyMultipleWhere(whereConditions)`
@@ -754,19 +930,22 @@ app.use('/items', list(Item, {
 Apply multiple where conditions at once:
 
 ```js
-app.use('/items', list(Item, {
-  pre: async (context) => {
-    const conditions = [
-      { tenant_id: context.req.user.tenantId },
-      { status: 'active' },
-      { price: { [Op.gt]: 0 } }
-    ];
-    
-    context.applyMultipleWhere(conditions);
-    
-    return { multipleFiltersApplied: true };
-  }
-}));
+app.use(
+  '/items',
+  list(Item, {
+    pre: async (context) => {
+      const conditions = [
+        { tenant_id: context.req.user.tenantId },
+        { status: 'active' },
+        { price: { [Op.gt]: 0 } },
+      ];
+
+      context.applyMultipleWhere(conditions);
+
+      return { multipleFiltersApplied: true };
+    },
+  })
+);
 ```
 
 #### `context.applyScopes(scopes)`
@@ -774,19 +953,22 @@ app.use('/items', list(Item, {
 Apply multiple scopes in sequence:
 
 ```js
-app.use('/items', list(Item, {
-  pre: async (context) => {
-    const scopes = [
-      'activeOnly',
-      { name: 'byTenant', args: [context.req.user.tenantId] },
-      'withCategory'
-    ];
-    
-    context.applyScopes(scopes);
-    
-    return { multipleScopesApplied: true };
-  }
-}));
+app.use(
+  '/items',
+  list(Item, {
+    pre: async (context) => {
+      const scopes = [
+        'activeOnly',
+        { name: 'byTenant', args: [context.req.user.tenantId] },
+        'withCategory',
+      ];
+
+      context.applyScopes(scopes);
+
+      return { multipleScopesApplied: true };
+    },
+  })
+);
 ```
 
 #### `context.removeWhere(keysToRemove)` & `context.replaceWhere(newWhere)`
@@ -794,96 +976,102 @@ app.use('/items', list(Item, {
 Remove or replace where conditions:
 
 ```js
-app.use('/items', list(Item, {
-  pre: async (context) => {
-    // Add base conditions
-    context.applyWhere({ 
-      tenant_id: context.req.user.tenantId,
-      status: 'active'
-    });
-    
-    // Remove status filter for admin users
-    if (context.req.user.role === 'admin') {
-      context.removeWhere('status');
-    }
-    
-    // Or completely replace where clause
-    if (context.req.user.role === 'superadmin') {
-      context.replaceWhere({}); // See everything
-    }
-    
-    return { adminAccess: true };
-  }
-}));
+app.use(
+  '/items',
+  list(Item, {
+    pre: async (context) => {
+      // Add base conditions
+      context.applyWhere({
+        tenant_id: context.req.user.tenantId,
+        status: 'active',
+      });
+
+      // Remove status filter for admin users
+      if (context.req.user.role === 'admin') {
+        context.removeWhere('status');
+      }
+
+      // Or completely replace where clause
+      if (context.req.user.role === 'superadmin') {
+        context.replaceWhere({}); // See everything
+      }
+
+      return { adminAccess: true };
+    },
+  })
+);
 ```
 
 #### Multi-tenant Example with Helper Functions
 
 ```js
-app.use('/items', crud(Item, {
-  routes: {
-    list: {
-      pre: async (context) => {
-        const user = context.req.user;
-        
-        // Base tenant isolation (always applied)
-        context.applyScope('byTenant', user.tenantId);
-        
-        // Role-based filtering
-        switch (user.role) {
-          case 'admin':
-            // Admin sees all items in tenant
-            break;
-            
-          case 'manager':
-            // Manager sees department items
-            context.applyScope('byDepartment', user.departmentId);
-            break;
-            
-          case 'user':
-            // User sees only their own items
-            context.applyWhere({ created_by: user.id });
-            break;
-        }
-        
-        // Apply common filters
-        context.applyScope('activeOnly');
-        
-        // Handle special query parameters
-        if (context.req.query.archived === 'true') {
-          context.removeWhere('status');
-          context.applyWhere({ archived_at: { [Op.not]: null } });
-        }
-        
-        return { 
-          tenantId: user.tenantId,
-          role: user.role,
-          filtersApplied: true 
-        };
-      }
+app.use(
+  '/items',
+  crud(Item, {
+    routes: {
+      list: {
+        pre: async (context) => {
+          const user = context.req.user;
+
+          // Base tenant isolation (always applied)
+          context.applyScope('byTenant', user.tenantId);
+
+          // Role-based filtering
+          switch (user.role) {
+            case 'admin':
+              // Admin sees all items in tenant
+              break;
+
+            case 'manager':
+              // Manager sees department items
+              context.applyScope('byDepartment', user.departmentId);
+              break;
+
+            case 'user':
+              // User sees only their own items
+              context.applyWhere({ created_by: user.id });
+              break;
+          }
+
+          // Apply common filters
+          context.applyScope('activeOnly');
+
+          // Handle special query parameters
+          if (context.req.query.archived === 'true') {
+            context.removeWhere('status');
+            context.applyWhere({ archived_at: { [Op.not]: null } });
+          }
+
+          return {
+            tenantId: user.tenantId,
+            role: user.role,
+            filtersApplied: true,
+          };
+        },
+      },
+
+      create: {
+        pre: async (context) => {
+          const user = context.req.user;
+
+          // Auto-inject tenant and user info
+          if (!context.req.apialize.values) {
+            context.req.apialize.values = {};
+          }
+
+          Object.assign(context.req.apialize.values, {
+            tenant_id: user.tenantId,
+            created_by: user.id,
+            department_id: user.departmentId,
+            status: 'active',
+          });
+
+          return { autoFieldsInjected: true };
+        },
+      },
     },
-    
-    create: {
-      pre: async (context) => {
-        const user = context.req.user;
-        
-        // Auto-inject tenant and user info
-        if (!context.req.apialize.values) {
-          context.req.apialize.values = {};
-        }
-        
-        Object.assign(context.req.apialize.values, {
-          tenant_id: user.tenantId,
-          created_by: user.id,
-          department_id: user.departmentId,
-          status: 'active'
-        });
-        
-        return { autoFieldsInjected: true };
-      }
-    }
-  }
-}));
+  })
+);
 ```
 
 ### Query Control in Pre Hooks
@@ -907,7 +1095,7 @@ app.use(
         const { Op } = require('sequelize');
         ctx.applyWhere({
           status: 'active',
-          price: { [Op.gt]: 0 }
+          price: { [Op.gt]: 0 },
         });
         return { step: 2 };
       },
@@ -1206,9 +1394,16 @@ Note: The final HTTP response body is taken from `context.payload` so your `post
 app.use('/items/search', search(Item)); // POST /items/search
 
 // With scopes applied automatically before search filters
-app.use('/items/search', search(Item, {}, {
-  scopes: ['active', { name: 'byTenant', args: [req.user.tenantId] }]
-})); // Only search within active items in user's tenant
+app.use(
+  '/items/search',
+  search(
+    Item,
+    {},
+    {
+      scopes: ['active', { name: 'byTenant', args: [req.user.tenantId] }],
+    }
+  )
+); // Only search within active items in user's tenant
 ```
 
 Request body shape:
@@ -1257,17 +1452,24 @@ Configuration:
 
 ```js
 // Configure search with relation_id_mapping
-app.use('/songs/search', search(Song, {
-  relation_id_mapping: [
-    { model: Artist, id_field: 'external_id' },
-    { model: Album, id_field: 'external_id' }
-  ]
-}, {
-  include: [
-    { model: Artist, as: 'artist' },
-    { model: Album, as: 'album' }
-  ]
-}));
+app.use(
+  '/songs/search',
+  search(
+    Song,
+    {
+      relation_id_mapping: [
+        { model: Artist, id_field: 'external_id' },
+        { model: Album, id_field: 'external_id' },
+      ],
+    },
+    {
+      include: [
+        { model: Artist, as: 'artist' },
+        { model: Album, as: 'album' },
+      ],
+    }
+  )
+);
 ```
 
 Usage in search requests:
@@ -1275,15 +1477,15 @@ Usage in search requests:
 ```js
 // POST /songs/search - Filter by artist.id using external_id
 {
-  "filters": { 
+  "filters": {
     "artist.id": "artist-beethoven"    // Uses artist.external_id
   }
 }
 
 // POST /songs/search - Complex filters with operators
 {
-  "filters": { 
-    "album.id": { 
+  "filters": {
+    "album.id": {
       "in": ["album-symphony-5", "album-requiem"]  // Uses album.external_id
     }
   }
@@ -1298,9 +1500,29 @@ Usage in search requests:
 ```
 
 The mapping applies to the same cases as in `list()`:
+
 - **Equality filters**: `"artist.id": "value"` → `artist.external_id = value`
 - **Operator filters**: `"artist.id": { "in": [...] }` → `artist.external_id IN (...)`
 - **Ordering**: `"orderby": "artist.id"` → `ORDER BY artist.external_id`
+- **Foreign key flattening**: Foreign key values in response data are replaced with mapped ID values
+
+```js
+// Search response with foreign key flattening
+// POST /songs/search returns:
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "title": "Symphony No. 5 - Movement 1",
+      "artist_id": "artist-beethoven",  // Mapped from internal ID
+      "album_id": "album-sym5"          // Mapped from internal ID
+    }
+  ]
+}
+```
+
+Foreign key flattening works the same way as in `list()` operations - see the detailed documentation in the filtering section above.
 
 #### Multi-level filtering and ordering (search)
 
@@ -1311,7 +1533,15 @@ app.use(
   search(
     Album,
     { metaShowOrdering: true },
-    { include: [{ model: Artist, as: 'artist', include: [{ model: Label, as: 'label' }] }] }
+    {
+      include: [
+        {
+          model: Artist,
+          as: 'artist',
+          include: [{ model: Label, as: 'label' }],
+        },
+      ],
+    }
   )
 );
 
@@ -1352,15 +1582,15 @@ Examples (operator-object form):
 ```jsonc
 {
   "filters": {
-  "price": { "gte": 100, "lt": 500 },
-  "status": { "neq": "archived" },
+    "price": { "gte": 100, "lt": 500 },
+    "status": { "neq": "archived" },
     "category": { "in": ["A", "B"] },
-  "name": { "icontains": "display" },
-  "title": { "not_contains": "draft" },
-  "sku": { "not_starts_with": "TMP-" },
-  "ext": { "not_ends_with": ".bak" },
-    "active": { "is_true": true }
-  }
+    "name": { "icontains": "display" },
+    "title": { "not_contains": "draft" },
+    "sku": { "not_starts_with": "TMP-" },
+    "ext": { "not_ends_with": ".bak" },
+    "active": { "is_true": true },
+  },
 }
 ```
 
@@ -1372,13 +1602,10 @@ Boolean grouping:
     "and": [
       { "status": "active" },
       {
-        "or": [
-          { "price": { "lt": 300 } },
-          { "score": { "gte": 9 } }
-        ]
-      }
-    ]
-  }
+        "or": [{ "price": { "lt": 300 } }, { "score": { "gte": 9 } }],
+      },
+    ],
+  },
 }
 ```
 
@@ -1390,9 +1617,9 @@ Multi-field substring search (OR across fields):
     "or": [
       { "name": { "icontains": "auto" } },
       { "category": { "icontains": "auto" } },
-      { "external_id": { "icontains": "auto" } }
-    ]
-  }
+      { "external_id": { "icontains": "auto" } },
+    ],
+  },
 }
 ```
 

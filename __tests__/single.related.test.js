@@ -512,11 +512,9 @@ describe('single() with related models', () => {
         .send({ title: 'New Post', content: 'Content via API' });
       expect(createRes.status).toBe(201);
       const postId = createRes.body.id;
-      
 
       // Verify the post was created with proper foreign key
       const post = await Post.findByPk(postId);
-      
 
       // READ LIST: GET /:id/posts
       const listRes = await request(app).get(`/users/${userId}/posts`);
@@ -533,7 +531,7 @@ describe('single() with related models', () => {
       const updateRes = await request(app)
         .put(`/users/${userId}/posts/${postId}`)
         .send({ title: 'Updated Post', content: null });
-      
+
       // expect(updateRes.status).toBe(200);
       // expect(updateRes.body.success).toBe(true);
 

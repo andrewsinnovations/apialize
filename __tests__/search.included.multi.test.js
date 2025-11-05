@@ -50,7 +50,15 @@ async function buildAppAndModels() {
     search(
       Album,
       {},
-      { include: [{ model: Artist, as: 'artist', include: [{ model: Label, as: 'label' }] }] }
+      {
+        include: [
+          {
+            model: Artist,
+            as: 'artist',
+            include: [{ model: Label, as: 'label' }],
+          },
+        ],
+      }
     )
   );
 
@@ -76,11 +84,18 @@ async function seed(Label, Artist, Album) {
   ]);
 }
 
-function titles(res) { return res.body.data.map((r) => r.title); }
+function titles(res) {
+  return res.body.data.map((r) => r.title);
+}
 
 describe('search: multi-level include filtering', () => {
   let sequelize;
-  afterEach(async () => { if (sequelize) { await sequelize.close(); sequelize = null; } });
+  afterEach(async () => {
+    if (sequelize) {
+      await sequelize.close();
+      sequelize = null;
+    }
+  });
 
   test('filters by artist.label.name dotted path (case-insensitive equality by default)', async () => {
     const ctx = await buildAppAndModels();
@@ -91,7 +106,10 @@ describe('search: multi-level include filtering', () => {
     // Default equality is case-insensitive (SQLite also treats ASCII as case-insensitive for LIKE)
     const res = await request(app)
       .post('/albums/search')
-      .send({ filters: { 'artist.label.name': 'warner' }, ordering: { orderby: 'id', direction: 'ASC' } });
+      .send({
+        filters: { 'artist.label.name': 'warner' },
+        ordering: { orderby: 'id', direction: 'ASC' },
+      });
 
     expect(res.status).toBe(200);
     expect(titles(res)).toEqual(['1999', 'Purple Rain']);

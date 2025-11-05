@@ -32,7 +32,14 @@ async function buildAppAndModels() {
 
   const app = express();
   app.use(bodyParser.json());
-  app.use('/albums', search(Album, { metaShowOrdering: true }, { include: [{ model: Artist, as: 'artist' }] }));
+  app.use(
+    '/albums',
+    search(
+      Album,
+      { metaShowOrdering: true },
+      { include: [{ model: Artist, as: 'artist' }] }
+    )
+  );
 
   return { sequelize, Artist, Album, app };
 }
@@ -55,7 +62,12 @@ function titles(res) {
 
 describe('search ordering by included attribute', () => {
   let sequelize;
-  afterEach(async () => { if (sequelize) { await sequelize.close(); sequelize = null; } });
+  afterEach(async () => {
+    if (sequelize) {
+      await sequelize.close();
+      sequelize = null;
+    }
+  });
 
   test('order by artist.name DESC then title ASC via POST body', async () => {
     const ctx = await buildAppAndModels();
@@ -65,10 +77,18 @@ describe('search ordering by included attribute', () => {
 
     const res = await request(app)
       .post('/albums/search')
-      .send({ ordering: [{ orderby: 'artist.name', direction: 'DESC' }, { orderby: 'title', direction: 'ASC' }] });
+      .send({
+        ordering: [
+          { orderby: 'artist.name', direction: 'DESC' },
+          { orderby: 'title', direction: 'ASC' },
+        ],
+      });
     expect(res.status).toBe(200);
     // Prince first (1999, Purple Rain), then Beethoven
     expect(titles(res)).toEqual(['1999', 'Purple Rain', 'Symphony No. 5']);
-    expect(res.body.meta.order).toEqual([["artist.name", "DESC"], ["title", "ASC"]]);
+    expect(res.body.meta.order).toEqual([
+      ['artist.name', 'DESC'],
+      ['title', 'ASC'],
+    ]);
   });
 });

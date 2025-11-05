@@ -173,17 +173,18 @@ function setupOrdering(
         }
         const parts = columnName.split('.');
         let attr = parts[parts.length - 1];
-        
+
         // Apply relation_id_mapping if configured and the attribute is 'id'
         if (attr === 'id' && Array.isArray(relationIdMapping)) {
-          const relationMapping = relationIdMapping.find(mapping => {
+          const relationMapping = relationIdMapping.find((mapping) => {
             // Compare models by name, tableName, or reference equality
             if (mapping.model === resolved.foundModel) return true;
             if (mapping.model && resolved.foundModel) {
               // Compare by model name
               if (mapping.model.name === resolved.foundModel.name) return true;
               // Compare by table name as fallback
-              if (mapping.model.tableName === resolved.foundModel.tableName) return true;
+              if (mapping.model.tableName === resolved.foundModel.tableName)
+                return true;
             }
             return false;
           });
@@ -191,10 +192,15 @@ function setupOrdering(
             attr = relationMapping.id_field;
           }
         }
-        
+
         const chain = Array.isArray(resolved.includeChain)
           ? resolved.includeChain.map((c) => ({ model: c.model, as: c.as }))
-          : [{ model: resolved.foundModel, as: parts.slice(0, -1).join('.') || parts[0] }];
+          : [
+              {
+                model: resolved.foundModel,
+                as: parts.slice(0, -1).join('.') || parts[0],
+              },
+            ];
         order.push([...chain, attr, direction]);
       } else {
         // Validate column exists on root model
@@ -241,7 +247,14 @@ function getSequelizeOp(model) {
   }
 }
 
-function setupFiltering(req, res, model, query, allowFiltering, relationIdMapping) {
+function setupFiltering(
+  req,
+  res,
+  model,
+  query,
+  allowFiltering,
+  relationIdMapping
+) {
   // appliedFiltersMeta is returned (for meta), dbFilters are merged into Sequelize where
   let appliedFiltersMeta = {};
   let appliedFiltersDb = {};
@@ -254,9 +267,7 @@ function setupFiltering(req, res, model, query, allowFiltering, relationIdMappin
       : [];
   const Op = getSequelizeOp(model);
   const dialect =
-    model &&
-    model.sequelize &&
-    typeof model.sequelize.getDialect === 'function'
+    model && model.sequelize && typeof model.sequelize.getDialect === 'function'
       ? model.sequelize.getDialect()
       : null;
   const CI = dialect === 'postgres' ? Op.iLike || Op.like : Op.like;
@@ -276,8 +287,8 @@ function setupFiltering(req, res, model, query, allowFiltering, relationIdMappin
       rawKey = rawKey.slice(0, idx);
     }
 
-  let outKey = rawKey;
-  let attribute;
+    let outKey = rawKey;
+    let attribute;
 
     if (rawKey.includes('.')) {
       const resolved = resolveIncludedAttribute(model, includes, rawKey);
@@ -290,27 +301,33 @@ function setupFiltering(req, res, model, query, allowFiltering, relationIdMappin
         res.status(400).json({ success: false, error: 'Bad request' });
         return false;
       }
-      
+
       // Apply relation_id_mapping if configured and the column is 'id'
       const parts = rawKey.split('.');
       let actualColumn = parts[parts.length - 1];
       if (actualColumn === 'id' && Array.isArray(relationIdMapping)) {
-        const relationMapping = relationIdMapping.find(mapping => {
+        const relationMapping = relationIdMapping.find((mapping) => {
           // Compare models by name, tableName, or reference equality
           if (mapping.model === resolved.foundModel) return true;
           if (mapping.model && resolved.foundModel) {
             // Compare by model name
             if (mapping.model.name === resolved.foundModel.name) return true;
             // Compare by table name as fallback
-            if (mapping.model.tableName === resolved.foundModel.tableName) return true;
+            if (mapping.model.tableName === resolved.foundModel.tableName)
+              return true;
           }
           return false;
         });
         if (relationMapping && relationMapping.id_field) {
           actualColumn = relationMapping.id_field;
           // Update the alias path to use the mapped field
-          const aliasPrefix = resolved.aliasPath.split('.').slice(0, -1).join('.');
-          const newAliasPath = aliasPrefix ? `${aliasPrefix}.${actualColumn}` : actualColumn;
+          const aliasPrefix = resolved.aliasPath
+            .split('.')
+            .slice(0, -1)
+            .join('.');
+          const newAliasPath = aliasPrefix
+            ? `${aliasPrefix}.${actualColumn}`
+            : actualColumn;
           outKey = `$${newAliasPath}$`;
           // Update attribute for the mapped field
           const attrs = getModelAttributes(resolved.foundModel);
@@ -357,7 +374,10 @@ function setupFiltering(req, res, model, query, allowFiltering, relationIdMappin
         attribute && attribute.type && attribute.type.constructor
           ? String(attribute.type.constructor.name).toLowerCase()
           : null;
-      if (typeName && ['string', 'text', 'char', 'varchar'].includes(typeName)) {
+      if (
+        typeName &&
+        ['string', 'text', 'char', 'varchar'].includes(typeName)
+      ) {
         appliedFiltersMeta[outKey] = value;
         appliedFiltersDb[outKey] = { [CI]: value };
       } else {
@@ -404,10 +424,14 @@ function setupFiltering(req, res, model, query, allowFiltering, relationIdMappin
       }
       const opSymbol = opMap[operator];
       let opValue;
-      if (operator === 'contains' || operator === 'not_contains') opValue = `%${value}%`;
-      else if (operator === 'icontains' || operator === 'not_icontains') opValue = `%${value}%`;
-      else if (operator === 'starts_with' || operator === 'not_starts_with') opValue = `${value}%`;
-      else if (operator === 'ends_with' || operator === 'not_ends_with') opValue = `%${value}`;
+      if (operator === 'contains' || operator === 'not_contains')
+        opValue = `%${value}%`;
+      else if (operator === 'icontains' || operator === 'not_icontains')
+        opValue = `%${value}%`;
+      else if (operator === 'starts_with' || operator === 'not_starts_with')
+        opValue = `${value}%`;
+      else if (operator === 'ends_with' || operator === 'not_ends_with')
+        opValue = `%${value}`;
       else if (operator === 'is_true') opValue = true;
       else if (operator === 'is_false') opValue = false;
       else if (operator === 'in' || operator === 'not_in') {
@@ -448,7 +472,7 @@ function setupFiltering(req, res, model, query, allowFiltering, relationIdMappin
   return appliedFiltersMeta;
 }
 
-function buildResponse(
+async function buildResponse(
   result,
   page,
   pageSize,
@@ -476,7 +500,7 @@ function buildResponse(
   }
 
   const normFn = normalizeRows || ((x) => x);
-  const normalizedRows = normFn(rows, idMapping);
+  const normalizedRows = await normFn(rows, idMapping);
   const totalPages = Math.max(1, Math.ceil(result.count / pageSize));
 
   let orderOut;
@@ -499,7 +523,11 @@ function buildResponse(
           if (attrIndex === 0) {
             // Simple [field, dir]
             let field = o[0];
-            if (typeof field === 'string' && field.startsWith('$') && field.endsWith('$')) {
+            if (
+              typeof field === 'string' &&
+              field.startsWith('$') &&
+              field.endsWith('$')
+            ) {
               field = field.slice(1, -1);
             }
             orderOut.push([field, dir]);
@@ -509,9 +537,12 @@ function buildResponse(
             const aliases = [];
             for (let k = 0; k < attrIndex; k++) {
               const seg = o[k];
-              if (seg && typeof seg === 'object' && seg.as) aliases.push(seg.as);
+              if (seg && typeof seg === 'object' && seg.as)
+                aliases.push(seg.as);
             }
-            const field = aliases.length ? `${aliases.join('.')}.${attr}` : attr;
+            const field = aliases.length
+              ? `${aliases.join('.')}.${attr}`
+              : attr;
             orderOut.push([field, dir]);
           } else {
             // Fallback: unknown format, push as-is

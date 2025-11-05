@@ -32,7 +32,14 @@ async function buildAppAndModels() {
 
   const app = express();
   app.use(bodyParser.json());
-  app.use('/albums', list(Album, { metaShowOrdering: true }, { include: [{ model: Artist, as: 'artist' }] }));
+  app.use(
+    '/albums',
+    list(
+      Album,
+      { metaShowOrdering: true },
+      { include: [{ model: Artist, as: 'artist' }] }
+    )
+  );
 
   return { sequelize, Artist, Album, app };
 }
@@ -56,7 +63,10 @@ function titles(res) {
 describe('list ordering by included attribute', () => {
   let sequelize;
   afterEach(async () => {
-    if (sequelize) { await sequelize.close(); sequelize = null; }
+    if (sequelize) {
+      await sequelize.close();
+      sequelize = null;
+    }
   });
 
   test('order by artist.name ASC then title ASC', async () => {
@@ -69,6 +79,9 @@ describe('list ordering by included attribute', () => {
     expect(res.status).toBe(200);
     // Beethoven first, then Prince (ordered by title within artist)
     expect(titles(res)).toEqual(['Symphony No. 5', '1999', 'Purple Rain']);
-    expect(res.body.meta.order).toEqual([["artist.name", "ASC"], ["title", "ASC"]]);
+    expect(res.body.meta.order).toEqual([
+      ['artist.name', 'ASC'],
+      ['title', 'ASC'],
+    ]);
   });
 });

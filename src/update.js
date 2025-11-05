@@ -43,7 +43,7 @@ function update(model, options = {}, modelOptions = {}) {
         const id = req.params.id;
         const provided = getProvidedValues(req);
         const ownershipWhere = getOwnershipWhere(req);
-        
+
         const where = Object.assign({}, ownershipWhere);
         where[id_mapping] = id;
         const findModelOptions = Object.assign({}, modelOptions, { where });

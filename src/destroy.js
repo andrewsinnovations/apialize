@@ -49,7 +49,7 @@ function destroy(model, options = {}, modelOptions = {}) {
         // Extract ID and ownership after pre-hooks (so pre-hooks can modify them)
         const id = req.params.id;
         const ownershipWhere = getOwnershipWhere(req);
-        
+
         const where = Object.assign({}, ownershipWhere);
         where[id_mapping] = id;
 

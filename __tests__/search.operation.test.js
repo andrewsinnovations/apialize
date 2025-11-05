@@ -263,38 +263,80 @@ describe('search operation: predicate coverage', () => {
     const { Item, app } = ctx;
 
     await seed(Item, [
-      { external_id: '1', name: 'Auto Wrench', category: 'tools', price: 10, score: 1, active: true },
-      { external_id: '2', name: 'Automatic Transmission', category: 'vehicles', price: 20, score: 2, active: true },
-      { external_id: '3', name: 'Manual Bike', category: 'bicycles', price: 30, score: 3, active: true },
-      { external_id: '4', name: 'Router', category: 'network', price: 40, score: 4, active: true },
+      {
+        external_id: '1',
+        name: 'Auto Wrench',
+        category: 'tools',
+        price: 10,
+        score: 1,
+        active: true,
+      },
+      {
+        external_id: '2',
+        name: 'Automatic Transmission',
+        category: 'vehicles',
+        price: 20,
+        score: 2,
+        active: true,
+      },
+      {
+        external_id: '3',
+        name: 'Manual Bike',
+        category: 'bicycles',
+        price: 30,
+        score: 3,
+        active: true,
+      },
+      {
+        external_id: '4',
+        name: 'Router',
+        category: 'network',
+        price: 40,
+        score: 4,
+        active: true,
+      },
     ]);
 
     // not_contains: exclude anything with 'Auto' (case-sensitive substring)
     const r1 = await request(app)
       .post('/items/search')
-      .send({ filters: { name: { not_contains: 'Auto' } }, ordering: { orderby: 'id', direction: 'asc' } });
+      .send({
+        filters: { name: { not_contains: 'Auto' } },
+        ordering: { orderby: 'id', direction: 'asc' },
+      });
     expect(names(r1)).toEqual(['Manual Bike', 'Router']);
 
     // not_icontains: exclude 'auto' regardless of case
     const r2 = await request(app)
       .post('/items/search')
-      .send({ filters: { name: { not_icontains: 'auto' } }, ordering: { orderby: 'id', direction: 'asc' } });
+      .send({
+        filters: { name: { not_icontains: 'auto' } },
+        ordering: { orderby: 'id', direction: 'asc' },
+      });
     expect(names(r2)).toEqual(['Manual Bike', 'Router']);
 
     // not_starts_with
     const r3 = await request(app)
       .post('/items/search')
-      .send({ filters: { name: { not_starts_with: 'Auto' } }, ordering: { orderby: 'id', direction: 'asc' } });
+      .send({
+        filters: { name: { not_starts_with: 'Auto' } },
+        ordering: { orderby: 'id', direction: 'asc' },
+      });
     expect(names(r3)).toEqual(['Manual Bike', 'Router']);
 
     // not_ends_with
     const r4 = await request(app)
       .post('/items/search')
-      .send({ filters: { name: { not_ends_with: 'er' } }, ordering: { orderby: 'id', direction: 'asc' } });
-    expect(names(r4)).toEqual(['Auto Wrench', 'Automatic Transmission', 'Manual Bike']);
+      .send({
+        filters: { name: { not_ends_with: 'er' } },
+        ordering: { orderby: 'id', direction: 'asc' },
+      });
+    expect(names(r4)).toEqual([
+      'Auto Wrench',
+      'Automatic Transmission',
+      'Manual Bike',
+    ]);
   });
-
-  
 
   test('multi-field substring OR returns matches from any field', async () => {
     const ctx = await buildAppAndModel();
@@ -303,13 +345,41 @@ describe('search operation: predicate coverage', () => {
 
     await seed(Item, [
       // Match via external_id (uppercase AUTO, case-insensitive)
-      { external_id: 'AUTO-001', name: 'Manual', category: 'tools', price: 10, score: 1, active: true },
+      {
+        external_id: 'AUTO-001',
+        name: 'Manual',
+        category: 'tools',
+        price: 10,
+        score: 1,
+        active: true,
+      },
       // Match via name
-      { external_id: 'id-2', name: 'Automatic Transmission', category: 'vehicles', price: 20, score: 2, active: true },
+      {
+        external_id: 'id-2',
+        name: 'Automatic Transmission',
+        category: 'vehicles',
+        price: 20,
+        score: 2,
+        active: true,
+      },
       // No matches on any field
-      { external_id: 'id-3', name: 'Bicycle', category: 'kitchen', price: 30, score: 3, active: true },
+      {
+        external_id: 'id-3',
+        name: 'Bicycle',
+        category: 'kitchen',
+        price: 30,
+        score: 3,
+        active: true,
+      },
       // Match via category
-      { external_id: 'id-4', name: 'Router', category: 'Automotive', price: 40, score: 4, active: true },
+      {
+        external_id: 'id-4',
+        name: 'Router',
+        category: 'Automotive',
+        price: 40,
+        score: 4,
+        active: true,
+      },
     ]);
 
     const res = await request(app)
@@ -335,9 +405,30 @@ describe('search operation: predicate coverage', () => {
     const { Item, app } = ctx;
 
     await seed(Item, [
-      { external_id: '1', name: 'A', category: 'A', price: 1, score: 1, active: true },
-      { external_id: '2', name: 'B', category: 'B', price: 2, score: 2, active: false },
-      { external_id: '3', name: 'C', category: 'C', price: 3, score: 3, active: true },
+      {
+        external_id: '1',
+        name: 'A',
+        category: 'A',
+        price: 1,
+        score: 1,
+        active: true,
+      },
+      {
+        external_id: '2',
+        name: 'B',
+        category: 'B',
+        price: 2,
+        score: 2,
+        active: false,
+      },
+      {
+        external_id: '3',
+        name: 'C',
+        category: 'C',
+        price: 3,
+        score: 3,
+        active: true,
+      },
     ]);
 
     const eqRes = await request(app)
@@ -352,9 +443,30 @@ describe('search operation: predicate coverage', () => {
     const { Item, app } = ctx;
 
     await seed(Item, [
-      { external_id: '1', name: 'A', category: 'A', price: 1, score: 1, active: true },
-      { external_id: '2', name: 'B', category: 'B', price: 2, score: 2, active: false },
-      { external_id: '3', name: 'C', category: 'C', price: 3, score: 3, active: true },
+      {
+        external_id: '1',
+        name: 'A',
+        category: 'A',
+        price: 1,
+        score: 1,
+        active: true,
+      },
+      {
+        external_id: '2',
+        name: 'B',
+        category: 'B',
+        price: 2,
+        score: 2,
+        active: false,
+      },
+      {
+        external_id: '3',
+        name: 'C',
+        category: 'C',
+        price: 3,
+        score: 3,
+        active: true,
+      },
     ]);
 
     const neRes = await request(app)
@@ -365,23 +477,45 @@ describe('search operation: predicate coverage', () => {
     expect(names(neRes)).toEqual(['A', 'C']);
   });
 
-  
-
   test('in operator', async () => {
     const ctx = await buildAppAndModel();
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
 
     await seed(Item, [
-      { external_id: '1', name: 'A', category: 'A', price: 1, score: 1, active: true },
-      { external_id: '2', name: 'B', category: 'B', price: 2, score: 2, active: false },
-      { external_id: '3', name: 'C', category: 'C', price: 3, score: 3, active: true },
+      {
+        external_id: '1',
+        name: 'A',
+        category: 'A',
+        price: 1,
+        score: 1,
+        active: true,
+      },
+      {
+        external_id: '2',
+        name: 'B',
+        category: 'B',
+        price: 2,
+        score: 2,
+        active: false,
+      },
+      {
+        external_id: '3',
+        name: 'C',
+        category: 'C',
+        price: 3,
+        score: 3,
+        active: true,
+      },
     ]);
 
     // in operator
     const inRes = await request(app)
       .post('/items/search')
-      .send({ filters: { category: { in: ['A', 'C'] } }, ordering: { orderby: 'id', direction: 'asc' } });
+      .send({
+        filters: { category: { in: ['A', 'C'] } },
+        ordering: { orderby: 'id', direction: 'asc' },
+      });
     expect(names(inRes)).toEqual(['A', 'C']);
 
     const notInRes = await request(app)

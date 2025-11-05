@@ -56,7 +56,9 @@ function create(model, options = {}, modelOptions = {}) {
         // Check bulk create validation after pre-hooks (so pre-hooks can modify the body/settings)
         const rawBody = req && req.body;
         if (Array.isArray(rawBody) && !allow_bulk_create) {
-          context.res.status(400).json({ success: false, error: 'Cannot insert multiple records.' });
+          context.res
+            .status(400)
+            .json({ success: false, error: 'Cannot insert multiple records.' });
           return;
         }
         const mergedCreateOptions = {};

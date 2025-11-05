@@ -209,17 +209,44 @@ describe('list operation: comprehensive options coverage', () => {
 
     await seed(Item, [
       { external_id: 'e1', name: 'Auto Wrench', category: 'tools', score: 1 },
-      { external_id: 'e2', name: 'Automatic Transmission', category: 'vehicles', score: 2 },
-      { external_id: 'e3', name: 'Manual Bike', category: 'bicycles', score: 3 },
+      {
+        external_id: 'e2',
+        name: 'Automatic Transmission',
+        category: 'vehicles',
+        score: 2,
+      },
+      {
+        external_id: 'e3',
+        name: 'Manual Bike',
+        category: 'bicycles',
+        score: 3,
+      },
       { external_id: 'e4', name: 'Router', category: 'network', score: 4 },
-      { external_id: 'e5', name: 'display stand', category: 'electronics', score: 5 },
-      { external_id: 'e6', name: '4k Display', category: 'electronics', score: 6 },
+      {
+        external_id: 'e5',
+        name: 'display stand',
+        category: 'electronics',
+        score: 5,
+      },
+      {
+        external_id: 'e6',
+        name: '4k Display',
+        category: 'electronics',
+        score: 6,
+      },
     ]);
 
     // not_icontains excludes anything containing 'auto' (case-insensitive)
-    const r1 = await request(app).get('/items?name:not_icontains=auto&api:orderby=id');
+    const r1 = await request(app).get(
+      '/items?name:not_icontains=auto&api:orderby=id'
+    );
     expect(r1.status).toBe(200);
-    expect(names(r1)).toEqual(['Manual Bike', 'Router', 'display stand', '4k Display']);
+    expect(names(r1)).toEqual([
+      'Manual Bike',
+      'Router',
+      'display stand',
+      '4k Display',
+    ]);
 
     // starts_with only
     const r2 = await request(app).get('/items?name:starts_with=dis');
@@ -232,14 +259,28 @@ describe('list operation: comprehensive options coverage', () => {
     expect(names(r3)).toEqual(['4k Display']);
 
     // neq on category
-    const r4 = await request(app).get('/items?category:neq=electronics&api:orderby=id');
+    const r4 = await request(app).get(
+      '/items?category:neq=electronics&api:orderby=id'
+    );
     expect(r4.status).toBe(200);
-    expect(names(r4)).toEqual(['Auto Wrench', 'Automatic Transmission', 'Manual Bike', 'Router']);
+    expect(names(r4)).toEqual([
+      'Auto Wrench',
+      'Automatic Transmission',
+      'Manual Bike',
+      'Router',
+    ]);
 
     // not_in on category
-    const r5 = await request(app).get('/items?category:not_in=tools,vehicles&api:orderby=id');
+    const r5 = await request(app).get(
+      '/items?category:not_in=tools,vehicles&api:orderby=id'
+    );
     expect(r5.status).toBe(200);
-    expect(names(r5)).toEqual(['Manual Bike', 'Router', 'display stand', '4k Display']);
+    expect(names(r5)).toEqual([
+      'Manual Bike',
+      'Router',
+      'display stand',
+      '4k Display',
+    ]);
   });
 
   test('pagination via page and pagesize, defaults, and model apialize page_size', async () => {
