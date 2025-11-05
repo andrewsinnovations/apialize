@@ -9,7 +9,9 @@ const {
   filterMiddlewareFns,
   extractMiddleware,
   extractOption,
+  extractBooleanOption,
   buildWhereClause,
+  buildHandlersWithValidation,
 } = require('./utils');
 const operationUtilFunctions = require('./operationUtils');
 
@@ -20,17 +22,17 @@ const notFoundWithRollback = operationUtilFunctions.notFoundWithRollback;
 function patch(model, options = {}, modelOptions = {}) {
   ensureFn(model, 'update');
   const middleware = extractMiddleware(options);
+  const validate = extractBooleanOption(options, 'validate', false);
   const id_mapping = extractOption(options, 'id_mapping', 'id');
   const pre = extractOption(options, 'pre', null);
   const post = extractOption(options, 'post', null);
 
   const inline = filterMiddlewareFns(middleware);
   const router = express.Router({ mergeParams: true });
-  router.patch(
-    '/:id',
-    apializeContext,
-    ...inline,
-    asyncHandler(async (req, res) => {
+  
+  const handlers = buildHandlersWithValidation(
+    inline,
+    async (req, res) => {
       const payload = await withTransactionAndHooks(
         {
           model,
@@ -204,8 +206,12 @@ function patch(model, options = {}, modelOptions = {}) {
       if (!res.headersSent) {
         res.json(payload);
       }
-    })
+    },
+    model,
+    { validate }
   );
+  
+  router.patch('/:id', handlers);
   router.apialize = {};
   return router;
 }

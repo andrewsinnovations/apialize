@@ -22,11 +22,12 @@ No heavy abstractions: you keep full control of Express and your models. Works w
 4. Response formats
 5. Filtering, pagination, ordering
 6. Middleware and `req.apialize`
-7. Pre/Post Hooks and Query Control
-8. Related models with `single(..., { related: [...] })`
-9. Member routes (follow-up routes on a single resource)
-10. Nested related routes (recursion)
-11. Bulk delete on related collections
+7. Input Validation
+8. Pre/Post Hooks and Query Control
+9. Related models with `single(..., { related: [...] })`
+10. Member routes (follow-up routes on a single resource)
+11. Nested related routes (recursion)
+12. Bulk delete on related collections
 
 ## 1. Installation
 
@@ -242,6 +243,7 @@ For `single()`, `update()`, `patch()`, and `destroy()` the `options` object supp
 
 - `middleware`: array of middleware functions
 - `id_mapping`: string mapping URL param to a field (default `'id'`)
+- `validate` (update/patch only): boolean, enables automatic Sequelize validation on request body (default `false`)
 - `param_name` (single only): change the name of the URL parameter used by `single()` for the record id (default `'id'`)
 - `member_routes` (single only): array of follow-up routes that run after the single record is loaded. Each item is an object `{ path, handler, method = 'get', middleware = [] }`.
 
@@ -279,6 +281,13 @@ The `create(model, options?, modelOptions?)` helper also supports:
   - When the request body is an array and this flag is `true`, `create` will insert all records in a single transaction using the model's `bulkCreate` and return an array of created objects.
   - When `false` (the default) and the request body is an array, the request is rejected with `400 { success: false, error: "Bulk create disabled" }`.
   - Identifier mapping is respected for array responses: if `id_mapping` is set (e.g., `'external_id'`), each returned object will also have `id` set to that mapped value.
+
+- `validate` (boolean, default `false`)
+  - When `true`, enables automatic Sequelize model validation on request body data before other middleware runs.
+  - Validation runs on the input data using `model.build(data).validate()` for single objects or each item in arrays.
+  - For `PATCH` operations, only validates the fields being updated (partial validation).
+  - If validation fails, returns `400 { success: false, error: "Validation failed", details: [...] }` where `details` contains an array of validation error objects with `field`, `message`, and `value` properties.
+  - When `false` (the default), no automatic validation is performed - validation occurs at the Sequelize level during save operations.
 
 ### Identifier mapping
 
@@ -676,7 +685,111 @@ Update semantics:
 
 ---
 
-## 7. Pre/Post Hooks and Query Control
+## 7. Input Validation
+
+apialize supports automatic input validation using your Sequelize model's validation rules. When enabled, validation runs before all other middleware and provides consistent error responses.
+
+### Enabling Validation
+
+Add `validate: true` to any operation options that accept request body data (`create`, `update`, `patch`):
+
+```js
+const { create, update, patch } = require('apialize');
+
+// Enable validation for create operations
+app.use('/users', create(User, { validate: true }));
+
+// Enable validation for update operations  
+app.use('/users', update(User, { validate: true }));
+
+// Enable validation for patch operations
+app.use('/users', patch(User, { validate: true }));
+
+// Or enable for all operations via crud
+app.use('/users', crud(User, {
+  routes: {
+    create: { validate: true },
+    update: { validate: true },
+    patch: { validate: true }
+  }
+}));
+```
+
+### Model Validation Rules
+
+Define validation rules in your Sequelize model as usual:
+
+```js
+const User = sequelize.define('User', {
+  name: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    validate: {
+      notEmpty: { msg: 'Name cannot be empty' },
+      len: { args: [2, 50], msg: 'Name must be 2-50 characters' }
+    }
+  },
+  email: {
+    type: DataTypes.STRING,
+    allowNull: false,
+    validate: {
+      isEmail: { msg: 'Must be a valid email address' }
+    }
+  },
+  age: {
+    type: DataTypes.INTEGER,
+    validate: {
+      min: { args: [0], msg: 'Age must be positive' },
+      max: { args: [120], msg: 'Age must be realistic' }
+    }
+  }
+});
+```
+
+### Validation Behavior
+
+- **Create**: Validates the entire request body against all model rules
+- **Update**: Validates the entire request body (full replacement)  
+- **Patch**: Validates only the fields being updated (partial validation)
+- **Bulk Create**: Validates each item in the array individually
+
+### Validation Error Response
+
+When validation fails, a `400` response is returned:
+
+```js
+{
+  "success": false,
+  "error": "Validation failed",
+  "details": [
+    {
+      "field": "email",
+      "message": "Must be a valid email address", 
+      "value": "invalid-email"
+    },
+    {
+      "field": "age",
+      "message": "Age must be positive",
+      "value": -5
+    }
+  ]
+}
+```
+
+### Validation Timing
+
+The validation middleware runs **before** all other middleware in this order:
+
+1. `apializeContext` (parses query/body data)
+2. **Validation middleware** (when `validate: true`)
+3. Your custom middleware
+4. Main operation handler
+
+This ensures invalid data is rejected early, before any business logic or database operations.
+
+---
+
+## 8. Pre/Post Hooks and Query Control
 
 All operations (`list`, `single`, `create`, `update`, `patch`, `destroy`) support optional pre/post processing hooks that provide powerful control over database queries and response formatting.
 
@@ -1642,7 +1755,7 @@ Options align with `list` where applicable: `defaultPageSize`, `defaultOrderBy`,
 
 ---
 
-## 8. Related models with `single(..., { related: [...] })`
+## 9. Related models with `single(..., { related: [...] })`
 
 ### Related model endpoints via `single()`
 
@@ -1702,7 +1815,7 @@ Examples:
 
 ---
 
-## 9. Member routes (follow-up routes on a single resource)
+## 10. Member routes (follow-up routes on a single resource)
 
 `single(model, { member_routes: [...] })` lets you add custom subroutes that operate on an already-loaded record. These routes mount under `/:id/<path>` (or your custom `param_name`).
 
@@ -1821,7 +1934,7 @@ Notes:
 
 ---
 
-## 10. Nested related routes (recursion)
+## 11. Nested related routes (recursion)
 
 You can nest related definitions at any depth by attaching a `related` array on a child related item. The child `get` operation is implemented using the same core `single()` helper under the hood, so all of its behavior (middleware, `id_mapping`, `modelOptions`, and further `related` nesting) applies consistently.
 
@@ -1890,7 +2003,7 @@ Because nested `get` uses core `single()`, you get consistent 404 handling, resp
 
 ---
 
-## 11. Bulk delete on related collections
+## 12. Bulk delete on related collections
 
 apialize supports a collection-level DELETE for related resources mounted via `single(..., { related: [...] })`. This lets you remove all child records for a given parent (or nested parent) in one call — with a built-in dry-run safety.
 

@@ -6,10 +6,12 @@ const {
   defaultNotFound,
   filterMiddlewareFns,
   buildHandlers,
+  buildHandlersWithValidation,
   getProvidedValues,
   getOwnershipWhere,
   buildWhereClause,
   convertInstanceToPlainObject,
+  extractBooleanOption,
 } = require('./utils');
 const {
   withTransactionAndHooks,
@@ -81,10 +83,12 @@ function update(model, options = {}, modelOptions = {}) {
     pre = null,
     post = null,
   } = options;
+  
+  const validate = extractBooleanOption(options, 'validate', false);
 
   const middlewareFunctions = filterMiddlewareFns(middleware);
   const router = express.Router({ mergeParams: true });
-  const handlers = buildHandlers(
+  const handlers = buildHandlersWithValidation(
     middlewareFunctions,
     async function (req, res) {
       const combinedOptions = Object.assign({}, options, { pre, post });
@@ -157,7 +161,9 @@ function update(model, options = {}, modelOptions = {}) {
       if (!res.headersSent) {
         res.json(payload);
       }
-    }
+    },
+    model,
+    { validate }
   );
   router.put('/:id', handlers);
   router.apialize = {};

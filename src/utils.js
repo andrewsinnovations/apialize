@@ -1,5 +1,6 @@
 const express = require('express');
 const { createHelpers } = require('./contextHelpers');
+const { createValidationMiddleware } = require('./validationMiddleware');
 
 function safeGetObject(source, fallback = {}) {
   if (source && typeof source === 'object') {
@@ -152,6 +153,28 @@ function buildHandlers(middleware, handler) {
   return [apializeContext].concat(middlewareFunctions).concat([wrappedHandler]);
 }
 
+function buildHandlersWithValidation(middleware, handler, model, options = {}) {
+  const middlewareFunctions = filterMiddlewareFns(middleware);
+  const wrappedHandler = asyncHandler(handler);
+  
+  // Build the middleware chain
+  const middlewareChain = [apializeContext];
+  
+  // Add validation middleware first if validate option is enabled
+  if (options.validate) {
+    const validationMiddleware = createValidationMiddleware(model, options);
+    middlewareChain.push(validationMiddleware);
+  }
+  
+  // Add user-provided middleware
+  middlewareChain.push(...middlewareFunctions);
+  
+  // Add the main handler
+  middlewareChain.push(wrappedHandler);
+  
+  return middlewareChain;
+}
+
 function getOwnershipWhere(req) {
   if (
     req &&
@@ -267,6 +290,7 @@ function convertInstanceToPlainObject(instance) {
 
 module.exports.filterMiddlewareFns = filterMiddlewareFns;
 module.exports.buildHandlers = buildHandlers;
+module.exports.buildHandlersWithValidation = buildHandlersWithValidation;
 module.exports.getOwnershipWhere = getOwnershipWhere;
 module.exports.getProvidedValues = getProvidedValues;
 module.exports.getIdFromInstance = getIdFromInstance;
