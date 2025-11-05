@@ -37,7 +37,7 @@ function convertListQueryToSearchBody(query, modelCfg, listOptions) {
   const searchBody = {
     filtering: {},
     ordering: null,
-    paging: {}
+    paging: {},
   };
 
   // Convert pagination parameters
@@ -56,10 +56,14 @@ function convertListQueryToSearchBody(query, modelCfg, listOptions) {
 
   // Convert ordering parameters
   let rawOrderBy, globalDir;
-  
+
   if (listOptions.allowOrdering) {
     rawOrderBy = query['api:order_by'] || modelCfg.orderby;
-    globalDir = (query['api:order_dir'] || modelCfg.orderdir || listOptions.defaultOrderDir)
+    globalDir = (
+      query['api:order_dir'] ||
+      modelCfg.orderdir ||
+      listOptions.defaultOrderDir
+    )
       .toString()
       .toUpperCase();
   } else {
@@ -73,7 +77,7 @@ function convertListQueryToSearchBody(query, modelCfg, listOptions) {
   if (rawOrderBy) {
     const splitFields = rawOrderBy.split(',');
     const orderingArray = [];
-    
+
     for (const field of splitFields) {
       const trimmed = field?.toString().trim();
       if (!trimmed) continue;
@@ -92,10 +96,10 @@ function convertListQueryToSearchBody(query, modelCfg, listOptions) {
 
       orderingArray.push({
         order_by: columnName,
-        direction: direction
+        direction: direction,
       });
     }
-    
+
     if (orderingArray.length > 0) {
       searchBody.ordering = orderingArray;
     }
@@ -103,10 +107,12 @@ function convertListQueryToSearchBody(query, modelCfg, listOptions) {
 
   // If no ordering was set, use defaults
   if (!searchBody.ordering) {
-    searchBody.ordering = [{
-      order_by: listOptions.defaultOrderBy,
-      direction: listOptions.defaultOrderDir
-    }];
+    searchBody.ordering = [
+      {
+        order_by: listOptions.defaultOrderBy,
+        direction: listOptions.defaultOrderDir,
+      },
+    ];
   }
 
   // Convert filtering parameters
@@ -120,19 +126,22 @@ function convertListQueryToSearchBody(query, modelCfg, listOptions) {
         const lastColonIndex = key.lastIndexOf(':');
         const fieldName = key.slice(0, lastColonIndex);
         const operator = key.slice(lastColonIndex + 1);
-        
+
         // Initialize field object if it doesn't exist
         if (!searchBody.filtering[fieldName]) {
           searchBody.filtering[fieldName] = {};
         }
-        
+
         // Convert list operators to search operators and handle special cases
         let searchValue = value;
         if (operator === 'in' || operator === 'not_in') {
           // Split comma-separated values for IN operations
-          searchValue = String(value).split(',').map(s => s.trim()).filter(s => s.length > 0);
+          searchValue = String(value)
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
         }
-        
+
         searchBody.filtering[fieldName][operator] = searchValue;
       } else {
         // Simple equality filter (case-insensitive for strings will be handled by search logic)
@@ -182,7 +191,11 @@ function list(model, options = {}, modelOptions = {}) {
       const modelCfg = (model && model.apialize) || {};
 
       // Convert list query parameters to search body format
-      const searchBody = convertListQueryToSearchBody(q, modelCfg, mergedOptions);
+      const searchBody = convertListQueryToSearchBody(
+        q,
+        modelCfg,
+        mergedOptions
+      );
 
       // Create search options that match list behavior
       const searchOptions = {
@@ -193,7 +206,7 @@ function list(model, options = {}, modelOptions = {}) {
         id_mapping: idMapping,
         relation_id_mapping: relationIdMapping,
         pre,
-        post
+        post,
       };
 
       // Execute the search operation with the converted parameters
@@ -225,7 +238,7 @@ function list(model, options = {}, modelOptions = {}) {
             }
           }
         }
-        
+
         res.json(payload);
       }
     })

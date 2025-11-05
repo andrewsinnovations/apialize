@@ -454,9 +454,7 @@ async function executeSearchOperation(
             `URL: ${req.originalUrl}`
           );
         }
-        context.res
-          .status(400)
-          .json({ success: false, error: 'Bad request' });
+        context.res.status(400).json({ success: false, error: 'Bad request' });
         return;
       }
       // Use Reflect.ownKeys so we don't drop symbol-keyed operators like Op.or
@@ -486,9 +484,7 @@ async function executeSearchOperation(
             `URL: ${req.originalUrl}`
           );
         }
-        context.res
-          .status(400)
-          .json({ success: false, error: 'Bad request' });
+        context.res.status(400).json({ success: false, error: 'Bad request' });
         return;
       }
       req.apialize.options.order = orderArr;
@@ -556,7 +552,7 @@ function search(model, options = {}, modelOptions = {}) {
         res,
         body
       );
-      
+
       if (!res.headersSent) {
         res.json(payload);
       }

@@ -370,12 +370,12 @@ The applied ordering is echoed back in `meta.order` as an array of `[field, dire
 
 Ordering examples:
 
-| Query                                | Resulting order          |
-| ------------------------------------ | ------------------------ |
-| `api:order_by=name`                     | name ASC                 |
-| `api:order_by=name&api:order_dir=DESC`  | name DESC                |
-| `api:order_by=-score,name`              | score DESC then name ASC |
-| `api:order_by=-score,+name`             | score DESC then name ASC |
+| Query                                  | Resulting order          |
+| -------------------------------------- | ------------------------ |
+| `api:order_by=name`                    | name ASC                 |
+| `api:order_by=name&api:order_dir=DESC` | name DESC                |
+| `api:order_by=-score,name`             | score DESC then name ASC |
+| `api:order_by=-score,+name`            | score DESC then name ASC |
 
 ### Filtering on included models (dotted paths)
 
