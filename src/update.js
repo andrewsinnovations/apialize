@@ -6,13 +6,13 @@ const {
   defaultNotFound,
   filterMiddlewareFns,
   buildHandlers,
-  buildHandlersWithValidation,
   getProvidedValues,
   getOwnershipWhere,
   buildWhereClause,
   convertInstanceToPlainObject,
   extractBooleanOption,
 } = require('./utils');
+const { validateData } = require('./validationMiddleware');
 const {
   withTransactionAndHooks,
   optionsWithTransaction,
@@ -83,12 +83,12 @@ function update(model, options = {}, modelOptions = {}) {
     pre = null,
     post = null,
   } = options;
-  
-  const validate = extractBooleanOption(options, 'validate', false);
+
+  const validate = extractBooleanOption(options, 'validate', true);
 
   const middlewareFunctions = filterMiddlewareFns(middleware);
   const router = express.Router({ mergeParams: true });
-  const handlers = buildHandlersWithValidation(
+  const handlers = buildHandlers(
     middlewareFunctions,
     async function (req, res) {
       const combinedOptions = Object.assign({}, options, { pre, post });
@@ -119,6 +119,24 @@ function update(model, options = {}, modelOptions = {}) {
             return notFoundWithRollback(context);
           }
           context.existing = existingInstance;
+
+          // Run validation if enabled (after we confirm the record exists)
+          if (validate) {
+            try {
+              // For UPDATE, validate the full object that will replace the existing one
+              await validateData(model, providedValues, { isPartial: false });
+            } catch (error) {
+              if (error.name === 'ValidationError') {
+                context.res.status(400).json({
+                  success: false,
+                  error: error.message,
+                  details: error.details,
+                });
+                return;
+              }
+              throw error;
+            }
+          }
 
           const updatableAttributes = getUpdatableAttributes(
             existingInstance,
@@ -161,9 +179,7 @@ function update(model, options = {}, modelOptions = {}) {
       if (!res.headersSent) {
         res.json(payload);
       }
-    },
-    model,
-    { validate }
+    }
   );
   router.put('/:id', handlers);
   router.apialize = {};

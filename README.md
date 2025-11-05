@@ -243,7 +243,7 @@ For `single()`, `update()`, `patch()`, and `destroy()` the `options` object supp
 
 - `middleware`: array of middleware functions
 - `id_mapping`: string mapping URL param to a field (default `'id'`)
-- `validate` (update/patch only): boolean, enables automatic Sequelize validation on request body (default `false`)
+- `validate` (create/update/patch only): boolean, enables automatic Sequelize validation on request body (default `true`)
 - `param_name` (single only): change the name of the URL parameter used by `single()` for the record id (default `'id'`)
 - `member_routes` (single only): array of follow-up routes that run after the single record is loaded. Each item is an object `{ path, handler, method = 'get', middleware = [] }`.
 
@@ -282,12 +282,12 @@ The `create(model, options?, modelOptions?)` helper also supports:
   - When `false` (the default) and the request body is an array, the request is rejected with `400 { success: false, error: "Bulk create disabled" }`.
   - Identifier mapping is respected for array responses: if `id_mapping` is set (e.g., `'external_id'`), each returned object will also have `id` set to that mapped value.
 
-- `validate` (boolean, default `false`)
-  - When `true`, enables automatic Sequelize model validation on request body data before other middleware runs.
+- `validate` (boolean, default `true`)
+  - When `true` (the default), enables automatic Sequelize model validation on request body data before other middleware runs.
   - Validation runs on the input data using `model.build(data).validate()` for single objects or each item in arrays.
   - For `PATCH` operations, only validates the fields being updated (partial validation).
   - If validation fails, returns `400 { success: false, error: "Validation failed", details: [...] }` where `details` contains an array of validation error objects with `field`, `message`, and `value` properties.
-  - When `false` (the default), no automatic validation is performed - validation occurs at the Sequelize level during save operations.
+  - When `false`, no automatic validation is performed - validation occurs at the Sequelize level during save operations.
 
 ### Identifier mapping
 
@@ -687,32 +687,42 @@ Update semantics:
 
 ## 7. Input Validation
 
-apialize supports automatic input validation using your Sequelize model's validation rules. When enabled, validation runs before all other middleware and provides consistent error responses.
+apialize supports automatic input validation using your Sequelize model's validation rules. Validation is **enabled by default** for operations that accept request body data and runs before all other middleware, providing consistent error responses.
 
-### Enabling Validation
+### Validation is Enabled by Default
 
-Add `validate: true` to any operation options that accept request body data (`create`, `update`, `patch`):
+Validation is automatically enabled for `create`, `update`, and `patch` operations. No configuration is needed:
 
 ```js
 const { create, update, patch } = require('apialize');
 
-// Enable validation for create operations
-app.use('/users', create(User, { validate: true }));
+// Validation is enabled by default - no configuration needed
+app.use('/users', create(User));
+app.use('/users', update(User));
+app.use('/users', patch(User));
 
-// Enable validation for update operations  
-app.use('/users', update(User, { validate: true }));
+// Or use crud for all operations
+app.use('/users', crud(User));
+```
 
-// Enable validation for patch operations
-app.use('/users', patch(User, { validate: true }));
+### Disabling Validation
 
-// Or enable for all operations via crud
-app.use('/users', crud(User, {
-  routes: {
-    create: { validate: true },
-    update: { validate: true },
-    patch: { validate: true }
-  }
-}));
+If you need to disable validation for specific operations, set `validate: false`:
+
+```js
+// Disable validation for create operations
+app.use('/users', create(User, { validate: false }));
+
+// Disable validation for specific operations via crud
+app.use(
+  '/users',
+  crud(User, {
+    routes: {
+      create: { validate: false },
+      update: { validate: false },
+    },
+  })
+);
 ```
 
 ### Model Validation Rules
@@ -726,30 +736,30 @@ const User = sequelize.define('User', {
     allowNull: false,
     validate: {
       notEmpty: { msg: 'Name cannot be empty' },
-      len: { args: [2, 50], msg: 'Name must be 2-50 characters' }
-    }
+      len: { args: [2, 50], msg: 'Name must be 2-50 characters' },
+    },
   },
   email: {
     type: DataTypes.STRING,
     allowNull: false,
     validate: {
-      isEmail: { msg: 'Must be a valid email address' }
-    }
+      isEmail: { msg: 'Must be a valid email address' },
+    },
   },
   age: {
     type: DataTypes.INTEGER,
     validate: {
       min: { args: [0], msg: 'Age must be positive' },
-      max: { args: [120], msg: 'Age must be realistic' }
-    }
-  }
+      max: { args: [120], msg: 'Age must be realistic' },
+    },
+  },
 });
 ```
 
 ### Validation Behavior
 
 - **Create**: Validates the entire request body against all model rules
-- **Update**: Validates the entire request body (full replacement)  
+- **Update**: Validates the entire request body (full replacement)
 - **Patch**: Validates only the fields being updated (partial validation)
 - **Bulk Create**: Validates each item in the array individually
 
@@ -764,7 +774,7 @@ When validation fails, a `400` response is returned:
   "details": [
     {
       "field": "email",
-      "message": "Must be a valid email address", 
+      "message": "Must be a valid email address",
       "value": "invalid-email"
     },
     {

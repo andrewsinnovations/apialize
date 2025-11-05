@@ -5,7 +5,6 @@ const {
   asyncHandler,
   filterMiddlewareFns,
   buildHandlers,
-  buildHandlersWithValidation,
   getIdFromInstance,
   extractOption,
   extractBooleanOption,
@@ -13,6 +12,7 @@ const {
   mergeReqOptionsIntoModelOptions,
   convertInstanceToPlainObject,
 } = require('./utils');
+const { validateData } = require('./validationMiddleware');
 const {
   withTransactionAndHooks,
   optionsWithTransaction,
@@ -95,7 +95,7 @@ function create(model, options, modelOptions) {
     'allow_bulk_create',
     false
   );
-  const validate = extractBooleanOption(options, 'validate', false);
+  const validate = extractBooleanOption(options, 'validate', true);
   const id_mapping = extractOption(options, 'id_mapping', 'id');
   const pre = extractOption(options, 'pre', null);
   const post = extractOption(options, 'post', null);
@@ -104,15 +104,13 @@ function create(model, options, modelOptions) {
 
   const router = express.Router({ mergeParams: true });
 
-  const handlers = buildHandlersWithValidation(
-    inline, 
-    async (req, res) => {
-      const effectiveOptions = Object.assign({}, options, {
-        pre: pre,
-        post: post,
-      });
+  const handlers = buildHandlers(inline, async (req, res) => {
+    const effectiveOptions = Object.assign({}, options, {
+      pre: pre,
+      post: post,
+    });
 
-      const payload = await withTransactionAndHooks(
+    const payload = await withTransactionAndHooks(
       {
         model: model,
         options: effectiveOptions,
@@ -131,6 +129,35 @@ function create(model, options, modelOptions) {
         if (!isValidRequest) {
           return;
         }
+
+        // Run validation if enabled (after middleware and pre-hooks have run)
+        if (validate) {
+          try {
+            // For bulk operations, validate the original array data
+            // For single operations, use the processed values from middleware
+            let dataToValidate;
+            if (Array.isArray(rawBody)) {
+              dataToValidate = rawBody;
+            } else {
+              dataToValidate =
+                req && req.apialize && req.apialize.values
+                  ? req.apialize.values
+                  : rawBody;
+            }
+            await validateData(model, dataToValidate, { isPartial: false });
+          } catch (error) {
+            if (error.name === 'ValidationError') {
+              context.res.status(400).json({
+                success: false,
+                error: error.message,
+                details: error.details,
+              });
+              return;
+            }
+            throw error;
+          }
+        }
+
         const mergedCreateOptions = mergeReqOptionsIntoModelOptions(
           req,
           modelOptions
@@ -163,9 +190,7 @@ function create(model, options, modelOptions) {
     if (!res.headersSent) {
       res.status(201).json(payload);
     }
-  }, 
-  model, 
-  { validate });
+  });
 
   router.post('/', handlers);
 

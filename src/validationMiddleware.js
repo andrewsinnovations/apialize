@@ -1,92 +1,73 @@
-// Import asyncHandler from utils - but we'll implement our own to avoid circular dependency
-function asyncHandler(fn) {
-  return (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-}
-
 /**
- * Creates a validation middleware that runs Sequelize model validations
- * before other middleware when the 'validate' option is enabled.
- * 
+ * Validates data against a Sequelize model
+ *
  * @param {Object} model - The Sequelize model to validate against
- * @param {Object} options - Options object that may contain validation settings
- * @returns {Function} Express middleware function
+ * @param {Object|Array} data - The data to validate
+ * @param {Object} options - Validation options
+ * @param {boolean} options.isPartial - Whether to do partial validation (for PATCH operations)
+ * @returns {Promise} - Resolves if validation passes, rejects with validation errors if not
  */
-function createValidationMiddleware(model, options = {}) {
-  return asyncHandler(async (req, res, next) => {
-    // Skip validation if not enabled
-    if (!options.validate) {
-      return next();
-    }
+async function validateData(model, data, options = {}) {
+  const { isPartial = false } = options;
 
-    // Skip validation if no body data to validate
-    if (!req.body || (typeof req.body === 'object' && Object.keys(req.body).length === 0)) {
-      return next();
-    }
-
-    try {
-      // Handle bulk operations (arrays)
-      if (Array.isArray(req.body)) {
-        for (let i = 0; i < req.body.length; i++) {
-          const item = req.body[i];
-          if (item && typeof item === 'object') {
-            // Create a temporary instance for validation without saving
-            const instance = model.build(item);
-            await instance.validate();
-          }
-        }
-      } else {
-        // Handle single object validation
-        // For patch operations, only validate the fields that are being updated
-        const isPatchOperation = req.method === 'PATCH';
-        
-        if (isPatchOperation) {
-          // For PATCH, validate only the fields being provided
-          const fieldsToValidate = Object.keys(req.body);
-          const instance = model.build(req.body);
-          
-          // Validate only the specified fields
-          await instance.validate({ fields: fieldsToValidate });
-        } else {
-          // For other operations, validate the entire object
-          const instance = model.build(req.body);
+  try {
+    // Handle bulk operations (arrays)
+    if (Array.isArray(data)) {
+      for (let i = 0; i < data.length; i++) {
+        const item = data[i];
+        if (item && typeof item === 'object') {
+          // Create a temporary instance for validation without saving
+          const instance = model.build(item);
           await instance.validate();
         }
       }
+    } else if (
+      data &&
+      typeof data === 'object' &&
+      Object.keys(data).length > 0
+    ) {
+      // Handle single object validation
+      if (isPartial) {
+        // For PATCH, validate only the fields being provided
+        const fieldsToValidate = Object.keys(data);
+        const instance = model.build(data);
 
-      // If we get here, validation passed
-      next();
-    } catch (error) {
-      // Handle Sequelize validation errors
-      if (error.name === 'SequelizeValidationError') {
-        const validationErrors = error.errors.map(err => ({
-          field: err.path,
-          message: err.message,
-          value: err.value
-        }));
-
-        return res.status(400).json({
-          success: false,
-          error: 'Validation failed',
-          details: validationErrors
-        });
+        // Validate only the specified fields
+        await instance.validate({ fields: fieldsToValidate });
+      } else {
+        // For other operations, validate the entire object
+        const instance = model.build(data);
+        await instance.validate();
       }
-
-      // Handle other Sequelize errors that might occur during validation
-      if (error.name && error.name.startsWith('Sequelize')) {
-        return res.status(400).json({
-          success: false,
-          error: error.message || 'Validation error'
-        });
-      }
-
-      // For any other unexpected errors, pass them along
-      throw error;
     }
-  });
+  } catch (error) {
+    // Handle Sequelize validation errors
+    if (error.name === 'SequelizeValidationError') {
+      const validationErrors = error.errors.map((err) => ({
+        field: err.path,
+        message: err.message,
+        value: err.value,
+      }));
+
+      const validationError = new Error('Validation failed');
+      validationError.name = 'ValidationError';
+      validationError.details = validationErrors;
+      throw validationError;
+    }
+
+    // Handle other Sequelize errors that might occur during validation
+    if (error.name && error.name.startsWith('Sequelize')) {
+      const validationError = new Error(error.message || 'Validation error');
+      validationError.name = 'ValidationError';
+      validationError.details = [];
+      throw validationError;
+    }
+
+    // For any other unexpected errors, re-throw them
+    throw error;
+  }
 }
 
 module.exports = {
-  createValidationMiddleware
+  validateData,
 };
