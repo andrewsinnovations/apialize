@@ -46,6 +46,7 @@ const SEARCH_DEFAULTS = {
   id_mapping: 'id',
   relation_id_mapping: null,
   path: '/search',
+  disableSubqueryOnIncludeRequest: true,
 };
 
 function getDatabaseDialect(model) {
@@ -145,42 +146,140 @@ function resolveIncludedModelColumn(model, includes, key, relationIdMapping) {
   };
 }
 
+function processFieldForFlattening(
+  key,
+  flattening,
+  model,
+  includes,
+  relationIdMapping
+) {
+  if (!flattening || typeof key !== 'string') {
+    return { isFlattened: false };
+  }
+
+  const {
+    isFlattenedField,
+    mapFlattenedFieldToIncludePath,
+  } = require('./listUtils');
+  if (!isFlattenedField(key, flattening)) {
+    return { isFlattened: false };
+  }
+
+  const includePath = mapFlattenedFieldToIncludePath(key, flattening);
+  if (!includePath) {
+    return { isFlattened: false };
+  }
+
+  const resolved = resolveIncludedModelColumn(
+    model,
+    includes,
+    includePath,
+    relationIdMapping
+  );
+  if (resolved.error) {
+    return { isFlattened: true, error: resolved.error };
+  }
+
+  return {
+    isFlattened: true,
+    outKey: resolved.outKey,
+    validateModel: resolved.validateModel,
+    validateColumn: resolved.validateColumn,
+    attribute: resolved.attribute,
+  };
+}
+
+function processFieldForIncludes(key, model, includes, relationIdMapping) {
+  if (typeof key !== 'string' || !key.includes('.')) {
+    return { hasIncludes: false };
+  }
+
+  const resolved = resolveIncludedModelColumn(
+    model,
+    includes,
+    key,
+    relationIdMapping
+  );
+  if (resolved.error) {
+    return { hasIncludes: true, error: resolved.error };
+  }
+
+  return {
+    hasIncludes: true,
+    outKey: resolved.outKey,
+    validateModel: resolved.validateModel,
+    validateColumn: resolved.validateColumn,
+    attribute: resolved.attribute,
+  };
+}
+
+function resolveFieldContext(
+  key,
+  model,
+  includes,
+  relationIdMapping,
+  flattening
+) {
+  const flattenedResult = processFieldForFlattening(
+    key,
+    flattening,
+    model,
+    includes,
+    relationIdMapping
+  );
+  if (flattenedResult.error) {
+    return flattenedResult;
+  }
+  if (flattenedResult.isFlattened) {
+    return flattenedResult;
+  }
+
+  const includesResult = processFieldForIncludes(
+    key,
+    model,
+    includes,
+    relationIdMapping
+  );
+  if (includesResult.error) {
+    return includesResult;
+  }
+  if (includesResult.hasIncludes) {
+    return includesResult;
+  }
+
+  const attrs = getModelAttributes(model);
+  return {
+    outKey: key,
+    validateModel: model,
+    validateColumn: key,
+    attribute: attrs && attrs[key],
+  };
+}
+
 function buildFieldPredicate(
   model,
   key,
   rawVal,
   Op,
   includes,
-  relationIdMapping
+  relationIdMapping,
+  flattening
 ) {
   const dialect = getDatabaseDialect(model);
   const operators = getCaseInsensitiveOperators(dialect, Op);
 
-  let outKey = key;
-  let validateModel = model;
-  let validateColumn = key;
-  let attribute;
-
-  if (typeof key === 'string' && key.includes('.')) {
-    const resolved = resolveIncludedModelColumn(
-      model,
-      includes,
-      key,
-      relationIdMapping
-    );
-
-    if (resolved.error) {
-      return resolved;
-    }
-
-    outKey = resolved.outKey;
-    validateModel = resolved.validateModel;
-    validateColumn = resolved.validateColumn;
-    attribute = resolved.attribute;
-  } else {
-    const attrs = getModelAttributes(validateModel);
-    attribute = attrs && attrs[validateColumn];
+  const fieldContext = resolveFieldContext(
+    key,
+    model,
+    includes,
+    relationIdMapping,
+    flattening
+  );
+  if (fieldContext.error) {
+    return fieldContext;
   }
+
+  const { outKey, validateModel, validateColumn, attribute } = fieldContext;
 
   if (rawVal && typeof rawVal === 'object' && !Array.isArray(rawVal)) {
     return buildObjectPredicate(
@@ -235,11 +334,30 @@ function getOperatorMapping(Op, operators) {
   };
 }
 
+function isContainsOperator(operatorKey) {
+  return (
+    operatorKey === 'contains' ||
+    operatorKey === 'not_contains' ||
+    operatorKey === 'icontains' ||
+    operatorKey === 'not_icontains'
+  );
+}
+
+function isStartsEndOperator(operatorKey) {
+  return (
+    operatorKey === 'starts_with' ||
+    operatorKey === 'not_starts_with' ||
+    operatorKey === 'ends_with' ||
+    operatorKey === 'not_ends_with'
+  );
+}
+
+function isBooleanOperator(operatorKey) {
+  return operatorKey === 'is_true' || operatorKey === 'is_false';
+}
+
 function transformOperatorValue(operatorKey, value) {
-  if (operatorKey === 'contains' || operatorKey === 'not_contains') {
-    return `%${value}%`;
-  }
-  if (operatorKey === 'icontains' || operatorKey === 'not_icontains') {
+  if (isContainsOperator(operatorKey)) {
     return `%${value}%`;
   }
   if (operatorKey === 'starts_with' || operatorKey === 'not_starts_with') {
@@ -257,20 +375,7 @@ function transformOperatorValue(operatorKey, value) {
   return value;
 }
 
-function buildObjectPredicate(
-  rawVal,
-  key,
-  outKey,
-  validateModel,
-  validateColumn,
-  Op,
-  operators
-) {
-  if (!validateColumnExists(validateModel, validateColumn)) {
-    return { error: `Invalid column '${key}'` };
-  }
-
-  const operatorMapping = getOperatorMapping(Op, operators);
+function processOperatorValues(rawVal, operatorMapping) {
   const sequelizeOperators = {};
 
   for (const operatorKey of Object.keys(rawVal)) {
@@ -285,15 +390,47 @@ function buildObjectPredicate(
     sequelizeOperators[sequelizeOp] = transformedValue;
   }
 
-  if (Reflect.ownKeys(sequelizeOperators).length === 0) {
-    return {};
-  }
+  return sequelizeOperators;
+}
 
+function validateInOperatorValue(rawVal, validateModel, validateColumn, key) {
   if (!Array.isArray(rawVal.in) && rawVal.in !== undefined) {
     const valueToValidate = (rawVal && rawVal.in && rawVal.in[0]) || rawVal.in;
     if (!validateDataType(validateModel, validateColumn, valueToValidate)) {
       return { error: `Invalid value for '${key}'` };
     }
+  }
+  return null;
+}
+
+function buildObjectPredicate(
+  rawVal,
+  key,
+  outKey,
+  validateModel,
+  validateColumn,
+  Op,
+  operators
+) {
+  if (!validateColumnExists(validateModel, validateColumn)) {
+    return { error: `Invalid column '${key}'` };
+  }
+
+  const operatorMapping = getOperatorMapping(Op, operators);
+  const sequelizeOperators = processOperatorValues(rawVal, operatorMapping);
+
+  if (Reflect.ownKeys(sequelizeOperators).length === 0) {
+    return {};
+  }
+
+  const validationError = validateInOperatorValue(
+    rawVal,
+    validateModel,
+    validateColumn,
+    key
+  );
+  if (validationError) {
+    return validationError;
   }
 
   return { [outKey]: sequelizeOperators };
@@ -341,23 +478,41 @@ function mergeObjectProperties(target, source) {
       typeof target[key] === 'object' &&
       typeof source[key] === 'object'
     ) {
-      target[key] = Object.assign({}, target[key], source[key]);
+      target[key] = { ...target[key], ...source[key] };
     } else {
       target[key] = source[key];
     }
   }
 }
 
-function processAndFilters(filters, model, Op, includes, relationIdMapping) {
+function collectWhereClauseParts(
+  filters,
+  model,
+  Op,
+  includes,
+  relationIdMapping,
+  flattening
+) {
   const parts = [];
 
-  for (const item of filters.and) {
-    const subWhere = buildWhere(model, item, Op, includes, relationIdMapping);
+  for (const item of filters) {
+    const subWhere = buildWhere(
+      model,
+      item,
+      Op,
+      includes,
+      relationIdMapping,
+      flattening
+    );
     if (subWhere && Object.keys(subWhere).length) {
       parts.push(subWhere);
     }
   }
 
+  return parts;
+}
+
+function separateOrClauses(parts, Op) {
   const merged = {};
   const orClauses = [];
 
@@ -373,6 +528,27 @@ function processAndFilters(filters, model, Op, includes, relationIdMapping) {
     }
   }
 
+  return { merged, orClauses };
+}
+
+function processAndFilters(
+  filters,
+  model,
+  Op,
+  includes,
+  relationIdMapping,
+  flattening
+) {
+  const parts = collectWhereClauseParts(
+    filters.and,
+    model,
+    Op,
+    includes,
+    relationIdMapping,
+    flattening
+  );
+  const { merged, orClauses } = separateOrClauses(parts, Op);
+
   if (orClauses.length) {
     merged[Op.or] = orClauses;
   }
@@ -380,15 +556,22 @@ function processAndFilters(filters, model, Op, includes, relationIdMapping) {
   return merged;
 }
 
-function processOrFilters(filters, model, Op, includes, relationIdMapping) {
-  const parts = [];
-
-  for (const item of filters.or) {
-    const subWhere = buildWhere(model, item, Op, includes, relationIdMapping);
-    if (subWhere && Object.keys(subWhere).length) {
-      parts.push(subWhere);
-    }
-  }
+function processOrFilters(
+  filters,
+  model,
+  Op,
+  includes,
+  relationIdMapping,
+  flattening
+) {
+  const parts = collectWhereClauseParts(
+    filters.or,
+    model,
+    Op,
+    includes,
+    relationIdMapping,
+    flattening
+  );
 
   if (parts.length === 0) {
     return {};
@@ -397,37 +580,35 @@ function processOrFilters(filters, model, Op, includes, relationIdMapping) {
   return { [Op.or]: parts };
 }
 
-function processImplicitAndFilters(
+function isLogicalOperator(key, value) {
+  return (key === 'and' || key === 'or') && Array.isArray(value);
+}
+
+function buildFieldPredicates(
   filters,
   model,
   Op,
   includes,
-  relationIdMapping
+  relationIdMapping,
+  flattening
 ) {
   const keys = Object.keys(filters);
   const andParts = [];
 
   for (const key of keys) {
-    if (key === 'and' || key === 'or') {
+    if (isLogicalOperator(key, filters[key])) {
       continue;
     }
 
     const value = filters[key];
-
-    if (key === 'and' && Array.isArray(value)) {
-      continue;
-    }
-    if (key === 'or' && Array.isArray(value)) {
-      continue;
-    }
-
     const predicate = buildFieldPredicate(
       model,
       key,
       value,
       Op,
       includes,
-      relationIdMapping
+      relationIdMapping,
+      flattening
     );
 
     if (predicate && predicate.error) {
@@ -439,6 +620,10 @@ function processImplicitAndFilters(
     }
   }
 
+  return andParts;
+}
+
+function mergePredicateParts(andParts) {
   if (andParts.length === 0) {
     return {};
   }
@@ -455,17 +640,62 @@ function processImplicitAndFilters(
   return merged;
 }
 
-function buildWhere(model, filters, Op, includes, relationIdMapping) {
+function processImplicitAndFilters(
+  filters,
+  model,
+  Op,
+  includes,
+  relationIdMapping,
+  flattening
+) {
+  const andParts = buildFieldPredicates(
+    filters,
+    model,
+    Op,
+    includes,
+    relationIdMapping,
+    flattening
+  );
+
+  if (andParts.__error) {
+    return andParts;
+  }
+
+  return mergePredicateParts(andParts);
+}
+
+function buildWhere(
+  model,
+  filters,
+  Op,
+  includes,
+  relationIdMapping,
+  flattening
+) {
   if (!filters || typeof filters !== 'object') {
     return {};
   }
 
   if (Array.isArray(filters.and)) {
-    return processAndFilters(filters, model, Op, includes, relationIdMapping);
+    return processAndFilters(
+      filters,
+      model,
+      Op,
+      includes,
+      relationIdMapping,
+      flattening
+    );
   }
 
   if (Array.isArray(filters.or)) {
-    return processOrFilters(filters, model, Op, includes, relationIdMapping);
+    return processOrFilters(
+      filters,
+      model,
+      Op,
+      includes,
+      relationIdMapping,
+      flattening
+    );
   }
 
   return processImplicitAndFilters(
@@ -473,7 +703,8 @@ function buildWhere(model, filters, Op, includes, relationIdMapping) {
     model,
     Op,
     includes,
-    relationIdMapping
+    relationIdMapping,
+    flattening
   );
 }
 
@@ -546,6 +777,167 @@ function processIncludedOrderColumn(
   return { includeChain, attribute };
 }
 
+function processOrderItemForFlattening(
+  columnName,
+  flattening,
+  model,
+  includes,
+  relationIdMapping,
+  direction
+) {
+  if (!flattening || typeof columnName !== 'string') {
+    return { processed: false };
+  }
+
+  const {
+    isFlattenedField,
+    mapFlattenedFieldToIncludePath,
+  } = require('./listUtils');
+  if (!isFlattenedField(columnName, flattening)) {
+    return { processed: false };
+  }
+
+  const includePath = mapFlattenedFieldToIncludePath(columnName, flattening);
+  if (!includePath) {
+    return { processed: false };
+  }
+
+  const result = processIncludedOrderColumn(
+    model,
+    includePath,
+    includes,
+    relationIdMapping
+  );
+  if (result.error) {
+    return { processed: true, error: result.error };
+  }
+
+  return {
+    processed: true,
+    orderClause: [...result.includeChain, result.attribute, direction],
+  };
+}
+
+function processOrderItemForIncludes(
+  columnName,
+  model,
+  includes,
+  relationIdMapping,
+  direction
+) {
+  if (typeof columnName !== 'string' || !columnName.includes('.')) {
+    return { processed: false };
+  }
+
+  const result = processIncludedOrderColumn(
+    model,
+    columnName,
+    includes,
+    relationIdMapping
+  );
+  if (result.error) {
+    return { processed: true, error: result.error };
+  }
+
+  return {
+    processed: true,
+    orderClause: [...result.includeChain, result.attribute, direction],
+  };
+}
+
+function processOrderItem(
+  item,
+  model,
+  defaultOrderDir,
+  idMapping,
+  includes,
+  relationIdMapping,
+  flattening
+) {
+  if (!item || typeof item !== 'object') {
+    return { skip: true };
+  }
+
+  const column = extractOrderColumn(item);
+  if (!column) {
+    return { skip: true };
+  }
+
+  const direction = normalizeOrderDirection(item, defaultOrderDir);
+  const columnName = resolveOrderColumnName(column, idMapping);
+
+  const flattenedResult = processOrderItemForFlattening(
+    columnName,
+    flattening,
+    model,
+    includes,
+    relationIdMapping,
+    direction
+  );
+  if (flattenedResult.error) {
+    return { error: flattenedResult.error };
+  }
+  if (flattenedResult.processed) {
+    return { orderClause: flattenedResult.orderClause };
+  }
+
+  const includesResult = processOrderItemForIncludes(
+    columnName,
+    model,
+    includes,
+    relationIdMapping,
+    direction
+  );
+  if (includesResult.error) {
+    return { error: includesResult.error };
+  }
+  if (includesResult.processed) {
+    return { orderClause: includesResult.orderClause };
+  }
+
+  if (!validateColumnExists(model, columnName)) {
+    return { error: `Invalid order column '${columnName}'` };
+  }
+
+  return { orderClause: [columnName, direction] };
+}
+
+function buildOrderClauses(
+  items,
+  model,
+  defaultOrderDir,
+  idMapping,
+  includes,
+  relationIdMapping,
+  flattening
+) {
+  const orderClauses = [];
+
+  for (const item of items) {
+    const result = processOrderItem(
+      item,
+      model,
+      defaultOrderDir,
+      idMapping,
+      includes,
+      relationIdMapping,
+      flattening
+    );
+
+    if (result.error) {
+      return { error: result.error };
+    }
+    if (result.skip) {
+      continue;
+    }
+    if (result.orderClause) {
+      orderClauses.push(result.orderClause);
+    }
+  }
+
+  return { orderClauses };
+}
+
 function buildOrdering(
   model,
   ordering,
@@ -553,44 +945,25 @@ function buildOrdering(
   defaultOrderDir,
   idMapping,
   includes,
-  relationIdMapping
+  relationIdMapping,
+  flattening
 ) {
   const items = normalizeOrderingItems(ordering);
-  const orderClauses = [];
+  const result = buildOrderClauses(
+    items,
+    model,
+    defaultOrderDir,
+    idMapping,
+    includes,
+    relationIdMapping,
+    flattening
+  );
 
-  for (const item of items) {
-    if (!item || typeof item !== 'object') {
-      continue;
-    }
-
-    const column = extractOrderColumn(item);
-    if (!column) {
-      continue;
-    }
-
-    const direction = normalizeOrderDirection(item, defaultOrderDir);
-    const columnName = resolveOrderColumnName(column, idMapping);
-
-    if (typeof columnName === 'string' && columnName.includes('.')) {
-      const result = processIncludedOrderColumn(
-        model,
-        columnName,
-        includes,
-        relationIdMapping
-      );
-
-      if (result.error) {
-        return result;
-      }
-
-      orderClauses.push([...result.includeChain, result.attribute, direction]);
-    } else {
-      if (!validateColumnExists(model, columnName)) {
-        return { error: `Invalid order column '${columnName}'` };
-      }
-      orderClauses.push([columnName, direction]);
-    }
+  if (result.error) {
+    return result;
   }
+
+  const { orderClauses } = result;
 
   if (orderClauses.length === 0) {
     const effectiveOrderBy = resolveOrderColumnName(defaultOrderBy, idMapping);
@@ -609,7 +982,7 @@ function extractSearchParameters(body) {
 }
 
 function extractMergedOptions(searchOptions) {
-  const merged = Object.assign({}, SEARCH_DEFAULTS, searchOptions || {});
+  const merged = { ...SEARCH_DEFAULTS, ...(searchOptions || {}) };
 
   return {
     defaultPageSize: merged.defaultPageSize,
@@ -618,9 +991,205 @@ function extractMergedOptions(searchOptions) {
     metaShowOrdering: !!merged.metaShowOrdering,
     idMapping: merged.id_mapping || 'id',
     relationIdMapping: merged.relation_id_mapping,
+    disableSubqueryOnIncludeRequest: merged.disableSubqueryOnIncludeRequest,
+    flattening: merged.flattening,
     pre: merged.pre,
     post: merged.post,
   };
+}
+
+function hasIncludedFieldsInFilters(filters) {
+  if (!filters || typeof filters !== 'object') {
+    return false;
+  }
+
+  for (const key in filters) {
+    if (typeof key === 'string' && key.includes('.')) {
+      return true;
+    }
+
+    if (key === 'and' || key === 'or') {
+      const nestedFilters = filters[key];
+      if (Array.isArray(nestedFilters)) {
+        for (const nestedFilter of nestedFilters) {
+          if (hasIncludedFieldsInFilters(nestedFilter)) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+function hasIncludedFieldsInOrdering(ordering) {
+  if (!ordering) {
+    return false;
+  }
+
+  const items = normalizeOrderingItems(ordering);
+
+  for (const item of items) {
+    if (!item || typeof item !== 'object') {
+      continue;
+    }
+
+    const column = extractOrderColumn(item);
+    if (!column) {
+      continue;
+    }
+
+    if (typeof column === 'string' && column.includes('.')) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function validateFlatteningConfiguration(options, model, req, res, body) {
+  if (!options.flattening) {
+    return true;
+  }
+
+  const includes = getIncludesFromContext(req, model);
+  const { validateFlatteningConfig } = require('./listUtils');
+  const validation = validateFlatteningConfig(
+    options.flattening,
+    model,
+    includes
+  );
+
+  if (!validation.isValid) {
+    logBadRequest(
+      'Search flattening validation failed',
+      validation.error,
+      body,
+      req
+    );
+    res.status(400).json({ success: false, error: 'Bad request' });
+    return false;
+  }
+
+  return true;
+}
+
+function configureSubqueryOptions(options, filters, ordering, req) {
+  if (!options.disableSubqueryOnIncludeRequest) {
+    return;
+  }
+
+  const hasIncludedFiltering = hasIncludedFieldsInFilters(filters);
+  const hasIncludedOrdering = hasIncludedFieldsInOrdering(ordering);
+  const hasFlattening = !!options.flattening;
+
+  if (hasIncludedFiltering || hasIncludedOrdering || hasFlattening) {
+    req.apialize.options.subQuery = false;
+  }
+}
+
+function setupPaginationOptions(paging, defaultPageSize, req) {
+  const { page, pageSize } = processPaging(paging, defaultPageSize);
+  req.apialize.options.limit = pageSize;
+  req.apialize.options.offset = (page - 1) * pageSize;
+  return { page, pageSize };
+}
+
+function processWhereClause(
+  model,
+  filters,
+  Op,
+  includes,
+  relationIdMapping,
+  flattening,
+  req,
+  body,
+  context
+) {
+  const whereTree = buildWhere(
+    model,
+    filters || {},
+    Op,
+    includes,
+    relationIdMapping,
+    flattening
+  );
+
+  if (whereTree && whereTree.__error) {
+    logBadRequest('Search bad request', whereTree.__error, body, req);
+    context.res.status(400).json({ success: false, error: 'Bad request' });
+    return { error: true };
+  }
+
+  if (Reflect.ownKeys(whereTree).length === 0) {
+    return { success: true };
+  }
+
+  const existingWhere = req.apialize.options.where || {};
+
+  if (flattening) {
+    const { isFlattenedField } = require('./listUtils');
+    const cleanedWhere = {};
+
+    for (const [key, value] of Object.entries(existingWhere)) {
+      const isFlattened = isFlattenedField(key, flattening);
+      if (!isFlattened) {
+        cleanedWhere[key] = value;
+      }
+    }
+
+    req.apialize.options.where = { ...cleanedWhere, ...whereTree };
+  } else {
+    req.apialize.options.where = { ...existingWhere, ...whereTree };
+  }
+
+  return { success: true };
+}
+
+function processOrderingClause(
+  model,
+  ordering,
+  options,
+  includes,
+  req,
+  body,
+  context
+) {
+  const orderArray = buildOrdering(
+    model,
+    ordering,
+    options.defaultOrderBy,
+    options.defaultOrderDir,
+    options.idMapping,
+    includes,
+    options.relationIdMapping,
+    options.flattening
+  );
+
+  if (orderArray && orderArray.error) {
+    logBadRequest('Search bad request', orderArray.error, body, req);
+    context.res.status(400).json({ success: false, error: 'Bad request' });
+    return { error: true };
+  }
+
+  req.apialize.options.order = orderArray;
+  return { success: true };
+}
+
+async function executeSearchQuery(model, options, req) {
+  const result = await model.findAndCountAll(req.apialize.options);
+
+  const normalizeRowsFn = async (rows, idMappingParam) => {
+    return await normalizeRowsWithForeignKeys(
+      rows,
+      idMappingParam,
+      options.relationIdMapping,
+      model
+    );
+  };
+
+  return { result, normalizeRowsFn };
 }
 
 async function executeSearchOperation(
@@ -637,6 +1206,12 @@ async function executeSearchOperation(
   const mergedReqOptions = mergeReqOptionsIntoModelOptions(req, modelOptions);
   req.apialize.options = mergedReqOptions;
 
+  if (!validateFlatteningConfiguration(options, model, req, res, body)) {
+    return;
+  }
+
+  configureSubqueryOptions(options, filters, ordering, req);
+
   const Op = getSequelizeOp(model);
 
   return await withTransactionAndHooks(
@@ -650,61 +1225,46 @@ async function executeSearchOperation(
       useReqOptionsTransaction: true,
     },
     async (context) => {
-      const { page, pageSize } = processPaging(paging, options.defaultPageSize);
-      req.apialize.options.limit = pageSize;
-      req.apialize.options.offset = (page - 1) * pageSize;
-
+      const { page, pageSize } = setupPaginationOptions(
+        paging,
+        options.defaultPageSize,
+        req
+      );
       const includes = getIncludesFromContext(req, model);
 
-      const whereTree = buildWhere(
+      const whereResult = processWhereClause(
         model,
-        filters || {},
+        filters,
         Op,
         includes,
-        options.relationIdMapping
+        options.relationIdMapping,
+        options.flattening,
+        req,
+        body,
+        context
       );
-      if (whereTree && whereTree.__error) {
-        logBadRequest('Search bad request', whereTree.__error, body, req);
-        context.res.status(400).json({ success: false, error: 'Bad request' });
+      if (whereResult.error) {
         return;
       }
 
-      if (Reflect.ownKeys(whereTree).length) {
-        req.apialize.options.where = Object.assign(
-          {},
-          req.apialize.options.where || {},
-          whereTree
-        );
-      }
-
-      const orderArray = buildOrdering(
+      const orderResult = processOrderingClause(
         model,
         ordering,
-        options.defaultOrderBy,
-        options.defaultOrderDir,
-        options.idMapping,
+        options,
         includes,
-        options.relationIdMapping
+        req,
+        body,
+        context
       );
-
-      if (orderArray && orderArray.error) {
-        logBadRequest('Search bad request', orderArray.error, body, req);
-        context.res.status(400).json({ success: false, error: 'Bad request' });
+      if (orderResult.error) {
         return;
       }
 
-      req.apialize.options.order = orderArray;
-
-      const result = await model.findAndCountAll(req.apialize.options);
-
-      const normalizeRowsFn = async (rows, idMappingParam) => {
-        return await normalizeRowsWithForeignKeys(
-          rows,
-          idMappingParam,
-          options.relationIdMapping,
-          model
-        );
-      };
+      const { result, normalizeRowsFn } = await executeSearchQuery(
+        model,
+        options,
+        req
+      );
 
       const response = await buildResponse(
         result,
@@ -716,7 +1276,8 @@ async function executeSearchOperation(
         false,
         req,
         options.idMapping,
-        normalizeRowsFn
+        normalizeRowsFn,
+        options.flattening
       );
 
       context.payload = response;
@@ -792,7 +1353,7 @@ function disableQueryFilters(req, res, next) {
 
 function search(model, options = {}, modelOptions = {}) {
   ensureFn(model, 'findAndCountAll');
-  const merged = Object.assign({}, SEARCH_DEFAULTS, options || {});
+  const merged = { ...SEARCH_DEFAULTS, ...(options || {}) };
 
   const middlewareFunctions = getMiddlewareFunctions(merged.middleware);
   const router = express.Router({ mergeParams: true });

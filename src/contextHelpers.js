@@ -29,32 +29,84 @@ function applyWhere(additionalWhere) {
 
 function createScopedModel(model, scope, scopeArgs) {
   if (typeof scope === 'function') {
-    return model.scope(scope(...scopeArgs));
+    const args = [];
+    for (let i = 0; i < scopeArgs.length; i++) {
+      args.push(scopeArgs[i]);
+    }
+    return model.scope(scope(...args));
   }
 
-  if (scopeArgs.length > 0) {
-    return model.scope({ method: [scope, ...scopeArgs] });
+  const hasArguments = scopeArgs.length > 0;
+  if (hasArguments) {
+    const methodArgs = [scope];
+    for (let i = 0; i < scopeArgs.length; i++) {
+      methodArgs.push(scopeArgs[i]);
+    }
+    return model.scope({ method: methodArgs });
   }
 
   return model.scope(scope);
 }
 
 function mergeIncludeOptions(currentInclude, scopeInclude) {
-  if (currentInclude) {
-    if (Array.isArray(currentInclude)) {
-      return [...currentInclude, ...scopeInclude];
-    }
-    return [currentInclude, ...scopeInclude];
+  if (!currentInclude) {
+    return scopeInclude;
   }
-  return scopeInclude;
+
+  const mergedInclude = [];
+
+  if (Array.isArray(currentInclude)) {
+    for (let i = 0; i < currentInclude.length; i++) {
+      mergedInclude.push(currentInclude[i]);
+    }
+  } else {
+    mergedInclude.push(currentInclude);
+  }
+
+  for (let i = 0; i < scopeInclude.length; i++) {
+    mergedInclude.push(scopeInclude[i]);
+  }
+
+  return mergedInclude;
+}
+
+function mergeWhereOptions(currentWhere, scopeWhere) {
+  const mergedWhere = {};
+
+  const currentKeys = Object.keys(currentWhere || {});
+  for (let i = 0; i < currentKeys.length; i++) {
+    const key = currentKeys[i];
+    mergedWhere[key] = currentWhere[key];
+  }
+
+  const scopeKeys = Object.keys(scopeWhere);
+  for (let i = 0; i < scopeKeys.length; i++) {
+    const key = scopeKeys[i];
+    mergedWhere[key] = scopeWhere[key];
+  }
+
+  return mergedWhere;
+}
+
+function mergeOtherScopeOptions(currentOptions, scopeOptions) {
+  const handledKeys = ['where', 'include', 'attributes', 'order'];
+  const scopeKeys = Object.keys(scopeOptions);
+
+  for (let i = 0; i < scopeKeys.length; i++) {
+    const key = scopeKeys[i];
+    const isHandledKey = handledKeys.indexOf(key) !== -1;
+    if (!isHandledKey) {
+      currentOptions[key] = scopeOptions[key];
+    }
+  }
 }
 
 function mergeScopeOptions(currentOptions, scopeOptions) {
   if (scopeOptions.where) {
-    currentOptions.where = {
-      ...currentOptions.where,
-      ...scopeOptions.where,
-    };
+    currentOptions.where = mergeWhereOptions(
+      currentOptions.where,
+      scopeOptions.where
+    );
   }
 
   if (scopeOptions.include) {
@@ -72,15 +124,7 @@ function mergeScopeOptions(currentOptions, scopeOptions) {
     currentOptions.order = scopeOptions.order;
   }
 
-  const handledKeys = ['where', 'include', 'attributes', 'order'];
-  const otherScopeKeys = Object.keys(scopeOptions);
-
-  for (let i = 0; i < otherScopeKeys.length; i++) {
-    const key = otherScopeKeys[i];
-    if (!handledKeys.includes(key)) {
-      currentOptions[key] = scopeOptions[key];
-    }
-  }
+  mergeOtherScopeOptions(currentOptions, scopeOptions);
 }
 
 function applyScope(scope, ...scopeArgs) {
@@ -115,42 +159,68 @@ function applyMultipleWhere(whereConditions) {
   return this._req.apialize.options.where;
 }
 
+function getNewWhereConditions(existingWhere, conditionalWhere) {
+  const newConditions = {};
+  const conditionalKeys = Object.keys(conditionalWhere);
+
+  for (let i = 0; i < conditionalKeys.length; i++) {
+    const key = conditionalKeys[i];
+    const value = conditionalWhere[key];
+    const keyAlreadyExists = key in existingWhere;
+
+    if (!keyAlreadyExists) {
+      newConditions[key] = value;
+    }
+  }
+
+  return newConditions;
+}
+
 function applyWhereIfNotExists(conditionalWhere) {
   const req = this._req;
 
   ensureApializeStructure(req);
 
   const existingWhere = req.apialize.options.where;
-  const filteredWhere = {};
+  const newConditions = getNewWhereConditions(existingWhere, conditionalWhere);
+  const hasNewConditions = Object.keys(newConditions).length > 0;
 
-  const conditionalKeys = Object.keys(conditionalWhere);
-  for (let i = 0; i < conditionalKeys.length; i++) {
-    const key = conditionalKeys[i];
-    const value = conditionalWhere[key];
-    if (!(key in existingWhere)) {
-      filteredWhere[key] = value;
-    }
-  }
-
-  if (Object.keys(filteredWhere).length > 0) {
-    return applyWhere.call(this, filteredWhere);
+  if (hasNewConditions) {
+    return applyWhere.call(this, newConditions);
   }
 
   return existingWhere;
 }
 
+function applySingleScope(scopeConfig) {
+  const scopeType = typeof scopeConfig;
+
+  if (scopeType === 'string') {
+    applyScope.call(this, scopeConfig);
+    return;
+  }
+
+  if (scopeType === 'function') {
+    applyScope.call(this, scopeConfig);
+    return;
+  }
+
+  const isObjectWithName =
+    scopeType === 'object' && scopeConfig && scopeConfig.name;
+  if (isObjectWithName) {
+    const scopeArgs = scopeConfig.args || [];
+    const args = [];
+    for (let i = 0; i < scopeArgs.length; i++) {
+      args.push(scopeArgs[i]);
+    }
+    applyScope.call(this, scopeConfig.name, ...args);
+  }
+}
+
 function applyScopes(scopes) {
   for (let i = 0; i < scopes.length; i++) {
     const scopeConfig = scopes[i];
-
-    if (typeof scopeConfig === 'string') {
-      applyScope.call(this, scopeConfig);
-    } else if (typeof scopeConfig === 'object' && scopeConfig.name) {
-      const scopeArgs = scopeConfig.args || [];
-      applyScope.call(this, scopeConfig.name, ...scopeArgs);
-    } else if (typeof scopeConfig === 'function') {
-      applyScope.call(this, scopeConfig);
-    }
+    applySingleScope.call(this, scopeConfig);
   }
 }
 
@@ -159,15 +229,23 @@ function removeWhere(keysToRemove) {
 
   ensureApializeStructure(req);
 
-  const keys = Array.isArray(keysToRemove) ? keysToRemove : [keysToRemove];
-  const where = req.apialize.options.where;
-
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[i];
-    delete where[key];
+  const keysArray = [];
+  if (Array.isArray(keysToRemove)) {
+    for (let i = 0; i < keysToRemove.length; i++) {
+      keysArray.push(keysToRemove[i]);
+    }
+  } else {
+    keysArray.push(keysToRemove);
   }
 
-  return where;
+  const whereConditions = req.apialize.options.where;
+
+  for (let i = 0; i < keysArray.length; i++) {
+    const keyToRemove = keysArray[i];
+    delete whereConditions[keyToRemove];
+  }
+
+  return whereConditions;
 }
 
 function replaceWhere(newWhere) {

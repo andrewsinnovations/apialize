@@ -17,10 +17,82 @@ const {
 } = require('./operationUtils');
 
 function buildDestroyOptions(modelOptions, where, transaction) {
-  const txModelOptions = Object.assign({}, modelOptions, {
-    where: where,
-  });
+  const txModelOptions = {};
+  const modelOptionKeys = Object.keys(modelOptions);
+
+  for (let i = 0; i < modelOptionKeys.length; i++) {
+    const key = modelOptionKeys[i];
+    txModelOptions[key] = modelOptions[key];
+  }
+
+  txModelOptions.where = where;
+
   return optionsWithTransaction(txModelOptions, transaction);
+}
+
+function handleDestroyResult(affected, id, context) {
+  const recordWasDestroyed = affected > 0;
+  if (!recordWasDestroyed) {
+    return notFoundWithRollback(context);
+  }
+
+  context.payload = { success: true, id: id };
+  return context.payload;
+}
+
+function buildHookOptions(options, pre, post) {
+  const hookOptions = {};
+  const optionKeys = Object.keys(options);
+
+  for (let i = 0; i < optionKeys.length; i++) {
+    const key = optionKeys[i];
+    hookOptions[key] = options[key];
+  }
+
+  if (pre !== null) {
+    hookOptions.pre = pre;
+  }
+
+  if (post !== null) {
+    hookOptions.post = post;
+  }
+
+  return hookOptions;
+}
+
+async function processDestroyRequest(
+  model,
+  options,
+  modelOptions,
+  req,
+  res,
+  config
+) {
+  const hookOptions = buildHookOptions(options, config.pre, config.post);
+
+  return await withTransactionAndHooks(
+    {
+      model: model,
+      options: hookOptions,
+      req: req,
+      res: res,
+      modelOptions: modelOptions,
+      idMapping: config.id_mapping,
+    },
+    async function (context) {
+      const id = req.params.id;
+      const ownershipWhere = getOwnershipWhere(req);
+
+      return await executeDestroy(
+        model,
+        id,
+        config.id_mapping,
+        ownershipWhere,
+        modelOptions,
+        context
+      );
+    }
+  );
 }
 
 function executeDestroy(
@@ -39,18 +111,8 @@ function executeDestroy(
   );
 
   return model.destroy(destroyOptions).then((affected) => {
-    if (!affected) {
-      return notFoundWithRollback(context);
-    }
-    context.payload = { success: true, id: id };
-    return context.payload;
+    return handleDestroyResult(affected, id, context);
   });
-}
-
-function createDestroyHandler(handleDestroy) {
-  return function (req, res, next) {
-    return handleDestroy(req, res, next);
-  };
 }
 
 function attachDestroyRoute(router, middlewares) {
@@ -62,58 +124,36 @@ function attachDestroyRoute(router, middlewares) {
 }
 
 function destroy(model, options, modelOptions) {
-  if (!options) {
-    options = {};
-  }
-  if (!modelOptions) {
-    modelOptions = {};
-  }
+  const safeOptions = options || {};
+  const safeModelOptions = modelOptions || {};
 
   ensureFn(model, 'destroy');
 
-  const middleware = extractMiddleware(options);
-  const id_mapping = extractOption(options, 'id_mapping', 'id');
-  const pre = extractOption(options, 'pre', null);
-  const post = extractOption(options, 'post', null);
+  const middleware = extractMiddleware(safeOptions);
+  const id_mapping = extractOption(safeOptions, 'id_mapping', 'id');
+  const pre = extractOption(safeOptions, 'pre', null);
+  const post = extractOption(safeOptions, 'post', null);
 
   const inlineMiddleware = filterMiddlewareFns(middleware);
-
   const router = express.Router({ mergeParams: true });
 
   const handleDestroy = asyncHandler(async function handleDestroy(req, res) {
-    const hookOptions = Object.assign({}, options, { pre: pre, post: post });
-
-    const payload = await withTransactionAndHooks(
-      {
-        model: model,
-        options: hookOptions,
-        req: req,
-        res: res,
-        modelOptions: modelOptions,
-        idMapping: id_mapping,
-      },
-      async function (context) {
-        const id = req.params.id;
-        const ownershipWhere = getOwnershipWhere(req);
-
-        return await executeDestroy(
-          model,
-          id,
-          id_mapping,
-          ownershipWhere,
-          modelOptions,
-          context
-        );
-      }
+    const payload = await processDestroyRequest(
+      model,
+      safeOptions,
+      safeModelOptions,
+      req,
+      res,
+      { pre: pre, post: post, id_mapping: id_mapping }
     );
 
-    if (!res.headersSent) {
+    const responseNotSent = !res.headersSent;
+    if (responseNotSent) {
       res.json(payload);
     }
   });
 
-  const destroyHandler = createDestroyHandler(handleDestroy);
-  const middlewares = buildHandlers(inlineMiddleware, destroyHandler);
+  const middlewares = buildHandlers(inlineMiddleware, handleDestroy);
   attachDestroyRoute(router, middlewares);
 
   router.apialize = {};

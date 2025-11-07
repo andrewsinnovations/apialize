@@ -134,39 +134,39 @@ You can apply Sequelize scopes declaratively by including a `scopes` array in `m
 
 ```js
 // Define scopes in your model
-User.addScope('active', { where: { status: 'active' } });
-User.addScope('byTenant', (tenantId) => ({ where: { tenant_id: tenantId } }));
-User.addScope('featured', { where: { is_featured: true } });
+Person.addScope('active', { where: { status: 'active' } });
+Person.addScope('byTenant', (tenantId) => ({ where: { tenant_id: tenantId } }));
+Person.addScope('featured', { where: { is_featured: true } });
 
 // Apply single scope
 app.use(
-  '/users',
+  '/people',
   list(
-    User,
+    Person,
     {},
     {
-      scopes: ['active'], // Only show active users
+      scopes: ['active'], // Only show active people
     }
   )
 );
 
 // Apply multiple scopes (combined with AND logic)
 app.use(
-  '/users',
+  '/people',
   list(
-    User,
+    Person,
     {},
     {
-      scopes: ['active', 'featured'], // Only show active AND featured users
+      scopes: ['active', 'featured'], // Only show active AND featured people
     }
   )
 );
 
 // Apply parameterized scopes
 app.use(
-  '/users',
+  '/people',
   single(
-    User,
+    Person,
     {},
     {
       scopes: [
@@ -179,23 +179,23 @@ app.use(
 
 // Works with write operations to restrict which records can be modified
 app.use(
-  '/users',
+  '/people',
   update(
-    User,
+    Person,
     {},
     {
-      scopes: ['active'], // Only allow updates to active users (404 if inactive)
+      scopes: ['active'], // Only allow updates to active people (404 if inactive)
     }
   )
 );
 
 app.use(
-  '/users',
+  '/people',
   destroy(
-    User,
+    Person,
     {},
     {
-      scopes: ['byTenant', 'active'], // Only allow deletion of active users in tenant
+      scopes: ['byTenant', 'active'], // Only allow deletion of active people in tenant
     }
   )
 );
@@ -224,7 +224,7 @@ app.use(
         { name: 'byAccessLevel', args: [req.user.role] },
       ],
       attributes: ['id', 'title', 'created_at'],
-      include: [{ model: User, as: 'author', attributes: ['name'] }],
+      include: [{ model: Person, as: 'author', attributes: ['name'] }],
     }
   )
 );
@@ -635,6 +635,179 @@ Examples:
 - `GET /items?category:not_in=tools,vehicles` → not in set
 - `GET /items?name:ieq=alpha` → case-insensitive equality (matches `Alpha` and `alpha`)
 
+### Response Flattening
+
+The `list` and `search` operations support automatic flattening of included model attributes into the main response object. This feature allows you to expose selected attributes from associated models as if they were part of the main model, simplifying client-side data handling and enabling direct filtering and ordering on flattened fields.
+
+#### Configuration
+
+Configure flattening by passing a `flattening` option to `list` or `search`:
+
+```js
+app.use(
+  '/available-people',
+  list(
+    Person,
+    {
+      id_mapping: 'external_id',
+      flattening: {
+        model: PersonNames,
+        as: 'Names',
+        attributes: ['first_name', ['last_name', 'lname']],
+      },
+    },
+    {
+      scopes: ['api'],
+    }
+  )
+);
+```
+
+**Flattening Configuration:**
+
+- `model`: The Sequelize model to flatten (must match an included model)
+- `as`: The alias used in the include (must match exactly)
+- `attributes`: Array of attributes to flatten. Each item can be:
+  - A string: `'first_name'` → flattened as `first_name`
+  - An array: `['last_name', 'lname']` → flattened as `lname`
+
+#### Response Transformation
+
+Without flattening:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid-123",
+      "login": "john.doe@example.com",
+      "Names": {
+        "first_name": "John",
+        "last_name": "Doe"
+      }
+    }
+  ]
+}
+```
+
+With flattening:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "uuid-123",
+      "login": "john.doe@example.com",
+      "first_name": "John",
+      "lname": "Doe"
+    }
+  ]
+}
+```
+
+#### Filtering and Ordering on Flattened Fields
+
+Once configured, you can filter and order by flattened field names directly:
+
+```js
+// Filter by flattened fields
+GET /available-people?first_name=John
+GET /available-people?lname:icontains=doe
+GET /available-people?first_name=John&lname:starts_with=D
+
+// Order by flattened fields
+GET /available-people?api:order_by=lname
+GET /available-people?api:order_by=first_name,lname
+GET /available-people?api:order_by=-lname,first_name
+```
+
+#### Search API Support
+
+Flattening works seamlessly with the search API:
+
+```js
+app.use('/people/search', search(Person, {
+    flattening: {
+        model: PersonNames,
+        as: 'Names',
+        attributes: ['first_name', ['last_name', 'surname']]
+    }
+}));
+
+// POST /people/search
+{
+  "filtering": {
+    "first_name": { "icontains": "john" },
+    "surname": "smith"
+  },
+  "ordering": [
+    { "orderby": "surname", "direction": "ASC" },
+    { "orderby": "first_name", "direction": "ASC" }
+  ]
+}
+```
+
+#### Important Notes
+
+- **Include Requirement**: The flattened model must be included in your `modelOptions.include` or applied via scopes
+- **Subquery Disabling**: Flattening automatically disables subqueries to ensure proper JOIN behavior
+- **Validation**: apialize validates that the specified model and alias exist in your includes
+- **Performance**: Use flattening judiciously—it requires JOINs which may impact query performance on large datasets
+- **Attribute Conflicts**: If a flattened attribute name conflicts with a main model attribute, the flattened value takes precedence in filtering/ordering
+
+#### Complete Example
+
+```js
+// Models with associations
+const Person = sequelize.define('Person', {
+  id: { type: DataTypes.INTEGER, primaryKey: true },
+  external_id: { type: DataTypes.UUID, unique: true },
+  login: DataTypes.STRING,
+});
+
+const PersonNames = sequelize.define('PersonNames', {
+  id: { type: DataTypes.INTEGER, primaryKey: true },
+  person_id: DataTypes.INTEGER,
+  first_name: DataTypes.STRING,
+  last_name: DataTypes.STRING,
+});
+
+Person.hasMany(PersonNames, { foreignKey: 'person_id', as: 'Names' });
+
+// Scope with include
+Person.addScope('api', {
+  include: [
+    {
+      model: PersonNames,
+      as: 'Names',
+      attributes: ['last_name', 'first_name'],
+      required: true,
+    },
+  ],
+});
+
+// API endpoint with flattening
+router.use(
+  '/available-people',
+  list(
+    Person,
+    {
+      id_mapping: 'external_id',
+      flattening: {
+        model: PersonNames,
+        as: 'Names',
+        attributes: ['first_name', ['last_name', 'lname']],
+      },
+    },
+    {
+      scopes: ['api'],
+    }
+  )
+);
+```
+
 ---
 
 ## 6. Middleware and `req.apialize`
@@ -697,12 +870,12 @@ Validation is automatically enabled for `create`, `update`, and `patch` operatio
 const { create, update, patch } = require('apialize');
 
 // Validation is enabled by default - no configuration needed
-app.use('/users', create(User));
-app.use('/users', update(User));
-app.use('/users', patch(User));
+app.use('/people', create(Person));
+app.use('/people', update(Person));
+app.use('/people', patch(Person));
 
 // Or use crud for all operations
-app.use('/users', crud(User));
+app.use('/people', crud(Person));
 ```
 
 ### Disabling Validation
@@ -711,12 +884,12 @@ If you need to disable validation for specific operations, set `validate: false`
 
 ```js
 // Disable validation for create operations
-app.use('/users', create(User, { validate: false }));
+app.use('/people', create(Person, { validate: false }));
 
 // Disable validation for specific operations via crud
 app.use(
-  '/users',
-  crud(User, {
+  '/people',
+  crud(Person, {
     routes: {
       create: { validate: false },
       update: { validate: false },
@@ -730,7 +903,7 @@ app.use(
 Define validation rules in your Sequelize model as usual:
 
 ```js
-const User = sequelize.define('User', {
+const Person = sequelize.define('Person', {
   name: {
     type: DataTypes.STRING,
     allowNull: false,
@@ -1360,11 +1533,11 @@ app.use(
 
 ```js
 app.use(
-  '/users',
-  single(User, {
+  '/people',
+  single(Person, {
     pre: [
       async (ctx) => {
-        // Base fields for all users
+        // Base fields for all people
         const baseFields = ['id', 'name', 'email'];
         ctx.apialize.options.attributes = [...baseFields];
         return { role: ctx.req.user.role };
@@ -1533,7 +1706,7 @@ Request body shape:
 
 ```jsonc
 {
-  "filters": {
+  "filtering": {
     // implicit AND of keys when no boolean wrapper provided
     "and": [
       { "status": "active" },
@@ -1562,7 +1735,7 @@ app.use(
 );
 
 // POST /albums/search with filters on included model
-// { "filters": { "artist.name": { "icontains": "beethoven" } } }
+// { "filtering": { "artist.name": { "icontains": "beethoven" } } }
 ```
 
 Supported operators and boolean grouping work the same as for top‑level attributes. If a dotted path doesn’t match an included alias/attribute, the request returns `400 Bad request`.
@@ -1600,14 +1773,14 @@ Usage in search requests:
 ```js
 // POST /songs/search - Filter by artist.id using external_id
 {
-  "filters": {
+  "filtering": {
     "artist.id": "artist-beethoven"    // Uses artist.external_id
   }
 }
 
 // POST /songs/search - Complex filters with operators
 {
-  "filters": {
+  "filtering": {
     "album.id": {
       "in": ["album-symphony-5", "album-requiem"]  // Uses album.external_id
     }
@@ -1670,7 +1843,7 @@ app.use(
 
 // Filter by label name (default case-insensitive equality)
 // POST /albums/search
-// { "filters": { "artist.label.name": "warner" } }
+// { "filtering": { "artist.label.name": "warner" } }
 
 // Order by label desc, then artist asc, then title asc
 // POST /albums/search
@@ -1704,7 +1877,7 @@ Examples (operator-object form):
 
 ```jsonc
 {
-  "filters": {
+  "filtering": {
     "price": { "gte": 100, "lt": 500 },
     "status": { "neq": "archived" },
     "category": { "in": ["A", "B"] },
@@ -1721,7 +1894,7 @@ Boolean grouping:
 
 ```jsonc
 {
-  "filters": {
+  "filtering": {
     "and": [
       { "status": "active" },
       {
@@ -1736,7 +1909,7 @@ Multi-field substring search (OR across fields):
 
 ```jsonc
 {
-  "filters": {
+  "filtering": {
     "or": [
       { "name": { "icontains": "auto" } },
       { "category": { "icontains": "auto" } },
@@ -1769,17 +1942,17 @@ Options align with `list` where applicable: `defaultPageSize`, `defaultOrderBy`,
 
 ### Related model endpoints via `single()`
 
-`single(model, { related: [...] })` can mount child endpoints under a parent resource, e.g., `/users/:id/posts`.
+`single(model, { related: [...] })` can mount child endpoints under a parent resource, e.g., `/people/:id/posts`.
 
 Config per related item:
 
 ```js
-single(User, {
+single(Person, {
   related: [
     {
       model: Post, // required
       path: 'articles', // optional, overrides path derived from model name
-      foreignKey: 'user_id', // optional, default: `${parentModelName.toLowerCase()}_id`
+      foreignKey: 'person_id', // optional, default: `${parentModelName.toLowerCase()}_id`
       operations: ['list', 'get', 'post', 'put', 'patch', 'delete'], // choose explicitly (none enabled by default)
       options: {
         // base options forwarded into child helpers
@@ -1816,12 +1989,12 @@ Behavior:
 
 Examples:
 
-- `GET /users/:id/posts` → list posts for a user
-- `POST /users/:id/posts` → create a post for a user (FK auto‑injected)
-- `GET /users/:id/posts/:postId` → fetch one
-- `PUT /users/:id/posts/:postId` → update one
-- `PATCH /users/:id/posts/:postId` → patch one
-- `DELETE /users/:id/posts/:postId` → delete one
+- `GET /people/:id/posts` → list posts for a person
+- `POST /people/:id/posts` → create a post for a person (FK auto‑injected)
+- `GET /people/:id/posts/:postId` → fetch one
+- `PUT /people/:id/posts/:postId` → update one
+- `PATCH /people/:id/posts/:postId` → patch one
+- `DELETE /people/:id/posts/:postId` → delete one
 
 ---
 
@@ -1857,17 +2030,17 @@ Config shape for each member route:
 Examples:
 
 ```js
-// GET /users/:id/profile
+// GET /people/:id/profile
 app.use(
-  '/users',
-  single(User, {
+  '/people',
+  single(Person, {
     member_routes: [
       {
         path: 'profile',
         method: 'get',
         async handler(req) {
-          const user = req.apialize.record;
-          return { success: true, userName: user.name };
+          const person = req.apialize.record;
+          return { success: true, personName: person.name };
         },
       },
     ],
@@ -1896,8 +2069,8 @@ app.use(
 
 // Full verb coverage example in one go
 app.use(
-  '/users',
-  single(User, {
+  '/people',
+  single(Person, {
     member_routes: [
       { path: 'get-verb', method: 'get', handler: (req) => ({ ok: true }) },
       {

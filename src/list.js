@@ -28,6 +28,8 @@ const LIST_DEFAULTS = {
   pre: null,
   post: null,
   relation_id_mapping: null,
+  disableSubqueryOnIncludeRequest: true,
+  flattening: null,
 };
 
 function extractValidPage(query) {
@@ -77,12 +79,14 @@ function extractGlobalDirection(
   allowOrdering,
   defaultOrderDir
 ) {
-  let direction;
+  let direction = defaultOrderDir;
 
-  if (allowOrdering) {
-    direction = query['api:order_dir'] || modelCfg.orderdir || defaultOrderDir;
-  } else {
-    direction = modelCfg.orderdir || defaultOrderDir;
+  if (modelCfg.orderdir) {
+    direction = modelCfg.orderdir;
+  }
+
+  if (allowOrdering && query['api:order_dir']) {
+    direction = query['api:order_dir'];
   }
 
   return direction.toString().toUpperCase();
@@ -94,22 +98,18 @@ function parseOrderByField(field, globalDir) {
     return null;
   }
 
-  let columnName;
-  let direction;
+  const firstChar = trimmed.charAt(0);
+  let columnName = trimmed;
+  let direction = globalDir;
 
-  if (trimmed.charAt(0) === '-') {
+  if (firstChar === '-') {
     columnName = trimmed.slice(1);
     direction = 'DESC';
-  } else if (trimmed.charAt(0) === '+') {
+  } else if (firstChar === '+') {
     columnName = trimmed.slice(1);
     direction = 'ASC';
   } else {
-    columnName = trimmed;
-    if (globalDir === 'DESC') {
-      direction = 'DESC';
-    } else {
-      direction = 'ASC';
-    }
+    direction = globalDir === 'DESC' ? 'DESC' : 'ASC';
   }
 
   return {
@@ -202,6 +202,13 @@ function processFieldOperatorFilter(key, value, filtering) {
   filtering[fieldName][operator] = searchValue;
 }
 
+function isValidFilterKey(key, value) {
+  const isApiKey = key.startsWith('api:');
+  const hasUndefinedValue = value === undefined;
+
+  return !isApiKey && !hasUndefinedValue;
+}
+
 function setupFilteringParameters(query, allowFiltering) {
   const filtering = {};
 
@@ -214,14 +221,12 @@ function setupFilteringParameters(query, allowFiltering) {
     const key = queryKeys[i];
     const value = query[key];
 
-    if (key.startsWith('api:')) {
-      continue;
-    }
-    if (value === undefined) {
+    if (!isValidFilterKey(key, value)) {
       continue;
     }
 
-    if (key.includes(':')) {
+    const hasOperator = key.includes(':');
+    if (hasOperator) {
       processFieldOperatorFilter(key, value, filtering);
     } else {
       filtering[key] = value;
@@ -249,7 +254,23 @@ function convertListQueryToSearchBody(query, modelCfg, listOptions) {
 }
 
 function extractListOptions(options) {
-  return Object.assign({}, LIST_DEFAULTS, options);
+  const mergedOptions = {};
+  const defaultKeys = Object.keys(LIST_DEFAULTS);
+
+  for (let i = 0; i < defaultKeys.length; i++) {
+    const key = defaultKeys[i];
+    mergedOptions[key] = LIST_DEFAULTS[key];
+  }
+
+  if (options) {
+    const optionKeys = Object.keys(options);
+    for (let i = 0; i < optionKeys.length; i++) {
+      const key = optionKeys[i];
+      mergedOptions[key] = options[key];
+    }
+  }
+
+  return mergedOptions;
 }
 
 function extractIdMapping(mergedOptions) {
@@ -277,16 +298,25 @@ function createFilteringMiddleware(allowFiltering) {
 }
 
 function createSearchOptions(mergedOptions, idMapping) {
-  return {
-    defaultPageSize: mergedOptions.defaultPageSize,
-    defaultOrderBy: mergedOptions.defaultOrderBy,
-    defaultOrderDir: mergedOptions.defaultOrderDir,
-    metaShowOrdering: mergedOptions.metaShowOrdering,
-    id_mapping: idMapping,
-    relation_id_mapping: mergedOptions.relation_id_mapping,
-    pre: mergedOptions.pre,
-    post: mergedOptions.post,
-  };
+  const searchOptions = {};
+
+  searchOptions.defaultPageSize = mergedOptions.defaultPageSize;
+  searchOptions.defaultOrderBy = mergedOptions.defaultOrderBy;
+  searchOptions.defaultOrderDir = mergedOptions.defaultOrderDir;
+  searchOptions.metaShowOrdering = mergedOptions.metaShowOrdering;
+  searchOptions.id_mapping = idMapping;
+  searchOptions.relation_id_mapping = mergedOptions.relation_id_mapping;
+  searchOptions.disableSubqueryOnIncludeRequest =
+    mergedOptions.disableSubqueryOnIncludeRequest;
+  searchOptions.flattening = mergedOptions.flattening;
+  searchOptions.pre = mergedOptions.pre;
+  searchOptions.post = mergedOptions.post;
+
+  return searchOptions;
+}
+
+function isOperatorObject(value) {
+  return typeof value === 'object' && !Array.isArray(value) && value !== null;
 }
 
 function convertSearchFiltersToListFormat(searchBody) {
@@ -301,12 +331,12 @@ function convertSearchFiltersToListFormat(searchBody) {
     const key = filteringKeys[i];
     const value = searchBody.filtering[key];
 
-    if (typeof value === 'object' && !Array.isArray(value)) {
+    if (isOperatorObject(value)) {
       const valueKeys = Object.keys(value);
       for (let j = 0; j < valueKeys.length; j++) {
-        const op = valueKeys[j];
-        const val = value[op];
-        filters[`${key}:${op}`] = val;
+        const operator = valueKeys[j];
+        const operatorValue = value[operator];
+        filters[`${key}:${operator}`] = operatorValue;
       }
     } else {
       filters[key] = value;
@@ -327,71 +357,85 @@ function addListMetaFilters(
   }
 }
 
+function extractListConfiguration(options) {
+  const mergedOptions = extractListOptions(options);
+
+  return {
+    mergedOptions: mergedOptions,
+    middleware: mergedOptions.middleware,
+    allowFiltering: mergedOptions.allowFiltering,
+    allowOrdering: mergedOptions.allowOrdering,
+    metaShowFilters: mergedOptions.metaShowFilters,
+    metaShowOrdering: mergedOptions.metaShowOrdering,
+    defaultPageSize: mergedOptions.defaultPageSize,
+    defaultOrderBy: mergedOptions.defaultOrderBy,
+    defaultOrderDir: mergedOptions.defaultOrderDir,
+    id_mapping: mergedOptions.id_mapping,
+    relationIdMapping: mergedOptions.relation_id_mapping,
+    flattening: mergedOptions.flattening,
+    pre: mergedOptions.pre,
+    post: mergedOptions.post,
+  };
+}
+
+async function processListRequest(model, config, modelOptions, req, res) {
+  const query = req.query || {};
+  const modelConfiguration = (model && model.apialize) || {};
+
+  const searchBody = convertListQueryToSearchBody(
+    query,
+    modelConfiguration,
+    config.mergedOptions
+  );
+  const idMapping = extractIdMapping(config.mergedOptions);
+  const searchOptions = createSearchOptions(config.mergedOptions, idMapping);
+
+  const payload = await executeSearchOperation(
+    model,
+    searchOptions,
+    modelOptions,
+    req,
+    res,
+    searchBody
+  );
+
+  const shouldSendResponse = !res.headersSent && payload;
+  if (shouldSendResponse) {
+    addListMetaFilters(
+      payload,
+      searchBody,
+      config.metaShowFilters,
+      config.allowFiltering
+    );
+    res.json(payload);
+  }
+}
+
 function list(model, options, modelOptions) {
-  if (!options) {
-    options = {};
-  }
-  if (!modelOptions) {
-    modelOptions = {};
-  }
+  const safeOptions = options || {};
+  const safeModelOptions = modelOptions || {};
 
   ensureFn(model, 'findAndCountAll');
 
-  const mergedOptions = extractListOptions(options);
-  const middleware = mergedOptions.middleware;
-  const allowFiltering = mergedOptions.allowFiltering;
-  const allowOrdering = mergedOptions.allowOrdering;
-  const metaShowFilters = mergedOptions.metaShowFilters;
-  const metaShowOrdering = mergedOptions.metaShowOrdering;
-  const defaultPageSize = mergedOptions.defaultPageSize;
-  const defaultOrderBy = mergedOptions.defaultOrderBy;
-  const defaultOrderDir = mergedOptions.defaultOrderDir;
-  const id_mapping = mergedOptions.id_mapping;
-  const relationIdMapping = mergedOptions.relation_id_mapping;
-  const pre = mergedOptions.pre;
-  const post = mergedOptions.post;
-
-  const idMapping = extractIdMapping(mergedOptions);
-  const inline = filterMiddlewareFunctions(middleware);
+  const config = extractListConfiguration(safeOptions);
+  const idMapping = extractIdMapping(config.mergedOptions);
+  const inline = filterMiddlewareFunctions(config.middleware);
   const router = express.Router({ mergeParams: true });
-  const filteringMiddleware = createFilteringMiddleware(allowFiltering);
+  const filteringMiddleware = createFilteringMiddleware(config.allowFiltering);
 
-  router.get(
-    '/',
-    filteringMiddleware,
-    apializeContext,
-    ...inline,
-    asyncHandler(async (req, res) => {
-      const q = req.query || {};
-      const modelCfg = (model && model.apialize) || {};
+  const middlewareList = ['/', filteringMiddleware, apializeContext];
 
-      const searchBody = convertListQueryToSearchBody(
-        q,
-        modelCfg,
-        mergedOptions
-      );
-      const searchOptions = createSearchOptions(mergedOptions, idMapping);
+  for (let i = 0; i < inline.length; i++) {
+    middlewareList.push(inline[i]);
+  }
 
-      const payload = await executeSearchOperation(
-        model,
-        searchOptions,
-        modelOptions,
-        req,
-        res,
-        searchBody
-      );
+  const handler = asyncHandler(async (req, res) => {
+    await processListRequest(model, config, safeModelOptions, req, res);
+  });
 
-      if (!res.headersSent && payload) {
-        addListMetaFilters(
-          payload,
-          searchBody,
-          metaShowFilters,
-          allowFiltering
-        );
-        res.json(payload);
-      }
-    })
-  );
+  middlewareList.push(handler);
+
+  router.get.apply(router, middlewareList);
 
   router.apialize = {};
   return router;

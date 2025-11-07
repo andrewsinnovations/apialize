@@ -262,6 +262,25 @@ function sendBadRequestResponse(res, message) {
   res.status(400).json({ success: false, error: 'Bad request' });
 }
 
+function modelsMatch(mappingModel, foundModel) {
+  if (mappingModel === foundModel) {
+    return true;
+  }
+
+  const bothModelsExist = mappingModel && foundModel;
+  if (!bothModelsExist) {
+    return false;
+  }
+
+  const namesMatch = mappingModel.name === foundModel.name;
+  if (namesMatch) {
+    return true;
+  }
+
+  const tableNamesMatch = mappingModel.tableName === foundModel.tableName;
+  return tableNamesMatch;
+}
+
 function findRelationMapping(relationIdMapping, foundModel) {
   if (!Array.isArray(relationIdMapping)) {
     return null;
@@ -269,38 +288,128 @@ function findRelationMapping(relationIdMapping, foundModel) {
 
   for (let i = 0; i < relationIdMapping.length; i++) {
     const mapping = relationIdMapping[i];
-    if (mapping.model === foundModel) {
+    if (modelsMatch(mapping.model, foundModel)) {
       return mapping;
-    }
-    if (mapping.model && foundModel) {
-      if (mapping.model.name === foundModel.name) {
-        return mapping;
-      }
-      if (mapping.model.tableName === foundModel.tableName) {
-        return mapping;
-      }
     }
   }
   return null;
 }
 
 function buildIncludeChainForOrder(resolved) {
-  if (Array.isArray(resolved.includeChain)) {
+  const hasIncludeChain = Array.isArray(resolved.includeChain);
+
+  if (hasIncludeChain) {
     const chain = [];
     for (let i = 0; i < resolved.includeChain.length; i++) {
-      const c = resolved.includeChain[i];
-      chain.push({ model: c.model, as: c.as });
+      const includeItem = resolved.includeChain[i];
+      chain.push({ model: includeItem.model, as: includeItem.as });
     }
     return chain;
   }
 
   const parts = resolved.aliasPath.split('.');
+  const aliasName = parts.slice(0, -1).join('.') || parts[0];
+
   return [
     {
       model: resolved.foundModel,
-      as: parts.slice(0, -1).join('.') || parts[0],
+      as: aliasName,
     },
   ];
+}
+
+function applyIdMappingToAttribute(attr, relationIdMapping, foundModel) {
+  if (attr !== 'id') {
+    return attr;
+  }
+
+  const relationMapping = findRelationMapping(relationIdMapping, foundModel);
+  const hasMappedIdField = relationMapping && relationMapping.id_field;
+
+  return hasMappedIdField ? relationMapping.id_field : attr;
+}
+
+function buildOrderArrayFromResolved(resolved, attr, direction) {
+  const chain = buildIncludeChainForOrder(resolved);
+  const orderArray = [];
+
+  for (let i = 0; i < chain.length; i++) {
+    orderArray.push(chain[i]);
+  }
+
+  orderArray.push(attr);
+  orderArray.push(direction);
+
+  return orderArray;
+}
+
+function processFlattenedOrderField(
+  columnName,
+  direction,
+  model,
+  includes,
+  req,
+  res,
+  relationIdMapping,
+  flattening
+) {
+  const includePath = mapFlattenedFieldToIncludePath(columnName, flattening);
+  if (!includePath) {
+    return null;
+  }
+
+  const resolved = resolveIncludedAttribute(model, includes, includePath);
+  if (!resolved) {
+    const message = `[Apialize] Bad request: Flattened field '${columnName}' maps to invalid path '${includePath}' on model '${model.name}'. Query: ${req.originalUrl}`;
+    sendBadRequestResponse(res, message);
+    return false;
+  }
+
+  const parts = includePath.split('.');
+  const originalAttr = parts[parts.length - 1];
+  const mappedAttr = applyIdMappingToAttribute(
+    originalAttr,
+    relationIdMapping,
+    resolved.foundModel
+  );
+
+  return buildOrderArrayFromResolved(resolved, mappedAttr, direction);
+}
+
+function processIncludedOrderField(
+  columnName,
+  direction,
+  model,
+  includes,
+  req,
+  res,
+  relationIdMapping
+) {
+  const resolved = resolveIncludedAttribute(model, includes, columnName);
+  if (!resolved) {
+    const message = `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`;
+    sendBadRequestResponse(res, message);
+    return false;
+  }
+
+  const parts = columnName.split('.');
+  const originalAttr = parts[parts.length - 1];
+  const mappedAttr = applyIdMappingToAttribute(
+    originalAttr,
+    relationIdMapping,
+    resolved.foundModel
+  );
+
+  return buildOrderArrayFromResolved(resolved, mappedAttr, direction);
+}
+
+function processSimpleOrderField(columnName, direction, model, req, res) {
+  if (!validateColumnExists(model, columnName)) {
+    const message = `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`;
+    sendBadRequestResponse(res, message);
+    return false;
+  }
+  return [columnName, direction];
 }
 
 function processOrderField(
@@ -310,7 +419,8 @@ function processOrderField(
   includes,
   req,
   res,
-  relationIdMapping
+  relationIdMapping,
+  flattening
 ) {
   const parsedField = parseFieldDirection(field, globalDir);
   if (!parsedField) {
@@ -319,37 +429,35 @@ function processOrderField(
 
   const { columnName, direction } = parsedField;
 
-  if (columnName.includes('.')) {
-    const resolved = resolveIncludedAttribute(model, includes, columnName);
-    if (!resolved) {
-      const message = `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`;
-      sendBadRequestResponse(res, message);
-      return false;
-    }
-
-    const parts = columnName.split('.');
-    let attr = parts[parts.length - 1];
-
-    if (attr === 'id') {
-      const relationMapping = findRelationMapping(
-        relationIdMapping,
-        resolved.foundModel
-      );
-      if (relationMapping && relationMapping.id_field) {
-        attr = relationMapping.id_field;
-      }
-    }
-
-    const chain = buildIncludeChainForOrder(resolved);
-    return [...chain, attr, direction];
-  } else {
-    if (!validateColumnExists(model, columnName)) {
-      const message = `[Apialize] Bad request: Invalid order column '${columnName}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`;
-      sendBadRequestResponse(res, message);
-      return false;
-    }
-    return [columnName, direction];
+  const isFlattenedColumn =
+    flattening && isFlattenedField(columnName, flattening);
+  if (isFlattenedColumn) {
+    return processFlattenedOrderField(
+      columnName,
+      direction,
+      model,
+      includes,
+      req,
+      res,
+      relationIdMapping,
+      flattening
+    );
   }
+
+  const isIncludedColumn = columnName.includes('.');
+  if (isIncludedColumn) {
+    return processIncludedOrderField(
+      columnName,
+      direction,
+      model,
+      includes,
+      req,
+      res,
+      relationIdMapping
+    );
+  }
+
+  return processSimpleOrderField(columnName, direction, model, req, res);
 }
 
 function setupOrdering(
@@ -362,7 +470,8 @@ function setupOrdering(
   defaultOrderBy,
   defaultOrderDir,
   idMapping,
-  relationIdMapping
+  relationIdMapping,
+  flattening
 ) {
   const rawOrderBy = extractOrderByValue(query, modelCfg, allowOrdering);
   const globalDir = extractOrderDirection(query, modelCfg, allowOrdering);
@@ -385,7 +494,8 @@ function setupOrdering(
         includes,
         req,
         res,
-        relationIdMapping
+        relationIdMapping,
+        flattening
       );
       if (orderEntry === false) {
         return false;
@@ -477,13 +587,88 @@ function parseFilterKey(key) {
   return { rawKey, operator };
 }
 
+function shouldSkipFilterKey(key, value) {
+  const isApiKey = key.startsWith('api:');
+  const hasUndefinedValue = value === undefined;
+  return isApiKey || hasUndefinedValue;
+}
+
+function createOperatorMap(Op, CI, CInot) {
+  return {
+    eq: Op.eq,
+    '=': Op.eq,
+    ieq: CI,
+    neq: Op.ne,
+    '!=': Op.ne,
+    gt: Op.gt,
+    '>': Op.gt,
+    gte: Op.gte,
+    '>=': Op.gte,
+    lt: Op.lt,
+    '<': Op.lt,
+    lte: Op.lte,
+    '<=': Op.lte,
+    in: Op.in,
+    not_in: Op.notIn,
+    contains: Op.like,
+    icontains: CI,
+    not_contains: Op.notLike,
+    not_icontains: CInot,
+    starts_with: Op.like,
+    ends_with: Op.like,
+    not_starts_with: Op.notLike,
+    not_ends_with: Op.notLike,
+    is_true: Op.eq,
+    is_false: Op.eq,
+  };
+}
+
+function getOperatorValue(operator, value) {
+  if (operator === 'contains' || operator === 'not_contains') {
+    return `%${value}%`;
+  }
+  if (operator === 'icontains' || operator === 'not_icontains') {
+    return `%${value}%`;
+  }
+  if (operator === 'starts_with' || operator === 'not_starts_with') {
+    return `${value}%`;
+  }
+  if (operator === 'ends_with' || operator === 'not_ends_with') {
+    return `%${value}`;
+  }
+  if (operator === 'is_true') {
+    return true;
+  }
+  if (operator === 'is_false') {
+    return false;
+  }
+  if (operator === 'in' || operator === 'not_in') {
+    return String(value)
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+  }
+  return value;
+}
+
+function isStringType(attribute) {
+  if (!attribute || !attribute.type || !attribute.type.constructor) {
+    return false;
+  }
+
+  const typeName = String(attribute.type.constructor.name).toLowerCase();
+  const stringTypes = ['string', 'text', 'char', 'varchar'];
+  return stringTypes.includes(typeName);
+}
+
 function setupFiltering(
   req,
   res,
   model,
   query,
   allowFiltering,
-  relationIdMapping
+  relationIdMapping,
+  flattening
 ) {
   let appliedFiltersMeta = {};
   let appliedFiltersDb = {};
@@ -496,15 +681,147 @@ function setupFiltering(
   const Op = getSequelizeOp(model);
   const dialect = getDatabaseDialect(model);
   const { CI, CInot } = getCaseInsensitiveOperators(Op, dialect);
+  const opMap = createOperatorMap(Op, CI, CInot);
 
-  function shouldSkipFilterKey(key, value) {
-    if (key.startsWith('api:')) {
-      return true;
+  function processFlattenedFilterField(
+    rawKey,
+    flattening,
+    model,
+    includes,
+    req,
+    res
+  ) {
+    const includePath = mapFlattenedFieldToIncludePath(rawKey, flattening);
+    if (!includePath) {
+      return null;
     }
-    if (value === undefined) {
-      return true;
+
+    const resolved = resolveIncludedAttribute(model, includes, includePath);
+    if (!resolved) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(
+          `[Apialize] Bad request: Flattened field '${rawKey}' maps to invalid path '${includePath}' on model '${model.name}'. Query: ${req.originalUrl}`
+        );
+      }
+      res.status(400).json({ success: false, error: 'Bad request' });
+      return false;
     }
-    return false;
+
+    return {
+      outKey: `$${resolved.aliasPath}$`,
+      attribute: resolved.attribute,
+      targetModel: resolved.foundModel,
+    };
+  }
+
+  function buildMappedAliasPath(resolved, actualColumn) {
+    const aliasPrefix = resolved.aliasPath.split('.').slice(0, -1).join('.');
+    return aliasPrefix ? `${aliasPrefix}.${actualColumn}` : actualColumn;
+  }
+
+  function processIncludedFilterField(
+    rawKey,
+    model,
+    includes,
+    relationIdMapping,
+    req,
+    res
+  ) {
+    const resolved = resolveIncludedAttribute(model, includes, rawKey);
+    if (!resolved) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(
+          `[Apialize] Bad request: Invalid filter column '${rawKey}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`
+        );
+      }
+      res.status(400).json({ success: false, error: 'Bad request' });
+      return false;
+    }
+
+    const parts = rawKey.split('.');
+    const originalColumn = parts[parts.length - 1];
+
+    const needsIdMapping =
+      originalColumn === 'id' && Array.isArray(relationIdMapping);
+    if (needsIdMapping) {
+      const relationMapping = relationIdMapping.find((mapping) => {
+        return modelsMatch(mapping.model, resolved.foundModel);
+      });
+
+      const hasMappedIdField = relationMapping && relationMapping.id_field;
+      if (hasMappedIdField) {
+        const actualColumn = relationMapping.id_field;
+        const newAliasPath = buildMappedAliasPath(resolved, actualColumn);
+        const attrs = getModelAttributes(resolved.foundModel);
+
+        return {
+          outKey: `$${newAliasPath}$`,
+          attribute: attrs && attrs[actualColumn],
+          targetModel: resolved.foundModel,
+        };
+      }
+    }
+
+    return {
+      outKey: `$${resolved.aliasPath}$`,
+      attribute: resolved.attribute,
+      targetModel: resolved.foundModel,
+    };
+  }
+
+  function processSimpleFilterField(rawKey, model, req, res) {
+    if (!validateColumnExists(model, rawKey)) {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn(
+          `[Apialize] Bad request: Invalid filter column '${rawKey}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`
+        );
+      }
+      res.status(400).json({ success: false, error: 'Bad request' });
+      return false;
+    }
+
+    return {
+      outKey: rawKey,
+      attribute: getModelAttributes(model)[rawKey],
+      targetModel: model,
+    };
+  }
+
+  function resolveFilterField(
+    rawKey,
+    model,
+    includes,
+    relationIdMapping,
+    flattening,
+    req,
+    res
+  ) {
+    const isFlattenedColumn =
+      flattening && isFlattenedField(rawKey, flattening);
+    if (isFlattenedColumn) {
+      return processFlattenedFilterField(
+        rawKey,
+        flattening,
+        model,
+        includes,
+        req,
+        res
+      );
+    }
+
+    const isIncludedColumn = rawKey.includes('.');
+    if (isIncludedColumn) {
+      return processIncludedFilterField(
+        rawKey,
+        model,
+        includes,
+        relationIdMapping,
+        req,
+        res
+      );
+    }
+
+    return processSimpleFilterField(rawKey, model, req, res);
   }
 
   const queryKeys = Object.keys(query);
@@ -516,134 +833,82 @@ function setupFiltering(
       continue;
     }
 
-    let targetModel = model;
     const { rawKey, operator } = parseFilterKey(key);
-    let outKey = rawKey;
-    let attribute;
+    const fieldInfo = resolveFilterField(
+      rawKey,
+      model,
+      includes,
+      relationIdMapping,
+      flattening,
+      req,
+      res
+    );
 
-    if (rawKey.includes('.')) {
-      const resolved = resolveIncludedAttribute(model, includes, rawKey);
-      if (!resolved) {
+    if (fieldInfo === false) {
+      return false;
+    }
+
+    if (!fieldInfo) {
+      continue;
+    }
+
+    const { outKey, attribute, targetModel } = fieldInfo;
+
+    function validateFilterValue(
+      attribute,
+      value,
+      rawKey,
+      targetModel,
+      req,
+      res
+    ) {
+      const hasAttributeType = attribute && attribute.type;
+      const isValidType = hasAttributeType
+        ? validateDataType({ rawAttributes: { tmp: attribute } }, 'tmp', value)
+        : true;
+
+      if (!isValidType) {
         if (process.env.NODE_ENV === 'development') {
+          const modelName =
+            targetModel && targetModel.name ? targetModel.name : 'Model';
           console.warn(
-            `[Apialize] Bad request: Invalid filter column '${rawKey}' does not exist on model '${model.name}' or its includes. Query: ${req.originalUrl}`
+            `[Apialize] Bad request: Invalid filter value '${value}' is not compatible with column '${rawKey}' data type on model '${modelName}'. Query: ${req.originalUrl}`
           );
         }
         res.status(400).json({ success: false, error: 'Bad request' });
         return false;
       }
-
-      // Apply relation_id_mapping if configured and the column is 'id'
-      const parts = rawKey.split('.');
-      let actualColumn = parts[parts.length - 1];
-      if (actualColumn === 'id' && Array.isArray(relationIdMapping)) {
-        const relationMapping = relationIdMapping.find((mapping) => {
-          // Compare models by name, tableName, or reference equality
-          if (mapping.model === resolved.foundModel) return true;
-          if (mapping.model && resolved.foundModel) {
-            // Compare by model name
-            if (mapping.model.name === resolved.foundModel.name) return true;
-            // Compare by table name as fallback
-            if (mapping.model.tableName === resolved.foundModel.tableName)
-              return true;
-          }
-          return false;
-        });
-        if (relationMapping && relationMapping.id_field) {
-          actualColumn = relationMapping.id_field;
-          // Update the alias path to use the mapped field
-          const aliasPrefix = resolved.aliasPath
-            .split('.')
-            .slice(0, -1)
-            .join('.');
-          const newAliasPath = aliasPrefix
-            ? `${aliasPrefix}.${actualColumn}`
-            : actualColumn;
-          outKey = `$${newAliasPath}$`;
-          // Update attribute for the mapped field
-          const attrs = getModelAttributes(resolved.foundModel);
-          attribute = attrs && attrs[actualColumn];
-        } else {
-          outKey = `$${resolved.aliasPath}$`;
-          attribute = resolved.attribute;
-        }
-      } else {
-        outKey = `$${resolved.aliasPath}$`;
-        attribute = resolved.attribute;
-      }
-      targetModel = resolved.foundModel;
-    } else {
-      if (!validateColumnExists(model, rawKey)) {
-        if (process.env.NODE_ENV === 'development') {
-          console.warn(
-            `[Apialize] Bad request: Invalid filter column '${rawKey}' does not exist on model '${model.name}'. Query: ${req.originalUrl}`
-          );
-        }
-        res.status(400).json({ success: false, error: 'Bad request' });
-        return false; // Indicate validation failed
-      }
-      attribute = getModelAttributes(model)[rawKey];
+      return true;
     }
 
-    const okType =
-      attribute && attribute.type
-        ? validateDataType({ rawAttributes: { tmp: attribute } }, 'tmp', value)
-        : true;
-    if (!okType) {
-      if (process.env.NODE_ENV === 'development') {
-        console.warn(
-          `[Apialize] Bad request: Invalid filter value '${value}' is not compatible with column '${rawKey}' data type on model '${targetModel && targetModel.name ? targetModel.name : 'Model'}'. Query: ${req.originalUrl}`
-        );
-      }
-      res.status(400).json({ success: false, error: 'Bad request' });
-      return false; // Indicate validation failed
-    }
-
-    // If no operator provided, default to equality (case-insensitive for strings)
-    if (!operator) {
-      const typeName =
-        attribute && attribute.type && attribute.type.constructor
-          ? String(attribute.type.constructor.name).toLowerCase()
-          : null;
-      if (
-        typeName &&
-        ['string', 'text', 'char', 'varchar'].includes(typeName)
-      ) {
+    function applyDefaultEqualityFilter(
+      outKey,
+      value,
+      attribute,
+      CI,
+      appliedFiltersMeta,
+      appliedFiltersDb
+    ) {
+      if (isStringType(attribute)) {
         appliedFiltersMeta[outKey] = value;
         appliedFiltersDb[outKey] = { [CI]: value };
       } else {
         appliedFiltersMeta[outKey] = value;
         appliedFiltersDb[outKey] = value;
       }
-    } else {
-      // Map operator to Sequelize operator
-      const opMap = {
-        eq: Op.eq,
-        '=': Op.eq,
-        ieq: CI,
-        neq: Op.ne,
-        '!=': Op.ne,
-        gt: Op.gt,
-        '>': Op.gt,
-        gte: Op.gte,
-        '>=': Op.gte,
-        lt: Op.lt,
-        '<': Op.lt,
-        lte: Op.lte,
-        '<=': Op.lte,
-        in: Op.in,
-        not_in: Op.notIn,
-        contains: Op.like,
-        icontains: CI,
-        not_contains: Op.notLike,
-        not_icontains: CInot,
-        starts_with: Op.like,
-        ends_with: Op.like,
-        not_starts_with: Op.notLike,
-        not_ends_with: Op.notLike,
-        is_true: Op.eq,
-        is_false: Op.eq,
-      };
+    }
+
+    function applyOperatorFilter(
+      outKey,
+      operator,
+      value,
+      opMap,
+      appliedFiltersMeta,
+      appliedFiltersDb,
+      rawKey,
+      req,
+      res
+    ) {
       if (!Object.prototype.hasOwnProperty.call(opMap, operator)) {
         if (process.env.NODE_ENV === 'development') {
           console.warn(
@@ -653,53 +918,92 @@ function setupFiltering(
         res.status(400).json({ success: false, error: 'Bad request' });
         return false;
       }
-      const opSymbol = opMap[operator];
-      let opValue;
-      if (operator === 'contains' || operator === 'not_contains')
-        opValue = `%${value}%`;
-      else if (operator === 'icontains' || operator === 'not_icontains')
-        opValue = `%${value}%`;
-      else if (operator === 'starts_with' || operator === 'not_starts_with')
-        opValue = `${value}%`;
-      else if (operator === 'ends_with' || operator === 'not_ends_with')
-        opValue = `%${value}`;
-      else if (operator === 'is_true') opValue = true;
-      else if (operator === 'is_false') opValue = false;
-      else if (operator === 'in' || operator === 'not_in') {
-        // Split comma-separated values; trim spaces
-        opValue = String(value)
-          .split(',')
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0);
-      } else {
-        opValue = value;
-      }
 
-      // Meta: reflect the operator application (symbol keys are fine for internal meta consumers)
-      appliedFiltersMeta[outKey] = Object.assign(
-        {},
-        appliedFiltersMeta[outKey] || {},
-        { [opSymbol]: opValue }
+      const opSymbol = opMap[operator];
+      const opValue = getOperatorValue(operator, value);
+
+      const existingMeta = appliedFiltersMeta[outKey] || {};
+      const existingDb = appliedFiltersDb[outKey] || {};
+
+      const newMeta = {};
+      const metaKeys = Object.keys(existingMeta);
+      for (let i = 0; i < metaKeys.length; i++) {
+        const key = metaKeys[i];
+        newMeta[key] = existingMeta[key];
+      }
+      newMeta[opSymbol] = opValue;
+
+      const newDb = {};
+      const dbKeys = Object.keys(existingDb);
+      for (let i = 0; i < dbKeys.length; i++) {
+        const key = dbKeys[i];
+        newDb[key] = existingDb[key];
+      }
+      newDb[opSymbol] = opValue;
+
+      appliedFiltersMeta[outKey] = newMeta;
+      appliedFiltersDb[outKey] = newDb;
+
+      return true;
+    }
+
+    if (!validateFilterValue(attribute, value, rawKey, targetModel, req, res)) {
+      return false;
+    }
+
+    if (!operator) {
+      applyDefaultEqualityFilter(
+        outKey,
+        value,
+        attribute,
+        CI,
+        appliedFiltersMeta,
+        appliedFiltersDb
       );
-      appliedFiltersDb[outKey] = Object.assign(
-        {},
-        appliedFiltersDb[outKey] || {},
-        { [opSymbol]: opValue }
-      );
+    } else {
+      if (
+        !applyOperatorFilter(
+          outKey,
+          operator,
+          value,
+          opMap,
+          appliedFiltersMeta,
+          appliedFiltersDb,
+          rawKey,
+          req,
+          res
+        )
+      ) {
+        return false;
+      }
     }
   }
 
-  if (Object.keys(appliedFiltersDb).length) {
+  function mergeFiltersIntoWhere(appliedFiltersDb, req) {
+    const hasFiltersToApply = Object.keys(appliedFiltersDb).length > 0;
+    if (!hasFiltersToApply) {
+      return;
+    }
+
     const existingWhere = req.apialize.options.where || {};
-    const mergedWhere = Object.assign({}, existingWhere);
+    const mergedWhere = {};
+
+    const existingKeys = Object.keys(existingWhere);
+    for (let i = 0; i < existingKeys.length; i++) {
+      const key = existingKeys[i];
+      mergedWhere[key] = existingWhere[key];
+    }
+
     const appliedKeys = Object.keys(appliedFiltersDb);
     for (let i = 0; i < appliedKeys.length; i++) {
-      const k = appliedKeys[i];
-      mergedWhere[k] = appliedFiltersDb[k];
+      const key = appliedKeys[i];
+      mergedWhere[key] = appliedFiltersDb[key];
     }
+
     req.apialize.options.where = mergedWhere;
   }
 
+  mergeFiltersIntoWhere(appliedFiltersDb, req);
   return appliedFiltersMeta;
 }
 
@@ -736,22 +1040,24 @@ async function buildResponse(
   allowFiltering,
   req,
   idMapping,
-  normalizeRows
+  normalizeRows,
+  flattening
 ) {
   const rows = convertResultRowsToPlainObjects(result.rows);
   const normFn = normalizeRows || createDefaultNormalizeFunction();
-  const normalizedRows = await normFn(rows, idMapping);
+  let normalizedRows = await normFn(rows, idMapping);
+
+  // Apply flattening if configured
+  if (flattening) {
+    normalizedRows = flattenResponseData(normalizedRows, flattening);
+  }
+
   const totalPages = Math.max(1, Math.ceil(result.count / pageSize));
 
   function cleanFieldName(field) {
-    if (
-      typeof field === 'string' &&
-      field.startsWith('$') &&
-      field.endsWith('$')
-    ) {
-      return field.slice(1, -1);
-    }
-    return field;
+    const isWrappedField =
+      typeof field === 'string' && field.startsWith('$') && field.endsWith('$');
+    return isWrappedField ? field.slice(1, -1) : field;
   }
 
   function findLastStringIndex(orderArray) {
@@ -766,9 +1072,10 @@ async function buildResponse(
   function extractAliasesFromOrderArray(orderArray, attrIndex) {
     const aliases = [];
     for (let k = 0; k < attrIndex; k++) {
-      const seg = orderArray[k];
-      if (seg && typeof seg === 'object' && seg.as) {
-        aliases.push(seg.as);
+      const segment = orderArray[k];
+      const hasAlias = segment && typeof segment === 'object' && segment.as;
+      if (hasAlias) {
+        aliases.push(segment.as);
       }
     }
     return aliases;
@@ -776,31 +1083,36 @@ async function buildResponse(
 
   function processOrderArrayEntry(orderEntry) {
     if (Array.isArray(orderEntry)) {
-      const dir = (orderEntry[orderEntry.length - 1] || 'ASC')
+      const direction = (orderEntry[orderEntry.length - 1] || 'ASC')
         .toString()
         .toUpperCase();
       const attrIndex = findLastStringIndex(orderEntry);
 
       if (attrIndex === 0) {
         const field = cleanFieldName(orderEntry[0]);
-        return [field, dir];
-      } else if (attrIndex > 0) {
+        return [field, direction];
+      }
+
+      if (attrIndex > 0) {
         const attr = orderEntry[attrIndex];
         const aliases = extractAliasesFromOrderArray(orderEntry, attrIndex);
         const field = aliases.length ? `${aliases.join('.')}.${attr}` : attr;
-        return [field, dir];
-      } else {
-        return orderEntry;
+        return [field, direction];
       }
-    } else if (typeof orderEntry === 'string') {
-      return [orderEntry, 'ASC'];
-    } else {
+
       return orderEntry;
     }
+
+    if (typeof orderEntry === 'string') {
+      return [orderEntry, 'ASC'];
+    }
+
+    return orderEntry;
   }
 
   function buildOrderOutput(req) {
-    if (!Array.isArray(req.apialize.options.order)) {
+    const hasOrder = Array.isArray(req.apialize.options.order);
+    if (!hasOrder) {
       return [];
     }
 
@@ -811,11 +1123,6 @@ async function buildResponse(
       orderOut.push(processedEntry);
     }
     return orderOut;
-  }
-
-  let orderOut;
-  if (metaShowOrdering) {
-    orderOut = buildOrderOutput(req);
   }
 
   function buildMetaObject(
@@ -841,16 +1148,13 @@ async function buildResponse(
     }
 
     if (metaShowFilters) {
-      if (allowFiltering) {
-        meta.filters = appliedFilters;
-      } else {
-        meta.filters = {};
-      }
+      meta.filters = allowFiltering ? appliedFilters : {};
     }
 
     return meta;
   }
 
+  const orderOut = metaShowOrdering ? buildOrderOutput(req) : undefined;
   const meta = buildMetaObject(
     page,
     pageSize,
@@ -870,6 +1174,163 @@ async function buildResponse(
   };
 }
 
+function validateFlatteningConfig(flattening, model, includes) {
+  if (!flattening) {
+    return { isValid: true };
+  }
+
+  if (!flattening.model || !flattening.as) {
+    return {
+      isValid: false,
+      error: 'Flattening config must specify model and as',
+    };
+  }
+
+  // Check if the specified alias exists in includes
+  const includeFound = findIncludeByAlias(includes, flattening.as);
+  if (!includeFound) {
+    return {
+      isValid: false,
+      error: `Flattening alias '${flattening.as}' not found in includes`,
+    };
+  }
+
+  // Validate that the model matches
+  if (includeFound.model !== flattening.model) {
+    return {
+      isValid: false,
+      error: `Flattening model does not match included model for alias '${flattening.as}'`,
+    };
+  }
+
+  return { isValid: true, includeFound };
+}
+
+function buildFlatteningAttributeMap(flattening) {
+  if (!flattening || !flattening.attributes) {
+    return {};
+  }
+
+  const attributeMap = {};
+  for (let i = 0; i < flattening.attributes.length; i++) {
+    const attr = flattening.attributes[i];
+    if (typeof attr === 'string') {
+      // Simple string attribute
+      attributeMap[attr] = attr;
+    } else if (Array.isArray(attr) && attr.length === 2) {
+      // Array format: [sourceAttribute, targetAlias]
+      attributeMap[attr[0]] = attr[1];
+    }
+  }
+  return attributeMap;
+}
+
+function isFlattenedField(field, flattening) {
+  if (!flattening || !field) {
+    return false;
+  }
+
+  const attributeMap = buildFlatteningAttributeMap(flattening);
+
+  // Check if field matches any target alias or source attribute
+  return (
+    Object.values(attributeMap).includes(field) ||
+    Object.keys(attributeMap).includes(field)
+  );
+}
+
+function mapFlattenedFieldToIncludePath(field, flattening) {
+  if (!flattening || !field) {
+    return null;
+  }
+
+  const attributeMap = buildFlatteningAttributeMap(flattening);
+
+  // If field is a target alias, find the source attribute
+  for (const [sourceAttr, targetAlias] of Object.entries(attributeMap)) {
+    if (targetAlias === field) {
+      return `${flattening.as}.${sourceAttr}`;
+    }
+  }
+
+  // If field is a source attribute
+  if (attributeMap[field]) {
+    return `${flattening.as}.${field}`;
+  }
+
+  return null;
+}
+
+function getIncludedDataForFlattening(rowData, alias) {
+  if (!rowData[alias]) {
+    return null;
+  }
+
+  let includedData = rowData[alias];
+
+  const isArrayData = Array.isArray(includedData);
+  if (isArrayData) {
+    const hasItems = includedData.length > 0;
+    includedData = hasItems ? includedData[0] : null;
+  }
+
+  return includedData;
+}
+
+function applyAttributeMapping(flattenedRow, includedData, attributeMap) {
+  const attributeEntries = Object.entries(attributeMap);
+
+  for (let i = 0; i < attributeEntries.length; i++) {
+    const [sourceAttr, targetField] = attributeEntries[i];
+    const hasSourceAttribute = includedData.hasOwnProperty(sourceAttr);
+
+    if (hasSourceAttribute) {
+      flattenedRow[targetField] = includedData[sourceAttr];
+    }
+  }
+}
+
+function flattenSingleRow(row, attributeMap, alias) {
+  if (!row || typeof row !== 'object') {
+    return row;
+  }
+
+  const flattenedRow = {};
+  const rowKeys = Object.keys(row);
+
+  for (let i = 0; i < rowKeys.length; i++) {
+    const key = rowKeys[i];
+    flattenedRow[key] = row[key];
+  }
+
+  const includedData = getIncludedDataForFlattening(row, alias);
+
+  if (includedData && typeof includedData === 'object') {
+    applyAttributeMapping(flattenedRow, includedData, attributeMap);
+  }
+
+  delete flattenedRow[alias];
+  return flattenedRow;
+}
+
+function flattenResponseData(rows, flattening) {
+  if (!flattening || !Array.isArray(rows)) {
+    return rows;
+  }
+
+  const attributeMap = buildFlatteningAttributeMap(flattening);
+  const alias = flattening.as;
+
+  const flattenedRows = [];
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const flattenedRow = flattenSingleRow(row, attributeMap, alias);
+    flattenedRows.push(flattenedRow);
+  }
+
+  return flattenedRows;
+}
+
 module.exports = {
   getModelAttributes,
   validateColumnExists,
@@ -879,4 +1340,9 @@ module.exports = {
   setupOrdering,
   setupFiltering,
   buildResponse,
+  validateFlatteningConfig,
+  buildFlatteningAttributeMap,
+  isFlattenedField,
+  mapFlattenedFieldToIncludePath,
+  flattenResponseData,
 };
