@@ -2,6 +2,93 @@ const utils = require('./utils');
 const { createHelpers } = require('./contextHelpers');
 const defaultNotFound = utils.defaultNotFound;
 
+function isValidModelOptions(modelOptions) {
+  const hasModelOptions = modelOptions && typeof modelOptions === 'object';
+  return hasModelOptions;
+}
+
+function convertScopeToSequelizeFormat(scope) {
+  const isStringScope = typeof scope === 'string';
+  if (isStringScope) {
+    return scope;
+  }
+
+  const isObjectScope = scope && typeof scope === 'object' && scope.name;
+  if (isObjectScope) {
+    const hasArgs = scope.args;
+    if (hasArgs) {
+      return { method: [scope.name, ...scope.args] };
+    }
+    return scope.name;
+  }
+
+  return scope;
+}
+
+function convertScopesToSequelizeFormat(scopes) {
+  const scopesToApply = [];
+
+  for (let i = 0; i < scopes.length; i++) {
+    const scope = scopes[i];
+    const convertedScope = convertScopeToSequelizeFormat(scope);
+    scopesToApply.push(convertedScope);
+  }
+
+  return scopesToApply;
+}
+
+function applyScopesToModel(effectiveModel, scopes) {
+  const hasScopes = scopes && Array.isArray(scopes);
+  if (!hasScopes) {
+    return effectiveModel;
+  }
+
+  try {
+    const scopesToApply = convertScopesToSequelizeFormat(scopes);
+    return effectiveModel.scope(scopesToApply);
+  } catch (error) {
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    if (isDevelopment) {
+      console.warn(
+        `[Apialize] Failed to apply scopes ${JSON.stringify(scopes)}: ${error.message}`
+      );
+    }
+    throw error;
+  }
+}
+
+function applySchemaToModel(effectiveModel, schema) {
+  const hasSchema = schema && typeof schema === 'string';
+  if (!hasSchema) {
+    return effectiveModel;
+  }
+
+  try {
+    return effectiveModel.schema(schema);
+  } catch (error) {
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    if (isDevelopment) {
+      console.warn(
+        `[Apialize] Failed to apply schema '${schema}': ${error.message}`
+      );
+    }
+    return effectiveModel;
+  }
+}
+
+function applyEndpointConfiguration(model, modelOptions) {
+  const hasValidOptions = isValidModelOptions(modelOptions);
+  if (!hasValidOptions) {
+    return model;
+  }
+
+  let effectiveModel = model;
+  effectiveModel = applyScopesToModel(effectiveModel, modelOptions.scopes);
+  effectiveModel = applySchemaToModel(effectiveModel, modelOptions.schema);
+
+  return effectiveModel;
+}
+
 function createBaseContext(params) {
   const ctx = {};
   ctx.req = params.req;
@@ -11,15 +98,36 @@ function createBaseContext(params) {
   ctx.options = params.options;
   ctx.modelOptions = params.modelOptions;
   ctx.idMapping = params.idMapping;
-  ctx.transaction = null;
+  // For read-only operations executed via withHooksOnly, tests expect transaction to be undefined.
+  // It will be populated (non-undefined) explicitly when a real Sequelize transaction starts.
+  ctx.transaction = undefined;
   ctx.preResult = undefined;
   ctx.payload = null;
 
-  if (params.req && params.req.apialize) {
+  const hasApializeContext = params.req && params.req.apialize;
+  if (hasApializeContext) {
     ctx.apialize = params.req.apialize;
   }
 
   return ctx;
+}
+
+function createContextHelpers(req, model) {
+  const hasModel = model;
+  if (hasModel) {
+    return createHelpers(req, model);
+  }
+  return createHelpers(req);
+}
+
+function attachHelpersToObjects(helpers, req, ctx) {
+  const helperKeys = Object.keys(helpers);
+
+  for (let i = 0; i < helperKeys.length; i++) {
+    const key = helperKeys[i];
+    req.apialize[key] = helpers[key];
+    ctx[key] = helpers[key];
+  }
 }
 
 function addHelpersToContext(ctx, params) {
@@ -28,17 +136,8 @@ function addHelpersToContext(ctx, params) {
     return;
   }
 
-  const hasModel = params.model;
-  const helpers = hasModel
-    ? createHelpers(params.req, params.model)
-    : createHelpers(params.req);
-
-  const helperKeys = Object.keys(helpers);
-  for (let i = 0; i < helperKeys.length; i++) {
-    const key = helperKeys[i];
-    params.req.apialize[key] = helpers[key];
-    ctx[key] = helpers[key];
-  }
+  const helpers = createContextHelpers(params.req, params.model);
+  attachHelpersToObjects(helpers, params.req, ctx);
 }
 
 function buildContext(params) {
@@ -60,31 +159,48 @@ function hasSequelize(model) {
   return true;
 }
 
+function copyOwnProperties(sourceObject, targetObject) {
+  const sourceKeys = Object.keys(sourceObject);
+
+  for (let i = 0; i < sourceKeys.length; i++) {
+    const key = sourceKeys[i];
+    targetObject[key] = sourceObject[key];
+  }
+}
+
 function optionsWithTransaction(opts, t) {
-  if (!t) {
+  const hasTransaction = t;
+  if (!hasTransaction) {
     return opts || {};
   }
 
   const result = {};
-  if (opts) {
-    const optionKeys = Object.keys(opts);
-    for (let i = 0; i < optionKeys.length; i++) {
-      const key = optionKeys[i];
-      result[key] = opts[key];
-    }
+  const hasOptions = opts;
+  if (hasOptions) {
+    copyOwnProperties(opts, result);
   }
 
   result.transaction = t;
   return result;
 }
 
+function canRollbackTransaction(transaction) {
+  const hasTransaction = transaction;
+  const hasRollbackMethod =
+    hasTransaction && typeof transaction.rollback === 'function';
+  return hasRollbackMethod;
+}
+
 async function rollbackTransaction(transaction) {
-  if (transaction && typeof transaction.rollback === 'function') {
-    try {
-      await transaction.rollback();
-    } catch (error) {
-      // Ignore rollback errors
-    }
+  const canRollback = canRollbackTransaction(transaction);
+  if (!canRollback) {
+    return;
+  }
+
+  try {
+    await transaction.rollback();
+  } catch (error) {
+    // Intentionally ignore rollback errors
   }
 }
 
@@ -102,32 +218,39 @@ async function notFoundWithRollback(context) {
   return defaultNotFound(context.res);
 }
 
+function isValidRowForNormalization(row) {
+  const hasRow = row && typeof row === 'object';
+  return hasRow;
+}
+
+function needsIdMapping(idMapping) {
+  const hasIdMapping = idMapping && idMapping !== 'id';
+  return hasIdMapping;
+}
+
+function rowHasIdMappingProperty(row, idMapping) {
+  const hasProperty = Object.prototype.hasOwnProperty.call(row, idMapping);
+  return hasProperty;
+}
+
 function normalizeId(row, idMapping) {
-  const isInvalidRow = !row || typeof row !== 'object';
-  if (isInvalidRow) {
+  const isValidRow = isValidRowForNormalization(row);
+  if (!isValidRow) {
     return row;
   }
 
-  const noMappingNeeded = !idMapping || idMapping === 'id';
-  if (noMappingNeeded) {
+  const shouldMapId = needsIdMapping(idMapping);
+  if (!shouldMapId) {
     return row;
   }
 
-  const hasIdMappingProperty = Object.prototype.hasOwnProperty.call(
-    row,
-    idMapping
-  );
-  if (!hasIdMappingProperty) {
+  const hasIdProperty = rowHasIdMappingProperty(row, idMapping);
+  if (!hasIdProperty) {
     return row;
   }
 
   const normalizedRow = {};
-  const rowKeys = Object.keys(row);
-
-  for (let i = 0; i < rowKeys.length; i++) {
-    const key = rowKeys[i];
-    normalizedRow[key] = row[key];
-  }
+  copyOwnProperties(row, normalizedRow);
 
   normalizedRow.id = row[idMapping];
   delete normalizedRow[idMapping];
@@ -136,13 +259,15 @@ function normalizeId(row, idMapping) {
 }
 
 function normalizeRows(rows, idMapping) {
-  if (!Array.isArray(rows)) {
+  const isArrayOfRows = Array.isArray(rows);
+  if (!isArrayOfRows) {
     return rows;
   }
 
   const normalized = [];
   for (let i = 0; i < rows.length; i++) {
-    const normalizedRow = normalizeId(rows[i], idMapping);
+    const row = rows[i];
+    const normalizedRow = normalizeId(row, idMapping);
     normalized.push(normalizedRow);
   }
   return normalized;
@@ -369,29 +494,38 @@ function initializeLookupEntry(mapping) {
   };
 }
 
+function processRowForForeignKeys(row, mappingKeys, fkMappings, lookupsNeeded) {
+  for (let j = 0; j < mappingKeys.length; j++) {
+    const fkField = mappingKeys[j];
+    const mapping = fkMappings[fkField];
+
+    const fieldHasValue = row[fkField] != null;
+    if (!fieldHasValue) {
+      continue;
+    }
+
+    const modelKey = getModelKey(mapping);
+    const lookupNotInitialized = !lookupsNeeded[modelKey];
+    if (lookupNotInitialized) {
+      lookupsNeeded[modelKey] = initializeLookupEntry(mapping);
+    }
+
+    lookupsNeeded[modelKey].values.add(row[fkField]);
+  }
+}
+
 function collectForeignKeyValues(rows, fkMappings) {
   const lookupsNeeded = {};
   const mappingKeys = Object.keys(fkMappings);
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i];
-    const isValidRow = row && typeof row === 'object';
+    const isValidRow = isValidRowForNormalization(row);
     if (!isValidRow) {
       continue;
     }
 
-    for (let j = 0; j < mappingKeys.length; j++) {
-      const fkField = mappingKeys[j];
-      const mapping = fkMappings[fkField];
-
-      if (row[fkField] != null) {
-        const modelKey = getModelKey(mapping);
-        if (!lookupsNeeded[modelKey]) {
-          lookupsNeeded[modelKey] = initializeLookupEntry(mapping);
-        }
-        lookupsNeeded[modelKey].values.add(row[fkField]);
-      }
-    }
+    processRowForForeignKeys(row, mappingKeys, fkMappings, lookupsNeeded);
   }
 
   return lookupsNeeded;
@@ -454,32 +588,29 @@ async function performBulkLookups(lookupsNeeded) {
 }
 
 function applyMappingToSingleField(mappedRow, fkField, mapping, lookupResults) {
-  if (mappedRow[fkField] == null) {
+  const fieldHasValue = mappedRow[fkField] != null;
+  if (!fieldHasValue) {
     return;
   }
 
-  const modelKey = mapping.model.name || mapping.model.tableName;
+  const modelKey = getModelKey(mapping);
   const lookupMap = lookupResults[modelKey] || {};
   const externalId = lookupMap[mappedRow[fkField]];
 
-  if (externalId != null) {
+  const hasExternalId = externalId != null;
+  if (hasExternalId) {
     mappedRow[fkField] = externalId;
   }
 }
 
 function applyAllMappingsToRow(row, fkMappings, lookupResults) {
-  const isInvalidRow = !row || typeof row !== 'object';
-  if (isInvalidRow) {
+  const isValidRow = isValidRowForNormalization(row);
+  if (!isValidRow) {
     return row;
   }
 
   const mappedRow = {};
-  const rowKeys = Object.keys(row);
-
-  for (let i = 0; i < rowKeys.length; i++) {
-    const key = rowKeys[i];
-    mappedRow[key] = row[key];
-  }
+  copyOwnProperties(row, mappedRow);
 
   const mappingKeys = Object.keys(fkMappings);
   for (let i = 0; i < mappingKeys.length; i++) {
@@ -559,61 +690,108 @@ async function setupTransaction(model, context, useReqOptionsTransaction, req) {
   return transaction;
 }
 
+async function executeSinglePreHook(preHook, context) {
+  const isFunction = typeof preHook === 'function';
+  if (isFunction) {
+    const result = await preHook(context);
+    context.preResult = result;
+  }
+}
+
+async function executePreHookArray(preHooks, context) {
+  for (let i = 0; i < preHooks.length; i++) {
+    const preHook = preHooks[i];
+    await executeSinglePreHook(preHook, context);
+  }
+}
+
 async function executePreHooks(context, options) {
-  if (!options.pre) {
+  const hasPreHooks = options.pre;
+  if (!hasPreHooks) {
     return;
   }
 
-  if (typeof options.pre === 'function') {
+  const isSingleFunction = typeof options.pre === 'function';
+  if (isSingleFunction) {
     context.preResult = await options.pre(context);
     return;
   }
 
-  if (Array.isArray(options.pre)) {
-    for (let i = 0; i < options.pre.length; i++) {
-      const preHook = options.pre[i];
-      if (typeof preHook === 'function') {
-        const result = await preHook(context);
-        context.preResult = result;
-      }
-    }
+  const isArrayOfHooks = Array.isArray(options.pre);
+  if (isArrayOfHooks) {
+    await executePreHookArray(options.pre, context);
+  }
+}
+
+async function executeSinglePostHook(postHook, context) {
+  const isFunction = typeof postHook === 'function';
+  if (isFunction) {
+    await postHook(context);
+  }
+}
+
+async function executePostHookArray(postHooks, context) {
+  for (let i = 0; i < postHooks.length; i++) {
+    const postHook = postHooks[i];
+    await executeSinglePostHook(postHook, context);
   }
 }
 
 async function executePostHooks(context, options) {
-  if (!context._responseSent && options.post) {
-    if (typeof options.post === 'function') {
-      await options.post(context);
-      return;
-    }
+  const responseNotSent = !context._responseSent;
+  const hasPostHooks = options.post;
 
-    if (Array.isArray(options.post)) {
-      for (let i = 0; i < options.post.length; i++) {
-        const postHook = options.post[i];
-        if (typeof postHook === 'function') {
-          await postHook(context);
-        }
-      }
-    }
+  if (!responseNotSent || !hasPostHooks) {
+    return;
+  }
+
+  const isSingleFunction = typeof options.post === 'function';
+  if (isSingleFunction) {
+    await options.post(context);
+    return;
+  }
+
+  const isArrayOfHooks = Array.isArray(options.post);
+  if (isArrayOfHooks) {
+    await executePostHookArray(options.post, context);
   }
 }
 
+function canCommitTransaction(context, transaction) {
+  const notRolledBack = !context._rolledBack;
+  const hasTransaction = transaction;
+  const hasCommitMethod =
+    hasTransaction && typeof transaction.commit === 'function';
+
+  return notRolledBack && hasCommitMethod;
+}
+
 async function commitTransaction(context, transaction) {
-  const shouldCommit =
-    !context._rolledBack &&
-    transaction &&
-    typeof transaction.commit === 'function';
+  const shouldCommit = canCommitTransaction(context, transaction);
   if (shouldCommit) {
     await transaction.commit();
   }
 }
 
 async function rollbackOnError(transaction) {
-  if (transaction && typeof transaction.rollback === 'function') {
-    try {
-      await transaction.rollback();
-    } catch (_) {}
+  const canRollback = canRollbackTransaction(transaction);
+  if (!canRollback) {
+    return;
   }
+
+  try {
+    await transaction.rollback();
+  } catch (error) {
+    // Intentionally ignore rollback errors during error handling
+  }
+}
+
+function determineReturnValue(context, result) {
+  const hasPayload = typeof context.payload !== 'undefined';
+  if (hasPayload) {
+    return context.payload;
+  }
+  return result;
 }
 
 async function withTransactionAndHooks(config, run) {
@@ -636,25 +814,43 @@ async function withTransactionAndHooks(config, run) {
   );
 
   try {
-    const shouldApplyScopes =
-      params.modelOptions.scopes &&
-      Array.isArray(params.modelOptions.scopes) &&
-      params.model &&
-      context.applyScopes;
-    if (shouldApplyScopes) {
-      context.applyScopes(params.modelOptions.scopes);
-    }
-
     await executePreHooks(context, params.options);
     const result = await run(context);
     await executePostHooks(context, params.options);
     await commitTransaction(context, transaction);
 
-    const hasPayload = typeof context.payload !== 'undefined';
-    return hasPayload ? context.payload : result;
+    return determineReturnValue(context, result);
   } catch (err) {
     await rollbackOnError(transaction);
     throw err;
+  }
+}
+
+async function withHooksOnly(config, run) {
+  const params = extractConfigParams(config);
+
+  const context = buildContext({
+    req: params.req,
+    res: params.res,
+    model: params.model,
+    options: params.options,
+    modelOptions: params.modelOptions,
+    idMapping: params.idMapping,
+  });
+
+  try {
+    await executePreHooks(context, params.options);
+    const result = await run(context);
+    // If the processor didn't explicitly populate context.payload, attach the result
+    // so post hooks can safely mutate the payload (parity with transactional path).
+    if (typeof context.payload === 'undefined' || context.payload === null) {
+      context.payload = result;
+    }
+    await executePostHooks(context, params.options);
+    // Return the (possibly mutated) payload
+    return context.payload;
+  } catch (error) {
+    throw error;
   }
 }
 
@@ -666,4 +862,6 @@ module.exports = {
   normalizeId: normalizeId,
   normalizeRows: normalizeRows,
   normalizeRowsWithForeignKeys: normalizeRowsWithForeignKeys,
+  applyEndpointConfiguration: applyEndpointConfiguration,
+  withHooksOnly: withHooksOnly,
 };

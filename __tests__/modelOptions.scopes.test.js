@@ -620,8 +620,8 @@ describe('modelOptions scopes support', () => {
           {
             pre: async (context) => {
               // Count items available in pre hook - should already be scoped
-              const result = await Item.findAndCountAll(
-                context.req.apialize.options
+              const result = await context.model.findAndCountAll(
+                context.options
               );
               preHookItemCount = result.count;
               return { preHookRan: true };

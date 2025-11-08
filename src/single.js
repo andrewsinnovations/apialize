@@ -14,12 +14,25 @@ const withTransactionAndHooks = operationUtils.withTransactionAndHooks;
 const optionsWithTransaction = operationUtils.optionsWithTransaction;
 const normalizeId = operationUtils.normalizeId;
 const notFoundWithRollback = operationUtils.notFoundWithRollback;
+const applyEndpointConfiguration = operationUtils.applyEndpointConfiguration;
 
 function getErrorMessage(err) {
-  if (process.env.NODE_ENV === 'development') {
-    return String((err && err.message) || err);
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  if (isDevelopment) {
+    const errorMessage = err && err.message;
+    const fallbackMessage = errorMessage || err;
+    return String(fallbackMessage);
   }
   return 'Internal Error';
+}
+
+function validateRelatedConfig(relatedConfig) {
+  const hasModel = relatedConfig.model;
+  if (!hasModel) {
+    throw new Error(
+      "Related model configuration must include a 'model' property"
+    );
+  }
 }
 
 function setupRelatedEndpoints(
@@ -30,12 +43,9 @@ function setupRelatedEndpoints(
   parentModelOptions,
   parentParamName = 'id'
 ) {
-  related.forEach(function (relatedConfig) {
-    if (!relatedConfig.model) {
-      throw new Error(
-        "Related model configuration must include a 'model' property"
-      );
-    }
+  for (let i = 0; i < related.length; i++) {
+    const relatedConfig = related[i];
+    validateRelatedConfig(relatedConfig);
 
     const relatedModel = relatedConfig.model;
     const relatedOptions = relatedConfig.options || {};
@@ -49,6 +59,85 @@ function setupRelatedEndpoints(
     const relatedForeignKey =
       foreignKey || parentModel.name.toLowerCase() + '_id';
 
+    const extractParentIdFromStored = function (req) {
+      const hasApializeParentId = req.apialize && req.apialize.parentId != null;
+      if (hasApializeParentId) {
+        return req.apialize.parentId;
+      }
+      return null;
+    };
+
+    const extractParentIdFromParams = function (req, effectiveParamName) {
+      const hasParamWithName =
+        req.params && req.params[effectiveParamName] != null;
+      if (hasParamWithName) {
+        return req.params[effectiveParamName];
+      }
+
+      const hasIdParam = req.params && req.params['id'] != null;
+      if (hasIdParam) {
+        return req.params['id'];
+      }
+
+      return null;
+    };
+
+    const extractParentIdByPreference = function (
+      req,
+      effectiveParamName,
+      useStoredFirst
+    ) {
+      if (useStoredFirst) {
+        const storedId = extractParentIdFromStored(req);
+        if (storedId != null) {
+          return storedId;
+        }
+        return extractParentIdFromParams(req, effectiveParamName);
+      } else {
+        const paramId = extractParentIdFromParams(req, effectiveParamName);
+        if (paramId != null) {
+          return paramId;
+        }
+        return extractParentIdFromStored(req);
+      }
+    };
+
+    const findParentById = async function (parentParamId) {
+      const effectiveIdMapping = parentIdMapping || 'id';
+      const needsMapping = effectiveIdMapping !== 'id';
+
+      if (!needsMapping) {
+        return parentParamId;
+      }
+
+      const where = {};
+      where[effectiveIdMapping] = parentParamId;
+      const queryOptions = Object.assign(
+        {
+          where: where,
+          attributes: ['id'],
+        },
+        parentModelOptions || {}
+      );
+
+      try {
+        const parent = await parentModel.findOne(queryOptions);
+        const hasParent = parent;
+        if (!hasParent) {
+          return null;
+        }
+
+        const hasGetMethod = parent.get;
+        if (hasGetMethod) {
+          return parent.get('id');
+        }
+
+        return parent.id;
+      } catch (error) {
+        return null;
+      }
+    };
+
     const resolveParentInternalId = async function (
       req,
       currentParamName,
@@ -59,40 +148,30 @@ function setupRelatedEndpoints(
           ? currentParamName
           : parentParamName;
       const useStoredFirst = Boolean(preferStored);
-      var parentParamId = null;
-      if (useStoredFirst) {
-        if (req.apialize && req.apialize.parentId != null) {
-          parentParamId = req.apialize.parentId;
-        } else if (req.params && req.params[effectiveParamName] != null) {
-          parentParamId = req.params[effectiveParamName];
-        } else if (req.params && req.params['id'] != null) {
-          parentParamId = req.params['id'];
-        }
-      } else {
-        if (req.params && req.params[effectiveParamName] != null) {
-          parentParamId = req.params[effectiveParamName];
-        } else if (req.params && req.params['id'] != null) {
-          parentParamId = req.params['id'];
-        } else if (req.apialize && req.apialize.parentId != null) {
-          parentParamId = req.apialize.parentId;
-        }
-      }
-      if (!parentParamId) return null;
-      if ((parentIdMapping || 'id') === 'id') return parentParamId;
-      const where = {};
-      where[parentIdMapping || 'id'] = parentParamId;
-      const queryOptions = Object.assign(
-        {
-          where: where,
-          attributes: ['id'],
-        },
-        parentModelOptions || {}
+
+      const parentParamId = extractParentIdByPreference(
+        req,
+        effectiveParamName,
+        useStoredFirst
       );
-      try {
-        const parent = await parentModel.findOne(queryOptions);
-        return parent ? (parent.get ? parent.get('id') : parent.id) : null;
-      } catch (_e) {
+
+      const hasParentId = parentParamId;
+      if (!hasParentId) {
         return null;
+      }
+
+      return await findParentById(parentParamId);
+    };
+
+    const initializeApializeContext = function (req) {
+      if (!req.apialize) {
+        req.apialize = {};
+      }
+      if (!req.apialize.options) {
+        req.apialize.options = {};
+      }
+      if (!req.apialize.options.where) {
+        req.apialize.options.where = {};
       }
     };
 
@@ -103,26 +182,40 @@ function setupRelatedEndpoints(
       const effectiveParamName =
         typeof paramName === 'string' ? paramName : parentParamName;
       const preferStoredVal = Boolean(preferStoredArg);
+
       return asyncHandler(async function (req, res, next) {
-        if (!req.apialize) req.apialize = {};
-        if (!req.apialize.options) req.apialize.options = {};
-        if (!req.apialize.options.where) req.apialize.options.where = {};
+        initializeApializeContext(req);
 
         const parentInternalId = await resolveParentInternalId(
           req,
           effectiveParamName,
           preferStoredVal
         );
-        if (
-          parentInternalId === null ||
-          typeof parentInternalId === 'undefined'
-        ) {
-          req.apialize.options.where[relatedForeignKey] = '__apialize_none__';
-        } else {
+
+        const hasParentId =
+          parentInternalId !== null && typeof parentInternalId !== 'undefined';
+        if (hasParentId) {
           req.apialize.options.where[relatedForeignKey] = parentInternalId;
+        } else {
+          req.apialize.options.where[relatedForeignKey] = '__apialize_none__';
         }
+
         next();
       });
+    };
+
+    const isWriteMethod = function (method) {
+      const writeMethods = ['POST', 'PUT', 'PATCH'];
+      return writeMethods.indexOf(method) !== -1;
+    };
+
+    const initializeApializeValues = function (req) {
+      if (!req.apialize) {
+        req.apialize = {};
+      }
+      if (!req.apialize.values) {
+        req.apialize.values = {};
+      }
     };
 
     const setForeignKeyMiddlewareFactory = function (
@@ -132,17 +225,23 @@ function setupRelatedEndpoints(
       const effectiveParamName =
         typeof paramName === 'string' ? paramName : parentParamName;
       const preferStoredVal = Boolean(preferStoredArg);
+
       return asyncHandler(async function (req, res, next) {
-        const writeMethods = ['POST', 'PUT', 'PATCH'];
-        if (writeMethods.indexOf(req.method) !== -1) {
-          if (!req.apialize) req.apialize = {};
-          if (!req.apialize.values) req.apialize.values = {};
+        const isWrite = isWriteMethod(req.method);
+        if (isWrite) {
+          initializeApializeValues(req);
+
           const parentInternalId = await resolveParentInternalId(
             req,
             effectiveParamName,
             preferStoredVal
           );
-          if (parentInternalId == null) return defaultNotFound(res);
+
+          const hasParentId = parentInternalId != null;
+          if (!hasParentId) {
+            return defaultNotFound(res);
+          }
+
           req.apialize.values[relatedForeignKey] = parentInternalId;
         }
         next();
@@ -158,44 +257,104 @@ function setupRelatedEndpoints(
       true
     );
 
-    const baseReadMiddleware = []
-      .concat(parentFilterForRead)
-      .concat(
-        Array.isArray(relatedOptions.middleware)
-          ? relatedOptions.middleware
-          : []
-      );
-    const baseWriteMiddleware = []
-      .concat(parentFilterForWrite)
-      .concat(setForeignKeyMiddlewareFactory(parentParamName, true))
-      .concat(
-        Array.isArray(relatedOptions.middleware)
-          ? relatedOptions.middleware
-          : []
-      );
+    const getRelatedMiddleware = function (relatedOptions) {
+      const isArrayMiddleware = Array.isArray(relatedOptions.middleware);
+      if (isArrayMiddleware) {
+        return relatedOptions.middleware;
+      }
+      return [];
+    };
+
+    const buildBaseMiddleware = function (
+      parentFilters,
+      additionalMiddleware,
+      relatedOptions
+    ) {
+      const relatedMiddleware = getRelatedMiddleware(relatedOptions);
+      const middleware = [];
+
+      for (let i = 0; i < parentFilters.length; i++) {
+        middleware.push(parentFilters[i]);
+      }
+
+      for (let i = 0; i < additionalMiddleware.length; i++) {
+        middleware.push(additionalMiddleware[i]);
+      }
+
+      for (let i = 0; i < relatedMiddleware.length; i++) {
+        middleware.push(relatedMiddleware[i]);
+      }
+
+      return middleware;
+    };
+
+    const baseReadMiddleware = buildBaseMiddleware(
+      [parentFilterForRead],
+      [],
+      relatedOptions
+    );
+    const baseWriteMiddleware = buildBaseMiddleware(
+      [parentFilterForWrite],
+      [setForeignKeyMiddlewareFactory(parentParamName, true)],
+      relatedOptions
+    );
+
+    const getOperationConfig = function (perOperation, opName) {
+      const hasOperationConfig = perOperation && perOperation[opName];
+      if (hasOperationConfig) {
+        return perOperation[opName];
+      }
+      return {};
+    };
+
+    const isWriteOperation = function (opName) {
+      const writeOperations = ['post', 'put', 'patch', 'delete'];
+      return writeOperations.indexOf(opName) !== -1;
+    };
+
+    const getOperationMiddleware = function (op) {
+      const isArrayMiddleware = Array.isArray(op.middleware);
+      if (isArrayMiddleware) {
+        return op.middleware;
+      }
+      return [];
+    };
+
+    const mergeMiddleware = function (baseMiddleware, operationMiddleware) {
+      const merged = [];
+
+      for (let i = 0; i < baseMiddleware.length; i++) {
+        merged.push(baseMiddleware[i]);
+      }
+
+      for (let i = 0; i < operationMiddleware.length; i++) {
+        merged.push(operationMiddleware[i]);
+      }
+
+      return merged;
+    };
 
     const resolveOpConfig = function (opName) {
-      const op =
-        perOperation && perOperation[opName] ? perOperation[opName] : {};
-      const isWrite =
-        opName === 'post' ||
-        opName === 'put' ||
-        opName === 'patch' ||
-        opName === 'delete';
+      const op = getOperationConfig(perOperation, opName);
+      const isWrite = isWriteOperation(opName);
       const baseMw = isWrite ? baseWriteMiddleware : baseReadMiddleware;
-      const opMiddleware = Array.isArray(op.middleware) ? op.middleware : [];
-      const mergedMiddleware = [].concat(baseMw).concat(opMiddleware);
+      const opMiddleware = getOperationMiddleware(op);
+      const mergedMiddleware = mergeMiddleware(baseMw, opMiddleware);
+
       const mergedOptions = Object.assign({}, relatedOptions, op);
       mergedOptions.middleware = mergedMiddleware;
+
+      const allowBulkDelete =
+        typeof op.allow_bulk_delete === 'boolean'
+          ? op.allow_bulk_delete
+          : false;
+
       return {
         options: mergedOptions,
         modelOptions: op.modelOptions || relatedOptions.modelOptions || {},
         id_mapping: op.id_mapping || relatedOptions.id_mapping || 'id',
         middleware: mergedMiddleware,
-        allow_bulk_delete:
-          typeof op.allow_bulk_delete === 'boolean'
-            ? op.allow_bulk_delete
-            : false,
+        allow_bulk_delete: allowBulkDelete,
       };
     };
 
@@ -207,7 +366,12 @@ function setupRelatedEndpoints(
       next();
     };
 
-    if (operations.indexOf('list') !== -1) {
+    const hasOperation = function (operations, operationName) {
+      return operations.indexOf(operationName) !== -1;
+    };
+
+    const hasListOperation = hasOperation(operations, 'list');
+    if (hasListOperation) {
       const { options: listOptions, modelOptions: listModelOptions } =
         resolveOpConfig('list');
       const relatedListRouter = list(
@@ -218,10 +382,11 @@ function setupRelatedEndpoints(
       relatedRouter.use('/', relatedListRouter);
     }
 
-    if (
-      operations.indexOf('post') !== -1 ||
-      operations.indexOf('create') !== -1
-    ) {
+    const hasPostOperation = hasOperation(operations, 'post');
+    const hasCreateOperation = hasOperation(operations, 'create');
+    const hasCreateOrPost = hasPostOperation || hasCreateOperation;
+
+    if (hasCreateOrPost) {
       const { options: createOptions, modelOptions: postModelOptions } =
         resolveOpConfig('post');
       const relatedCreateRouter = create(
@@ -232,40 +397,46 @@ function setupRelatedEndpoints(
       relatedRouter.use('/', relatedCreateRouter);
     }
 
-    if (operations.indexOf('get') !== -1) {
+    const hasGetOperation = hasOperation(operations, 'get');
+    if (hasGetOperation) {
       const {
         options: getOptions,
         modelOptions: getModelOptions,
         id_mapping: relatedIdMapping,
       } = resolveOpConfig('get');
+
       const childSingleOptions = Object.assign({}, getOptions);
-      // Use a parameter name that matches the actual URL parameter for this model
       const relatedParamName = relatedModel.name.toLowerCase() + 'Id';
       childSingleOptions.param_name = relatedParamName;
       childSingleOptions.id_mapping = relatedIdMapping;
-      childSingleOptions.related = Array.isArray(relatedConfig.related)
+
+      const hasRelatedConfig = Array.isArray(relatedConfig.related);
+      childSingleOptions.related = hasRelatedConfig
         ? relatedConfig.related
         : [];
+
       const childSingleRouter = single(
         relatedModel,
         childSingleOptions,
         getModelOptions
       );
+
       const nested = express.Router({ mergeParams: true });
-      // Create a custom store parent middleware that uses the correct parameter name
       const storeRelatedParentIdMiddleware = function (req, _res, next) {
         req.apialize = req.apialize || {};
         req.apialize.parentId = req.params[relatedParamName];
         next();
       };
+
       nested.use('/', storeRelatedParentIdMiddleware, childSingleRouter);
       relatedRouter.use('/', nested);
     }
 
-    if (
-      operations.indexOf('put') !== -1 ||
-      operations.indexOf('update') !== -1
-    ) {
+    const hasPutOperation = hasOperation(operations, 'put');
+    const hasUpdateOperation = hasOperation(operations, 'update');
+    const hasUpdateOrPut = hasPutOperation || hasUpdateOperation;
+
+    if (hasUpdateOrPut) {
       const { options: updateOptions, modelOptions: putModelOptions } =
         resolveOpConfig('put');
       const relatedUpdateRouter = update(
@@ -276,7 +447,8 @@ function setupRelatedEndpoints(
       relatedRouter.use('/', storeParentIdMiddleware, relatedUpdateRouter);
     }
 
-    if (operations.indexOf('patch') !== -1) {
+    const hasPatchOperation = hasOperation(operations, 'patch');
+    if (hasPatchOperation) {
       const { options: patchOptions, modelOptions: patchModelOptions } =
         resolveOpConfig('patch');
       const relatedPatchRouter = patch(
@@ -287,10 +459,11 @@ function setupRelatedEndpoints(
       relatedRouter.use('/', storeParentIdMiddleware, relatedPatchRouter);
     }
 
-    if (
-      operations.indexOf('delete') !== -1 ||
-      operations.indexOf('destroy') !== -1
-    ) {
+    const hasDeleteOperation = hasOperation(operations, 'delete');
+    const hasDestroyOperation = hasOperation(operations, 'destroy');
+    const hasDeleteOrDestroy = hasDeleteOperation || hasDestroyOperation;
+
+    if (hasDeleteOrDestroy) {
       const { options: destroyOptions, modelOptions: deleteModelOptions } =
         resolveOpConfig('delete');
       const relatedDestroyRouter = destroy(
@@ -300,50 +473,80 @@ function setupRelatedEndpoints(
       );
       relatedRouter.use('/', storeParentIdMiddleware, relatedDestroyRouter);
 
-      // Bulk DELETE: when confirm!=true, dry-run and return ids; when confirm==true, delete and return count and ids
       const {
         modelOptions: bulkDelModelOptions,
         id_mapping: bulkDelIdMapping,
         middleware: bulkDelMiddleware,
         allow_bulk_delete,
       } = resolveOpConfig('delete');
-      if (allow_bulk_delete) {
+
+      const shouldAllowBulkDelete = allow_bulk_delete;
+      if (shouldAllowBulkDelete) {
+        const isConfirmed = function (queryParams) {
+          const query = queryParams || {};
+          const confirmVal = String(query.confirm).toLowerCase();
+          const confirmValues = ['true', '1', 'yes', 'y'];
+          return confirmValues.indexOf(confirmVal) !== -1;
+        };
+
+        const getBaseWhere = function (req) {
+          const hasApializeOptions =
+            req.apialize && req.apialize.options && req.apialize.options.where;
+          const baseWhere = hasApializeOptions
+            ? req.apialize.options.where
+            : {};
+
+          const hasConfirmProperty = Object.prototype.hasOwnProperty.call(
+            baseWhere,
+            'confirm'
+          );
+          if (hasConfirmProperty) {
+            delete baseWhere.confirm;
+          }
+
+          return baseWhere;
+        };
+
+        const extractIdsFromRows = function (rows, idMapping) {
+          const ids = [];
+
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const hasRow = row;
+            if (!hasRow) {
+              continue;
+            }
+
+            const hasGetMethod = typeof row.get === 'function';
+            if (hasGetMethod) {
+              ids.push(row.get(idMapping));
+            } else {
+              ids.push(row[idMapping]);
+            }
+          }
+
+          return ids;
+        };
+
         relatedRouter.delete(
           '/',
           storeParentIdMiddleware,
           apializeContext,
           ...bulkDelMiddleware,
           asyncHandler(async (req, res) => {
-            const q = req.query || {};
-            const confirmVal = String(q.confirm).toLowerCase();
-            const confirmed =
-              ['true', '1', 'yes', 'y'].indexOf(confirmVal) !== -1;
-
-            const baseWhere =
-              (req.apialize &&
-                req.apialize.options &&
-                req.apialize.options.where) ||
-              {};
-            if (Object.prototype.hasOwnProperty.call(baseWhere, 'confirm')) {
-              delete baseWhere.confirm;
-            }
+            const confirmed = isConfirmed(req.query);
+            const baseWhere = getBaseWhere(req);
 
             const findOptions = Object.assign({}, bulkDelModelOptions, {
               where: baseWhere,
               attributes: [bulkDelIdMapping],
             });
-            const rows = await relatedModel.findAll(findOptions);
-            const ids = [];
-            for (var i = 0; i < rows.length; i++) {
-              var r = rows[i];
-              if (r && typeof r.get === 'function') {
-                ids.push(r.get(bulkDelIdMapping));
-              } else if (r) {
-                ids.push(r[bulkDelIdMapping]);
-              }
-            }
 
-            if (!confirmed) {
+            const rows = await relatedModel.findAll(findOptions);
+            const ids = extractIdsFromRows(rows, bulkDelIdMapping);
+
+            const needsConfirmation = !confirmed;
+            if (needsConfirmation) {
               return res.json({ success: true, confirm_required: true, ids });
             }
 
@@ -365,12 +568,11 @@ function setupRelatedEndpoints(
       }
     }
     relatedRouter.use(function (err, _req, res, _next) {
-      // eslint-disable-next-line no-console
       console.error('[Apialize] Related route error:', err);
       res.status(500).json({ success: false, error: getErrorMessage(err) });
     });
     router.use(`/:${parentParamName}/${endpointPath}`, relatedRouter);
-  });
+  }
 }
 
 function modelNameToPath(modelName) {
@@ -381,116 +583,108 @@ function modelNameToPath(modelName) {
   return pluralize(snakeCase);
 }
 
-function pluralize(word) {
-  if (word.endsWith('y')) {
-    return word.slice(0, -1) + 'ies';
-  } else if (
-    word.endsWith('s') ||
-    word.endsWith('sh') ||
-    word.endsWith('ch') ||
-    word.endsWith('x') ||
-    word.endsWith('z')
-  ) {
-    return word + 'es';
-  } else {
-    return word + 's';
+function endsWithY(word) {
+  return word.endsWith('y');
+}
+
+function endsWithSpecialChars(word) {
+  const specialEndings = ['s', 'sh', 'ch', 'x', 'z'];
+
+  for (let i = 0; i < specialEndings.length; i++) {
+    const ending = specialEndings[i];
+    const hasEnding = word.endsWith(ending);
+    if (hasEnding) {
+      return true;
+    }
   }
+
+  return false;
+}
+
+function pluralize(word) {
+  const hasYEnding = endsWithY(word);
+  if (hasYEnding) {
+    return word.slice(0, -1) + 'ies';
+  }
+
+  const hasSpecialEnding = endsWithSpecialChars(word);
+  if (hasSpecialEnding) {
+    return word + 'es';
+  }
+
+  return word + 's';
+}
+
+function extractMiddlewareFunctions(middleware) {
+  const isArrayMiddleware = Array.isArray(middleware);
+  if (!isArrayMiddleware) {
+    return [];
+  }
+
+  const functions = [];
+  for (let i = 0; i < middleware.length; i++) {
+    const item = middleware[i];
+    const isFunction = typeof item === 'function';
+    if (isFunction) {
+      functions.push(item);
+    }
+  }
+
+  return functions;
+}
+
+function extractStringOption(options, key, defaultValue) {
+  const value = options[key];
+  const isString = typeof value === 'string';
+  if (isString) {
+    return value;
+  }
+  return defaultValue;
+}
+
+function extractArrayOption(options, key) {
+  const value = options[key];
+  const isArray = Array.isArray(value);
+  if (isArray) {
+    return value;
+  }
+  return [];
 }
 
 function single(model, options = {}, modelOptions = {}) {
   ensureFn(model, 'findOne');
-  const middleware = Array.isArray(options.middleware)
-    ? options.middleware
-    : [];
-  const id_mapping =
-    typeof options.id_mapping === 'string' ? options.id_mapping : 'id';
-  const param_name =
-    typeof options.param_name === 'string' ? options.param_name : 'id';
-  const related = Array.isArray(options.related) ? options.related : [];
+
+  const middleware = extractArrayOption(options, 'middleware');
+  const idMapping = extractStringOption(options, 'id_mapping', 'id');
+  const paramName = extractStringOption(options, 'param_name', 'id');
+  const related = extractArrayOption(options, 'related');
   const pre = options.pre || null;
   const post = options.post || null;
-  const member_routes = Array.isArray(options.member_routes)
-    ? options.member_routes
-    : [];
-  const inline = middleware.filter(function (fn) {
-    return typeof fn === 'function';
-  });
+  const memberRoutes = extractArrayOption(options, 'member_routes');
+
+  const inline = extractMiddlewareFunctions(middleware);
   const router = express.Router({ mergeParams: true });
 
-  router.get(
-    `/:${param_name}`,
-    apializeContext,
-    ...inline,
-    asyncHandler(async (req, res) => {
-      const payload = await withTransactionAndHooks(
-        {
-          model,
-          options: Object.assign({}, options, { pre: pre, post: post }),
-          req,
-          res,
-          modelOptions,
-          idMapping: id_mapping,
-          useReqOptionsTransaction: true,
-        },
-        async (context) => {
-          // Setup query parameters after pre-hooks (so pre-hooks can modify them)
-          const paramValue = req.params[param_name];
-          req.apialize.id = paramValue;
-          if (!req.apialize.where) req.apialize.where = {};
-          if (typeof req.apialize.where[id_mapping] === 'undefined')
-            req.apialize.where[id_mapping] = paramValue;
-          req.apialize.options = Object.assign(
-            {},
-            modelOptions,
-            req.apialize.options || {}
-          );
-          const modelWhere = (modelOptions && modelOptions.where) || {};
-          const reqOptionsWhere =
-            (req.apialize.options && req.apialize.options.where) || {};
-          const fullWhere = Object.assign(
-            {},
-            modelWhere,
-            reqOptionsWhere,
-            req.apialize.where
-          );
-          req.apialize.options.where = fullWhere;
-
-          const result = await model.findOne(req.apialize.options);
-          if (result == null) {
-            return notFoundWithRollback(context);
-          }
-
-          context.record = result;
-          let recordPayload = result;
-          if (recordPayload && typeof recordPayload === 'object')
-            recordPayload = recordPayload.get
-              ? recordPayload.get({ plain: true })
-              : Object.assign({}, recordPayload);
-
-          recordPayload = normalizeId(recordPayload, id_mapping);
-
-          context.payload = { success: true, record: recordPayload };
-          return context.payload;
-        }
-      );
-      if (!res.headersSent) {
-        res.json(payload);
-      }
-    })
-  );
-  const loadSingleRecord = async function (req, res, next) {
-    const paramValue = req.params[param_name];
-    req.apialize = req.apialize || {};
+  const setupApializeContext = function (req, paramValue, idMapping) {
     req.apialize.id = paramValue;
-    req.apialize.where = req.apialize.where || {};
-    if (typeof req.apialize.where[id_mapping] === 'undefined') {
-      req.apialize.where[id_mapping] = paramValue;
+
+    if (!req.apialize.where) {
+      req.apialize.where = {};
     }
+
+    const whereNotSet = typeof req.apialize.where[idMapping] === 'undefined';
+    if (whereNotSet) {
+      req.apialize.where[idMapping] = paramValue;
+    }
+  };
+
+  const buildQueryOptions = function (req, modelOptions) {
     req.apialize.options = Object.assign(
       {},
       modelOptions,
       req.apialize.options || {}
     );
+
     const modelWhere = (modelOptions && modelOptions.where) || {};
     const reqOptionsWhere =
       (req.apialize.options && req.apialize.options.where) || {};
@@ -500,87 +694,200 @@ function single(model, options = {}, modelOptions = {}) {
       reqOptionsWhere,
       req.apialize.where
     );
+
     req.apialize.options.where = fullWhere;
+  };
+
+  const convertToPlainObject = function (recordPayload) {
+    const isObject = recordPayload && typeof recordPayload === 'object';
+    if (!isObject) {
+      return recordPayload;
+    }
+
+    const hasGetMethod = recordPayload.get;
+    if (hasGetMethod) {
+      return recordPayload.get({ plain: true });
+    }
+
+    return Object.assign({}, recordPayload);
+  };
+
+  router.get(
+    `/:${paramName}`,
+    apializeContext,
+    ...inline,
+    asyncHandler(async (req, res) => {
+      const effectiveModel = applyEndpointConfiguration(model, modelOptions);
+      const effectiveOptions = Object.assign({}, options, {
+        pre: pre,
+        post: post,
+      });
+
+      const payload = await withTransactionAndHooks(
+        {
+          model: effectiveModel,
+          options: effectiveOptions,
+          req,
+          res,
+          modelOptions,
+          idMapping: idMapping,
+          useReqOptionsTransaction: true,
+        },
+        async (context) => {
+          const paramValue = req.params[paramName];
+          setupApializeContext(req, paramValue, idMapping);
+          buildQueryOptions(req, modelOptions);
+
+          const result = await context.model.findOne(req.apialize.options);
+          const hasResult = result != null;
+          if (!hasResult) {
+            return notFoundWithRollback(context);
+          }
+
+          context.record = result;
+          let recordPayload = convertToPlainObject(result);
+          recordPayload = normalizeId(recordPayload, idMapping);
+
+          context.payload = { success: true, record: recordPayload };
+          return context.payload;
+        }
+      );
+
+      const responseNotSent = !res.headersSent;
+      if (responseNotSent) {
+        res.json(payload);
+      }
+    })
+  );
+  const initializeApializeForLoad = function (req) {
+    req.apialize = req.apialize || {};
+    req.apialize.where = req.apialize.where || {};
+  };
+
+  const loadSingleRecord = async function (req, res, next) {
+    const paramValue = req.params[paramName];
+    initializeApializeForLoad(req);
+
+    setupApializeContext(req, paramValue, idMapping);
+    buildQueryOptions(req, modelOptions);
 
     try {
       const result = await model.findOne(req.apialize.options);
-      if (result == null) return defaultNotFound(res);
-
-      let recordPayload = result;
-      if (recordPayload && typeof recordPayload === 'object') {
-        recordPayload = recordPayload.get
-          ? recordPayload.get({ plain: true })
-          : Object.assign({}, recordPayload);
+      const hasResult = result != null;
+      if (!hasResult) {
+        return defaultNotFound(res);
       }
-      recordPayload = normalizeId(recordPayload, id_mapping);
+
+      let recordPayload = convertToPlainObject(result);
+      recordPayload = normalizeId(recordPayload, idMapping);
+
       req.apialize.rawRecord = result;
       req.apialize.record = recordPayload;
       req.apialize.singlePayload = { success: true, record: recordPayload };
+
       return next();
     } catch (err) {
       return next(err);
     }
   };
-  if (Array.isArray(member_routes) && member_routes.length > 0) {
-    const allowedList = ['get', 'post', 'put', 'patch', 'delete'];
-    function ensureLeadingSlash(p) {
-      if (typeof p !== 'string' || p.length === 0) return null;
-      if (p.charAt(0) === '/') return p;
-      return '/' + p;
+  const validateRoute = function (route, index) {
+    const isValidRoute =
+      route && typeof route === 'object' && typeof route.handler === 'function';
+    if (!isValidRoute) {
+      throw new Error(
+        `[Apialize] member_routes[${index}] must be an object with a 'handler' function and a 'path' string`
+      );
+    }
+  };
+
+  const validateRouteMethod = function (route, index, allowedMethods) {
+    const method = String(route.method || 'get').toLowerCase();
+    const isAllowedMethod = allowedMethods.indexOf(method) !== -1;
+    if (!isAllowedMethod) {
+      throw new Error(
+        `[Apialize] member_routes[${index}].method must be one of ${allowedMethods.join(', ')}`
+      );
+    }
+    return method;
+  };
+
+  const ensureLeadingSlash = function (path) {
+    const isValidString = typeof path === 'string' && path.length > 0;
+    if (!isValidString) {
+      return null;
     }
 
-    member_routes.forEach(function (route, idx) {
-      if (
-        !route ||
-        typeof route !== 'object' ||
-        typeof route.handler !== 'function'
-      ) {
-        throw new Error(
-          `[Apialize] member_routes[${idx}] must be an object with a 'handler' function and a 'path' string`
-        );
-      }
-      const method = String(route.method || 'get').toLowerCase();
-      if (allowedList.indexOf(method) === -1) {
-        throw new Error(
-          `[Apialize] member_routes[${idx}].method must be one of ${allowedList.join(', ')}`
-        );
-      }
-      const subPath = ensureLeadingSlash(route.path || '');
-      if (!subPath) {
-        throw new Error(
-          `[Apialize] member_routes[${idx}] requires a non-empty 'path' (e.g., 'stats' or '/stats')`
-        );
-      }
-      const fullPath = `/:${param_name}${subPath}`;
-      const perRouteMw = Array.isArray(route.middleware)
-        ? route.middleware
-        : [];
+    const hasLeadingSlash = path.charAt(0) === '/';
+    if (hasLeadingSlash) {
+      return path;
+    }
+
+    return '/' + path;
+  };
+
+  const validateRoutePath = function (route, index) {
+    const subPath = ensureLeadingSlash(route.path || '');
+    const hasValidPath = subPath;
+    if (!hasValidPath) {
+      throw new Error(
+        `[Apialize] member_routes[${index}] requires a non-empty 'path' (e.g., 'stats' or '/stats')`
+      );
+    }
+    return subPath;
+  };
+
+  const getRouteMiddleware = function (route) {
+    const isArrayMiddleware = Array.isArray(route.middleware);
+    if (isArrayMiddleware) {
+      return route.middleware;
+    }
+    return [];
+  };
+
+  const hasMemberRoutes =
+    Array.isArray(memberRoutes) && memberRoutes.length > 0;
+  if (hasMemberRoutes) {
+    const allowedMethods = ['get', 'post', 'put', 'patch', 'delete'];
+
+    for (let i = 0; i < memberRoutes.length; i++) {
+      const route = memberRoutes[i];
+
+      validateRoute(route, i);
+      const method = validateRouteMethod(route, i, allowedMethods);
+      const subPath = validateRoutePath(route, i);
+
+      const fullPath = `/:${paramName}${subPath}`;
+      const perRouteMiddleware = getRouteMiddleware(route);
+
       router[method](
         fullPath,
         apializeContext,
         ...inline,
         asyncHandler(loadSingleRecord),
-        ...perRouteMw,
+        ...perRouteMiddleware,
         asyncHandler(async (req, res) => {
-          const out = await route.handler(req, res);
-          if (!res.headersSent) {
-            if (typeof out === 'undefined') {
-              return res.json(req.apialize.singlePayload);
+          const handlerOutput = await route.handler(req, res);
+          const responseNotSent = !res.headersSent;
+          if (responseNotSent) {
+            const hasOutput = typeof handlerOutput !== 'undefined';
+            if (hasOutput) {
+              return res.json(handlerOutput);
             }
-            return res.json(out);
+            return res.json(req.apialize.singlePayload);
           }
         })
       );
-    });
+    }
   }
-  if (Array.isArray(related) && related.length > 0) {
+  const hasRelatedEndpoints = Array.isArray(related) && related.length > 0;
+  if (hasRelatedEndpoints) {
     setupRelatedEndpoints(
       router,
       model,
       related,
-      id_mapping,
+      idMapping,
       modelOptions,
-      param_name
+      paramName
     );
   }
 

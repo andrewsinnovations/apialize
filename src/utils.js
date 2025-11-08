@@ -265,6 +265,44 @@ function convertInstanceToPlainObject(instance) {
   return instance;
 }
 
+
+// Additional shared helpers moved from processors
+function extractIdFromRequest(req) {
+  if (req && req.params && typeof req.params.id !== 'undefined') {
+    return req.params.id;
+  }
+  return undefined;
+}
+
+function extractRequestBody(req) {
+  if (req && req.body) return req.body;
+  return undefined;
+}
+
+function handleValidationError(error, resOrContext) {
+  const isValidationError = error && error.name === 'ValidationError';
+  if (!isValidationError) return false;
+
+  const res = resOrContext && resOrContext.res ? resOrContext.res : resOrContext;
+  if (res && typeof res.status === 'function') {
+    res.status(400).json({ success: false, error: error.message, details: error.details });
+    return true;
+  }
+
+  return false;
+}
+
+function extractRawAttributes(model) {
+  if (model && model.rawAttributes) return model.rawAttributes;
+  if (model && model.prototype && model.prototype.rawAttributes) return model.prototype.rawAttributes;
+  return {};
+}
+
+function extractAffectedCount(updateResult) {
+  if (Array.isArray(updateResult)) return updateResult[0];
+  return updateResult;
+}
+
 module.exports.filterMiddlewareFns = filterMiddlewareFns;
 module.exports.buildHandlers = buildHandlers;
 module.exports.getOwnershipWhere = getOwnershipWhere;
@@ -277,3 +315,9 @@ module.exports.extractBooleanOption = extractBooleanOption;
 module.exports.extractMiddleware = extractMiddleware;
 module.exports.buildWhereClause = buildWhereClause;
 module.exports.convertInstanceToPlainObject = convertInstanceToPlainObject;
+module.exports.copyOwnProperties = copyOwnProperties;
+module.exports.extractIdFromRequest = extractIdFromRequest;
+module.exports.extractRequestBody = extractRequestBody;
+module.exports.handleValidationError = handleValidationError;
+module.exports.extractRawAttributes = extractRawAttributes;
+module.exports.extractAffectedCount = extractAffectedCount;

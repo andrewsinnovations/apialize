@@ -486,15 +486,14 @@ describe('list operation: comprehensive options coverage', () => {
 
     const calls = { pre: 0, post: 0 };
     const app2 = express();
-    app2.use(express.json());
+    app2.use(bodyParser.json());
     app2.use(
       '/items',
       list(Item, {
         pre: async (context) => {
           calls.pre++;
-          // Ensure transaction exists and is a Sequelize transaction-like object
-          expect(context.transaction).toBeTruthy();
-          expect(typeof context.transaction.commit).toBe('function');
+          // For read operations like list, no transaction is needed
+          expect(context.transaction).toBeUndefined();
           // Stash something to ensure it's stored
           return { tag: 'from-pre' };
         },
@@ -532,17 +531,17 @@ describe('list operation: comprehensive options coverage', () => {
         pre: [
           async (context) => {
             executionOrder.push('pre1');
-            expect(context.transaction).toBeTruthy();
+            expect(context.transaction).toBeUndefined();
             return { step: 1 };
           },
           async (context) => {
             executionOrder.push('pre2');
-            expect(context.transaction).toBeTruthy();
+            expect(context.transaction).toBeUndefined();
             return { step: 2 };
           },
           async (context) => {
             executionOrder.push('pre3');
-            expect(context.transaction).toBeTruthy();
+            expect(context.transaction).toBeUndefined();
             return { step: 3, finalPre: true };
           },
         ],
