@@ -265,7 +265,6 @@ function convertInstanceToPlainObject(instance) {
   return instance;
 }
 
-
 // Additional shared helpers moved from processors
 function extractIdFromRequest(req) {
   if (req && req.params && typeof req.params.id !== 'undefined') {
@@ -283,9 +282,12 @@ function handleValidationError(error, resOrContext) {
   const isValidationError = error && error.name === 'ValidationError';
   if (!isValidationError) return false;
 
-  const res = resOrContext && resOrContext.res ? resOrContext.res : resOrContext;
+  const res =
+    resOrContext && resOrContext.res ? resOrContext.res : resOrContext;
   if (res && typeof res.status === 'function') {
-    res.status(400).json({ success: false, error: error.message, details: error.details });
+    res
+      .status(400)
+      .json({ success: false, error: error.message, details: error.details });
     return true;
   }
 
@@ -294,7 +296,8 @@ function handleValidationError(error, resOrContext) {
 
 function extractRawAttributes(model) {
   if (model && model.rawAttributes) return model.rawAttributes;
-  if (model && model.prototype && model.prototype.rawAttributes) return model.prototype.rawAttributes;
+  if (model && model.prototype && model.prototype.rawAttributes)
+    return model.prototype.rawAttributes;
   return {};
 }
 

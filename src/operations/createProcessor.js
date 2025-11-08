@@ -102,7 +102,10 @@ function getDataToValidate(rawBody, req) {
     return rawBody;
   }
   const processedValues = getProvidedValues(req);
-  const hasProcessedValues = processedValues !== undefined && processedValues !== null && Object.keys(processedValues || {}).length > 0;
+  const hasProcessedValues =
+    processedValues !== undefined &&
+    processedValues !== null &&
+    Object.keys(processedValues || {}).length > 0;
   if (hasProcessedValues) {
     return processedValues;
   }

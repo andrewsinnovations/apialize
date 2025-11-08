@@ -1,4 +1,9 @@
-const { getOwnershipWhere, buildWhereClause, copyOwnProperties, extractIdFromRequest } = require('../utils');
+const {
+  getOwnershipWhere,
+  buildWhereClause,
+  copyOwnProperties,
+  extractIdFromRequest,
+} = require('../utils');
 const {
   optionsWithTransaction,
   notFoundWithRollback,

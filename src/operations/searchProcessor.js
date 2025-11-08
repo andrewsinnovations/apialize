@@ -1088,6 +1088,11 @@ async function processSearchRequest(context, config, req, res) {
       );
       throw new ValidationError('Bad request');
     }
+
+    // If include was auto-created, update the request options
+    if (validation.autoCreated) {
+      req.apialize.options.include = includes;
+    }
   }
 
   const Op = getSequelizeOp(context.model);

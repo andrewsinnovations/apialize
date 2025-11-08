@@ -1189,10 +1189,60 @@ function validateFlatteningConfig(flattening, model, includes) {
   // Check if the specified alias exists in includes
   const includeFound = findIncludeByAlias(includes, flattening.as);
   if (!includeFound) {
-    return {
-      isValid: false,
-      error: `Flattening alias '${flattening.as}' not found in includes`,
+    // Check if there's a conflicting include with the same model but different alias
+    const hasConflictingInclude = includes.some(
+      (inc) => inc.model === flattening.model && inc.as !== flattening.as
+    );
+
+    if (hasConflictingInclude) {
+      return {
+        isValid: false,
+        error: `Flattening alias '${flattening.as}' not found in includes, but model is included with a different alias`,
+      };
+    }
+
+    // Auto-create include from flattening config
+    // Start with model and as (required fields)
+    const autoInclude = {
+      model: flattening.model,
+      as: flattening.as,
     };
+
+    // Add all standard Sequelize include options if present in flattening config
+    // Note: 'attributes' from flattening is for flattening config only, not Sequelize include
+    const includeOptions = [
+      'association',
+      'where',
+      'or',
+      'on',
+      'required',
+      'right',
+      'separate',
+      'limit',
+      'through',
+      'include',
+      'duplicating',
+      'paranoid',
+      'subQuery',
+      'order',
+      'having',
+      'group',
+    ];
+
+    for (let i = 0; i < includeOptions.length; i++) {
+      const option = includeOptions[i];
+      if (flattening.hasOwnProperty(option)) {
+        autoInclude[option] = flattening[option];
+      }
+    }
+
+    // Set required to true by default if not explicitly specified
+    if (!autoInclude.hasOwnProperty('required')) {
+      autoInclude.required = true;
+    }
+
+    includes.push(autoInclude);
+    return { isValid: true, includeFound: autoInclude, autoCreated: true };
   }
 
   // Validate that the model matches

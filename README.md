@@ -655,10 +655,8 @@ app.use(
         as: 'Names',
         attributes: ['first_name', ['last_name', 'lname']],
       },
-    },
-    {
-      scopes: ['api'],
     }
+    // No need to specify include - it's auto-created from flattening config!
   )
 );
 ```
@@ -725,9 +723,10 @@ GET /available-people?api:order_by=-lname,first_name
 
 #### Search API Support
 
-Flattening works seamlessly with the search API:
+Flattening works seamlessly with the search API and also auto-creates includes:
 
 ```js
+// Include is automatically created from flattening config
 app.use('/people/search', search(Person, {
     flattening: {
         model: PersonNames,
@@ -749,11 +748,161 @@ app.use('/people/search', search(Person, {
 }
 ```
 
+#### Automatic Include Creation
+
+**New in this version:** If a matching include doesn't exist, apialize will automatically create one from your flattening configuration. This means you don't need to configure both the include and the flattening separately!
+
+```js
+// Before: Required explicit include configuration
+app.use(
+  '/people',
+  list(
+    Person,
+    {
+      flattening: {
+        model: PersonNames,
+        as: 'Names',
+        attributes: ['first_name', 'last_name'],
+      },
+    },
+    {
+      include: [{ model: PersonNames, as: 'Names', required: true }],
+    }
+  )
+);
+
+// Now: Include is auto-created from flattening config
+app.use(
+  '/people',
+  list(Person, {
+    flattening: {
+      model: PersonNames,
+      as: 'Names',
+      attributes: ['first_name', 'last_name'],
+    },
+  })
+);
+```
+
+The auto-created include will:
+
+- Use `required: true` by default (can be overridden with `flattening.required`)
+- Support all standard Sequelize include options like `where`, `include` (nested), `separate`, `or`, `on`, `limit`, etc.
+- **Note:** The `attributes` property in flattening config is used for defining what to flatten and how to alias it (e.g., `['last_name', 'surname']`). It is NOT copied to the Sequelize include. If you need to limit which attributes are loaded from the database, provide an explicit include configuration.
+
+```js
+// Auto-include with custom options
+app.use(
+  '/people',
+  list(Person, {
+    flattening: {
+      model: PersonNames,
+      as: 'Names',
+      attributes: ['first_name', 'last_name'],
+      required: false, // Optional include
+      where: { is_active: true }, // Additional filtering
+      separate: true, // Use separate query for hasMany
+      limit: 10, // Limit results when using separate
+    },
+  })
+);
+```
+
+If you provide an explicit include that matches the flattening alias, it will be used instead of auto-creating one.
+
+#### Supported Include Options in Flattening Config
+
+The flattening configuration supports all standard Sequelize include options. When auto-creating an include, these options are passed through to the Sequelize query:
+
+| Option               | Type        | Description                                                                         |
+| -------------------- | ----------- | ----------------------------------------------------------------------------------- |
+| `model`              | Model       | **Required**. The Sequelize model to include                                        |
+| `as`                 | string      | **Required**. The alias for the association                                         |
+| `where`              | object      | WHERE clauses for the child model (converts to inner join unless `required: false`) |
+| `required`           | boolean     | If true, uses inner join; if false, uses left join (default: `true`)                |
+| `include`            | Array       | Nested includes for multi-level associations                                        |
+| `separate`           | boolean     | Run a separate query for hasMany associations                                       |
+| `limit`              | number      | Limit results (only with `separate: true`)                                          |
+| `order`              | Array       | Order the included records                                                          |
+| `on`                 | object      | Custom ON condition for the join                                                    |
+| `or`                 | boolean     | Bind ON and WHERE with OR instead of AND                                            |
+| `right`              | boolean     | Use right join if supported by dialect                                              |
+| `association`        | Association | Use association object instead of model/as                                          |
+| `through`            | object      | Options for belongsToMany join table                                                |
+| `through.where`      | object      | Filter conditions on the join table                                                 |
+| `through.attributes` | Array       | Attributes to select from the join table                                            |
+| `through.as`         | string      | Custom alias for the join table                                                     |
+| `through.paranoid`   | boolean     | Include/exclude soft-deleted join records                                           |
+| `duplicating`        | boolean     | Mark as duplicating to prevent subqueries                                           |
+| `paranoid`           | boolean     | Include/exclude soft-deleted records                                                |
+
+**Important Sequelize Limitations:**
+
+- `separate: true` is **only supported for hasMany** associations, not for belongsToMany
+- For belongsToMany relationships, you cannot use `limit` without `separate: true`
+
+**Example with through table (belongsToMany):**
+
+```js
+// Many-to-many relationship with enrollment data
+Student.belongsToMany(Course, {
+  through: Enrollment,
+  as: 'Courses'
+});
+
+app.use('/students', list(Student, {
+  flattening: {
+    model: Course,
+    as: 'Courses',
+    attributes: ['course_code', 'title', 'credits'],
+    through: {
+      where: { status: 'active' },  // Only active enrollments
+      attributes: ['grade', 'semester']  // Include enrollment data
+    },
+    required: true
+  }
+}));
+
+// Filters students by course fields
+GET /students?course_code=CS101
+GET /students?credits:gte=3
+
+// Orders by flattened course fields
+GET /students?api:order_by=course_code
+```
+
+**Example with multiple options:**
+
+```js
+app.use(
+  '/people',
+  list(Person, {
+    flattening: {
+      model: PersonNames,
+      as: 'Names',
+      attributes: ['first_name', 'last_name'],
+      where: { is_active: true },
+      required: true,
+      include: [
+        {
+          model: Address,
+          as: 'Addresses',
+          required: false,
+        },
+      ],
+      separate: false,
+      order: [['last_name', 'ASC']],
+    },
+  })
+);
+```
+
 #### Important Notes
 
-- **Include Requirement**: The flattened model must be included in your `modelOptions.include` or applied via scopes
+- **Include Auto-Creation**: If no matching include exists, one is automatically created from the flattening config
+- **Explicit Override**: Manually specified includes with the same alias take precedence over auto-creation
 - **Subquery Disabling**: Flattening automatically disables subqueries to ensure proper JOIN behavior
-- **Validation**: apialize validates that the specified model and alias exist in your includes
+- **Validation**: apialize validates that the specified model and alias are consistent between flattening and includes
 - **Performance**: Use flattening judiciously—it requires JOINs which may impact query performance on large datasets
 - **Attribute Conflicts**: If a flattened attribute name conflicts with a main model attribute, the flattened value takes precedence in filtering/ordering
 
@@ -776,7 +925,24 @@ const PersonNames = sequelize.define('PersonNames', {
 
 Person.hasMany(PersonNames, { foreignKey: 'person_id', as: 'Names' });
 
-// Scope with include
+// Option 1: Simple auto-include (recommended)
+router.use(
+  '/available-people',
+  list(
+    Person,
+    {
+      id_mapping: 'external_id',
+      flattening: {
+        model: PersonNames,
+        as: 'Names',
+        attributes: ['first_name', ['last_name', 'lname']],
+      },
+    }
+    // Include is auto-created from flattening config!
+  )
+);
+
+// Option 2: Using scopes with explicit include (when you need more control)
 Person.addScope('api', {
   include: [
     {
@@ -788,9 +954,8 @@ Person.addScope('api', {
   ],
 });
 
-// API endpoint with flattening
 router.use(
-  '/available-people',
+  '/people-with-scope',
   list(
     Person,
     {
