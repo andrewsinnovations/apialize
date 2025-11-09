@@ -1174,12 +1174,22 @@ async function buildResponse(
   };
 }
 
-function validateFlatteningConfig(flattening, model, includes) {
+function normalizeFlatteningConfig(flattening) {
   if (!flattening) {
-    return { isValid: true };
+    return [];
   }
 
-  if (!flattening.model || !flattening.as) {
+  // If it's already an array, return as-is
+  if (Array.isArray(flattening)) {
+    return flattening;
+  }
+
+  // If it's a single object, wrap it in an array
+  return [flattening];
+}
+
+function validateSingleFlatteningConfig(flatteningConfig, model, includes) {
+  if (!flatteningConfig.model || !flatteningConfig.as) {
     return {
       isValid: false,
       error: 'Flattening config must specify model and as',
@@ -1187,25 +1197,26 @@ function validateFlatteningConfig(flattening, model, includes) {
   }
 
   // Check if the specified alias exists in includes
-  const includeFound = findIncludeByAlias(includes, flattening.as);
+  const includeFound = findIncludeByAlias(includes, flatteningConfig.as);
   if (!includeFound) {
     // Check if there's a conflicting include with the same model but different alias
     const hasConflictingInclude = includes.some(
-      (inc) => inc.model === flattening.model && inc.as !== flattening.as
+      (inc) =>
+        inc.model === flatteningConfig.model && inc.as !== flatteningConfig.as
     );
 
     if (hasConflictingInclude) {
       return {
         isValid: false,
-        error: `Flattening alias '${flattening.as}' not found in includes, but model is included with a different alias`,
+        error: `Flattening alias '${flatteningConfig.as}' not found in includes, but model is included with a different alias`,
       };
     }
 
     // Auto-create include from flattening config
     // Start with model and as (required fields)
     const autoInclude = {
-      model: flattening.model,
-      as: flattening.as,
+      model: flatteningConfig.model,
+      as: flatteningConfig.as,
     };
 
     // Add all standard Sequelize include options if present in flattening config
@@ -1231,8 +1242,8 @@ function validateFlatteningConfig(flattening, model, includes) {
 
     for (let i = 0; i < includeOptions.length; i++) {
       const option = includeOptions[i];
-      if (flattening.hasOwnProperty(option)) {
-        autoInclude[option] = flattening[option];
+      if (flatteningConfig.hasOwnProperty(option)) {
+        autoInclude[option] = flatteningConfig[option];
       }
     }
 
@@ -1246,14 +1257,38 @@ function validateFlatteningConfig(flattening, model, includes) {
   }
 
   // Validate that the model matches
-  if (includeFound.model !== flattening.model) {
+  if (includeFound.model !== flatteningConfig.model) {
     return {
       isValid: false,
-      error: `Flattening model does not match included model for alias '${flattening.as}'`,
+      error: `Flattening model does not match included model for alias '${flatteningConfig.as}'`,
     };
   }
 
   return { isValid: true, includeFound };
+}
+
+function validateFlatteningConfig(flattening, model, includes) {
+  if (!flattening) {
+    return { isValid: true };
+  }
+
+  const flatteningConfigs = normalizeFlatteningConfig(flattening);
+  let anyAutoCreated = false;
+
+  for (let i = 0; i < flatteningConfigs.length; i++) {
+    const config = flatteningConfigs[i];
+    const validation = validateSingleFlatteningConfig(config, model, includes);
+
+    if (!validation.isValid) {
+      return validation;
+    }
+
+    if (validation.autoCreated) {
+      anyAutoCreated = true;
+    }
+  }
+
+  return { isValid: true, autoCreated: anyAutoCreated };
 }
 
 function buildFlatteningAttributeMap(flattening) {
@@ -1280,13 +1315,23 @@ function isFlattenedField(field, flattening) {
     return false;
   }
 
-  const attributeMap = buildFlatteningAttributeMap(flattening);
+  const flatteningConfigs = normalizeFlatteningConfig(flattening);
 
-  // Check if field matches any target alias or source attribute
-  return (
-    Object.values(attributeMap).includes(field) ||
-    Object.keys(attributeMap).includes(field)
-  );
+  for (let i = 0; i < flatteningConfigs.length; i++) {
+    const config = flatteningConfigs[i];
+    const attributeMap = buildFlatteningAttributeMap(config);
+
+    // Check if field matches any target alias or source attribute
+    const isInMap =
+      Object.values(attributeMap).includes(field) ||
+      Object.keys(attributeMap).includes(field);
+
+    if (isInMap) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function mapFlattenedFieldToIncludePath(field, flattening) {
@@ -1294,18 +1339,23 @@ function mapFlattenedFieldToIncludePath(field, flattening) {
     return null;
   }
 
-  const attributeMap = buildFlatteningAttributeMap(flattening);
+  const flatteningConfigs = normalizeFlatteningConfig(flattening);
 
-  // If field is a target alias, find the source attribute
-  for (const [sourceAttr, targetAlias] of Object.entries(attributeMap)) {
-    if (targetAlias === field) {
-      return `${flattening.as}.${sourceAttr}`;
+  for (let i = 0; i < flatteningConfigs.length; i++) {
+    const config = flatteningConfigs[i];
+    const attributeMap = buildFlatteningAttributeMap(config);
+
+    // If field is a target alias, find the source attribute
+    for (const [sourceAttr, targetAlias] of Object.entries(attributeMap)) {
+      if (targetAlias === field) {
+        return `${config.as}.${sourceAttr}`;
+      }
     }
-  }
 
-  // If field is a source attribute
-  if (attributeMap[field]) {
-    return `${flattening.as}.${field}`;
+    // If field is a source attribute
+    if (attributeMap[field]) {
+      return `${config.as}.${field}`;
+    }
   }
 
   return null;
@@ -1368,17 +1418,27 @@ function flattenResponseData(rows, flattening) {
     return rows;
   }
 
-  const attributeMap = buildFlatteningAttributeMap(flattening);
-  const alias = flattening.as;
+  const flatteningConfigs = normalizeFlatteningConfig(flattening);
 
-  const flattenedRows = [];
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    const flattenedRow = flattenSingleRow(row, attributeMap, alias);
-    flattenedRows.push(flattenedRow);
+  let processedRows = rows;
+
+  // Apply each flattening config sequentially
+  for (let i = 0; i < flatteningConfigs.length; i++) {
+    const config = flatteningConfigs[i];
+    const attributeMap = buildFlatteningAttributeMap(config);
+    const alias = config.as;
+
+    const flattenedRows = [];
+    for (let j = 0; j < processedRows.length; j++) {
+      const row = processedRows[j];
+      const flattenedRow = flattenSingleRow(row, attributeMap, alias);
+      flattenedRows.push(flattenedRow);
+    }
+
+    processedRows = flattenedRows;
   }
 
-  return flattenedRows;
+  return processedRows;
 }
 
 module.exports = {
@@ -1391,6 +1451,7 @@ module.exports = {
   setupFiltering,
   buildResponse,
   validateFlatteningConfig,
+  normalizeFlatteningConfig,
   buildFlatteningAttributeMap,
   isFlattenedField,
   mapFlattenedFieldToIncludePath,

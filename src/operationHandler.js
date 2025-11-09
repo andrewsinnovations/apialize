@@ -21,6 +21,7 @@ const { processPatchRequest } = require('./operations/patchProcessor');
 const { processDestroyRequest } = require('./operations/destroyProcessor');
 const { processListRequest } = require('./operations/listProcessor');
 const { processSearchRequest } = require('./operations/searchProcessor');
+const { processSingleRequest } = require('./operations/singleProcessor');
 
 const OPERATION_TYPES = {
   CREATE: 'create',
@@ -29,6 +30,7 @@ const OPERATION_TYPES = {
   DESTROY: 'destroy',
   LIST: 'list',
   SEARCH: 'search',
+  SINGLE: 'single',
 };
 
 const OPERATION_DEFAULTS = {
@@ -90,6 +92,15 @@ const OPERATION_DEFAULTS = {
     defaultOrderBy: 'id',
     defaultOrderDir: 'ASC',
   },
+  [OPERATION_TYPES.SINGLE]: {
+    middleware: [],
+    id_mapping: 'id',
+    param_name: 'id',
+    pre: null,
+    post: null,
+    related: [],
+    member_routes: [],
+  },
 };
 
 const REQUIRED_MODEL_METHODS = {
@@ -99,6 +110,7 @@ const REQUIRED_MODEL_METHODS = {
   [OPERATION_TYPES.DESTROY]: ['destroy'],
   [OPERATION_TYPES.LIST]: ['findAndCountAll'],
   [OPERATION_TYPES.SEARCH]: ['findAndCountAll'],
+  [OPERATION_TYPES.SINGLE]: ['findOne'],
 };
 
 const OPERATION_PROCESSORS = {
@@ -108,6 +120,7 @@ const OPERATION_PROCESSORS = {
   [OPERATION_TYPES.DESTROY]: processDestroyRequest,
   [OPERATION_TYPES.LIST]: processListRequest,
   [OPERATION_TYPES.SEARCH]: processSearchRequest,
+  [OPERATION_TYPES.SINGLE]: processSingleRequest,
 };
 
 function validateModelForOperation(model, operationType) {
@@ -238,7 +251,8 @@ function createOperationHandler(
       // Execute with or without transactions based on operation type
       const isReadOnlyOperation =
         operationType === OPERATION_TYPES.SEARCH ||
-        operationType === OPERATION_TYPES.LIST;
+        operationType === OPERATION_TYPES.LIST ||
+        operationType === OPERATION_TYPES.SINGLE;
       const executeWithContext = isReadOnlyOperation
         ? withHooksOnly
         : withTransactionAndHooks;
@@ -369,6 +383,19 @@ function list(model, options, modelOptions) {
   return router;
 }
 
+function single(model, options, modelOptions) {
+  const { router, handlers, config } = createOperationHandler(
+    model,
+    OPERATION_TYPES.SINGLE,
+    options,
+    modelOptions
+  );
+
+  router.get(`/:${config.param_name}`, ...handlers);
+  router.apialize = {};
+  return router;
+}
+
 module.exports = {
   createOperationHandler,
   OPERATION_TYPES,
@@ -377,4 +404,5 @@ module.exports = {
   patch,
   destroy,
   list,
+  single,
 };

@@ -1,20 +1,17 @@
+const { single: baseSingle } = require('./operationHandler');
 const utils = require('./utils');
 const express = utils.express;
 const apializeContext = utils.apializeContext;
-const ensureFn = utils.ensureFn;
 const asyncHandler = utils.asyncHandler;
 const defaultNotFound = utils.defaultNotFound;
+const { normalizeId, applyEndpointConfiguration } = require('./operationUtils');
+
+// Import operation handlers for related endpoints
 const list = require('./list');
 const create = require('./create');
 const update = require('./update');
 const patch = require('./patch');
 const destroy = require('./destroy');
-const operationUtils = require('./operationUtils');
-const withTransactionAndHooks = operationUtils.withTransactionAndHooks;
-const optionsWithTransaction = operationUtils.optionsWithTransaction;
-const normalizeId = operationUtils.normalizeId;
-const notFoundWithRollback = operationUtils.notFoundWithRollback;
-const applyEndpointConfiguration = operationUtils.applyEndpointConfiguration;
 
 function getErrorMessage(err) {
   const isDevelopment = process.env.NODE_ENV === 'development';
@@ -121,7 +118,13 @@ function setupRelatedEndpoints(
       );
 
       try {
-        const parent = await parentModel.findOne(queryOptions);
+        // Apply endpoint configuration (scopes, schema) before query
+        const effectiveParentModel = applyEndpointConfiguration(
+          parentModel,
+          parentModelOptions
+        );
+
+        const parent = await effectiveParentModel.findOne(queryOptions);
         const hasParent = parent;
         if (!hasParent) {
           return null;
@@ -651,19 +654,31 @@ function extractArrayOption(options, key) {
   return [];
 }
 
-function single(model, options = {}, modelOptions = {}) {
-  ensureFn(model, 'findOne');
-
+function setupMemberRoutes(
+  router,
+  model,
+  memberRoutes,
+  paramName,
+  idMapping,
+  modelOptions,
+  options
+) {
   const middleware = extractArrayOption(options, 'middleware');
-  const idMapping = extractStringOption(options, 'id_mapping', 'id');
-  const paramName = extractStringOption(options, 'param_name', 'id');
-  const related = extractArrayOption(options, 'related');
-  const pre = options.pre || null;
-  const post = options.post || null;
-  const memberRoutes = extractArrayOption(options, 'member_routes');
-
   const inline = extractMiddlewareFunctions(middleware);
-  const router = express.Router({ mergeParams: true });
+
+  const convertToPlainObject = function (recordPayload) {
+    const isObject = recordPayload && typeof recordPayload === 'object';
+    if (!isObject) {
+      return recordPayload;
+    }
+
+    const hasGetMethod = recordPayload.get;
+    if (hasGetMethod) {
+      return recordPayload.get({ plain: true });
+    }
+
+    return Object.assign({}, recordPayload);
+  };
 
   const setupApializeContext = function (req, paramValue, idMapping) {
     req.apialize.id = paramValue;
@@ -698,67 +713,6 @@ function single(model, options = {}, modelOptions = {}) {
     req.apialize.options.where = fullWhere;
   };
 
-  const convertToPlainObject = function (recordPayload) {
-    const isObject = recordPayload && typeof recordPayload === 'object';
-    if (!isObject) {
-      return recordPayload;
-    }
-
-    const hasGetMethod = recordPayload.get;
-    if (hasGetMethod) {
-      return recordPayload.get({ plain: true });
-    }
-
-    return Object.assign({}, recordPayload);
-  };
-
-  router.get(
-    `/:${paramName}`,
-    apializeContext,
-    ...inline,
-    asyncHandler(async (req, res) => {
-      const effectiveModel = applyEndpointConfiguration(model, modelOptions);
-      const effectiveOptions = Object.assign({}, options, {
-        pre: pre,
-        post: post,
-      });
-
-      const payload = await withTransactionAndHooks(
-        {
-          model: effectiveModel,
-          options: effectiveOptions,
-          req,
-          res,
-          modelOptions,
-          idMapping: idMapping,
-          useReqOptionsTransaction: true,
-        },
-        async (context) => {
-          const paramValue = req.params[paramName];
-          setupApializeContext(req, paramValue, idMapping);
-          buildQueryOptions(req, modelOptions);
-
-          const result = await context.model.findOne(req.apialize.options);
-          const hasResult = result != null;
-          if (!hasResult) {
-            return notFoundWithRollback(context);
-          }
-
-          context.record = result;
-          let recordPayload = convertToPlainObject(result);
-          recordPayload = normalizeId(recordPayload, idMapping);
-
-          context.payload = { success: true, record: recordPayload };
-          return context.payload;
-        }
-      );
-
-      const responseNotSent = !res.headersSent;
-      if (responseNotSent) {
-        res.json(payload);
-      }
-    })
-  );
   const initializeApializeForLoad = function (req) {
     req.apialize = req.apialize || {};
     req.apialize.where = req.apialize.where || {};
@@ -772,7 +726,10 @@ function single(model, options = {}, modelOptions = {}) {
     buildQueryOptions(req, modelOptions);
 
     try {
-      const result = await model.findOne(req.apialize.options);
+      // Apply endpoint configuration (scopes, schema) before query
+      const effectiveModel = applyEndpointConfiguration(model, modelOptions);
+
+      const result = await effectiveModel.findOne(req.apialize.options);
       const hasResult = result != null;
       if (!hasResult) {
         return defaultNotFound(res);
@@ -790,6 +747,7 @@ function single(model, options = {}, modelOptions = {}) {
       return next(err);
     }
   };
+
   const validateRoute = function (route, index) {
     const isValidRoute =
       route && typeof route === 'object' && typeof route.handler === 'function';
@@ -844,41 +802,64 @@ function single(model, options = {}, modelOptions = {}) {
     return [];
   };
 
+  const allowedMethods = ['get', 'post', 'put', 'patch', 'delete'];
+
+  for (let i = 0; i < memberRoutes.length; i++) {
+    const route = memberRoutes[i];
+
+    validateRoute(route, i);
+    const method = validateRouteMethod(route, i, allowedMethods);
+    const subPath = validateRoutePath(route, i);
+
+    const fullPath = `/:${paramName}${subPath}`;
+    const perRouteMiddleware = getRouteMiddleware(route);
+
+    router[method](
+      fullPath,
+      apializeContext,
+      ...inline,
+      asyncHandler(loadSingleRecord),
+      ...perRouteMiddleware,
+      asyncHandler(async (req, res) => {
+        const handlerOutput = await route.handler(req, res);
+        const responseNotSent = !res.headersSent;
+        if (responseNotSent) {
+          const hasOutput = typeof handlerOutput !== 'undefined';
+          if (hasOutput) {
+            return res.json(handlerOutput);
+          }
+          return res.json(req.apialize.singlePayload);
+        }
+      })
+    );
+  }
+}
+
+function single(model, options = {}, modelOptions = {}) {
+  // Create the base router using the standard operation handler
+  const router = baseSingle(model, options, modelOptions);
+
+  const idMapping = extractStringOption(options, 'id_mapping', 'id');
+  const paramName = extractStringOption(options, 'param_name', 'id');
+  const related = extractArrayOption(options, 'related');
+  const memberRoutes = extractArrayOption(options, 'member_routes');
+
+  // Add member routes (custom routes on the single resource)
   const hasMemberRoutes =
     Array.isArray(memberRoutes) && memberRoutes.length > 0;
   if (hasMemberRoutes) {
-    const allowedMethods = ['get', 'post', 'put', 'patch', 'delete'];
-
-    for (let i = 0; i < memberRoutes.length; i++) {
-      const route = memberRoutes[i];
-
-      validateRoute(route, i);
-      const method = validateRouteMethod(route, i, allowedMethods);
-      const subPath = validateRoutePath(route, i);
-
-      const fullPath = `/:${paramName}${subPath}`;
-      const perRouteMiddleware = getRouteMiddleware(route);
-
-      router[method](
-        fullPath,
-        apializeContext,
-        ...inline,
-        asyncHandler(loadSingleRecord),
-        ...perRouteMiddleware,
-        asyncHandler(async (req, res) => {
-          const handlerOutput = await route.handler(req, res);
-          const responseNotSent = !res.headersSent;
-          if (responseNotSent) {
-            const hasOutput = typeof handlerOutput !== 'undefined';
-            if (hasOutput) {
-              return res.json(handlerOutput);
-            }
-            return res.json(req.apialize.singlePayload);
-          }
-        })
-      );
-    }
+    setupMemberRoutes(
+      router,
+      model,
+      memberRoutes,
+      paramName,
+      idMapping,
+      modelOptions,
+      options
+    );
   }
+
+  // Add related endpoints
   const hasRelatedEndpoints = Array.isArray(related) && related.length > 0;
   if (hasRelatedEndpoints) {
     setupRelatedEndpoints(
@@ -891,7 +872,6 @@ function single(model, options = {}, modelOptions = {}) {
     );
   }
 
-  router.apialize = {};
   return router;
 }
 

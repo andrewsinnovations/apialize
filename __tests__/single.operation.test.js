@@ -179,17 +179,18 @@ describe('single operation: comprehensive options coverage', () => {
         pre: [
           async (context) => {
             executionOrder.push('pre1');
-            expect(context.transaction).toBeTruthy();
+            // Single is read-only, should not have transaction by default
+            expect(context.transaction).toBeUndefined();
             return { step: 1 };
           },
           async (context) => {
             executionOrder.push('pre2');
-            expect(context.transaction).toBeTruthy();
+            expect(context.transaction).toBeUndefined();
             return { step: 2 };
           },
           async (context) => {
             executionOrder.push('pre3');
-            expect(context.transaction).toBeTruthy();
+            expect(context.transaction).toBeUndefined();
             return { step: 3, finalPre: true };
           },
         ],
