@@ -29,34 +29,19 @@ function validateBulkCreateRequest(rawBody, allowBulkCreate, context) {
 }
 
 /**
- * Applies ID mapping to output array
+ * Extracts IDs from created instances
  */
-function applyIdMapping(outputArray, idMapping) {
-  const needsIdMapping = idMapping && idMapping !== 'id';
-  if (!needsIdMapping) {
-    return;
-  }
-
-  for (let i = 0; i < outputArray.length; i++) {
-    const row = outputArray[i];
-    const canApplyMapping = row && typeof row === 'object' && row[idMapping];
-
-    if (canApplyMapping) {
-      row.id = row[idMapping];
-    }
-  }
-}
-
-function convertInstancesToPlainObjects(createdArray) {
-  const outputArray = [];
+function extractIdsFromInstances(createdArray, idMapping) {
+  const ids = [];
+  const effectiveIdMapping = idMapping || 'id';
 
   for (let i = 0; i < createdArray.length; i++) {
     const instance = createdArray[i];
-    const plainObject = convertInstanceToPlainObject(instance);
-    outputArray.push(plainObject);
+    const idValue = getIdFromInstance(instance, effectiveIdMapping);
+    ids.push(idValue);
   }
 
-  return outputArray;
+  return ids;
 }
 
 function createBulkOptions(createOptions) {
@@ -76,11 +61,9 @@ function handleBulkCreate(model, rawBody, createOptions, context, idMapping) {
   const bulkOptions = createBulkOptions(createOptions);
 
   return model.bulkCreate(rawBody, bulkOptions).then((createdArray) => {
-    const outputArray = convertInstancesToPlainObjects(createdArray);
-    applyIdMapping(outputArray, idMapping);
-
     context.created = createdArray;
-    context.payload = outputArray;
+    const ids = extractIdsFromInstances(createdArray, idMapping);
+    context.payload = { success: true, ids: ids };
     return context.payload;
   });
 }

@@ -2,7 +2,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const request = require('supertest');
 const { Sequelize, DataTypes } = require('sequelize');
-const { list, search } = require('../src');
+const { list, search, single } = require('../src');
 
 describe('Response Flattening', () => {
   let sequelize;
@@ -1110,6 +1110,201 @@ describe('Response Flattening', () => {
 
       // Restore original method
       Person.findAndCountAll = originalFindAndCountAll;
+    });
+  });
+
+  describe('Single Endpoint with Flattening', () => {
+    test('flattens included model attributes on single endpoint', async () => {
+      const ctx = await buildAppAndModels();
+      const { Person, PersonNames, app } = ctx;
+      const { person1 } = await seedData(Person, PersonNames);
+
+      app.use(
+        '/persons',
+        single(
+          Person,
+          {
+            flattening: {
+              model: PersonNames,
+              as: 'Names',
+              attributes: ['first_name', 'last_name'],
+            },
+          },
+          {
+            include: [{ model: PersonNames, as: 'Names', required: true }],
+          }
+        )
+      );
+
+      const res = await request(app).get(`/persons/${person1.id}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.record).toBeDefined();
+      expect(res.body.record.first_name).toBe('John');
+      expect(res.body.record.last_name).toBe('Doe');
+      expect(res.body.record.Names).toBeUndefined(); // Should be removed after flattening
+      expect(res.body.record.login).toBe('john.doe@example.com'); // Original fields should remain
+    });
+
+    test('single endpoint flattens with attribute aliasing', async () => {
+      const ctx = await buildAppAndModels();
+      const { Person, PersonNames, app } = ctx;
+      const { person2 } = await seedData(Person, PersonNames);
+
+      app.use(
+        '/persons',
+        single(
+          Person,
+          {
+            flattening: {
+              model: PersonNames,
+              as: 'Names',
+              attributes: [
+                'first_name',
+                ['last_name', 'surname'],
+                ['age', 'person_age'],
+              ],
+            },
+          },
+          {
+            include: [{ model: PersonNames, as: 'Names', required: true }],
+          }
+        )
+      );
+
+      const res = await request(app).get(`/persons/${person2.id}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.record.first_name).toBe('Jane');
+      expect(res.body.record.surname).toBe('Smith'); // Aliased field
+      expect(res.body.record.person_age).toBe(25); // Another aliased field
+      expect(res.body.record.last_name).toBeUndefined(); // Original field should not exist
+      expect(res.body.record.age).toBeUndefined(); // Original field should not exist
+      expect(res.body.record.Names).toBeUndefined(); // Include should be removed
+    });
+
+    test('single endpoint works with id_mapping and flattening', async () => {
+      const ctx = await buildAppAndModels();
+      const { Person, PersonNames, app } = ctx;
+      await seedData(Person, PersonNames);
+
+      app.use(
+        '/persons',
+        single(
+          Person,
+          {
+            id_mapping: 'external_id',
+            flattening: {
+              model: PersonNames,
+              as: 'Names',
+              attributes: ['first_name', ['last_name', 'lname']],
+            },
+          },
+          {
+            include: [{ model: PersonNames, as: 'Names', required: true }],
+          }
+        )
+      );
+
+      const res = await request(app).get('/persons/person-123');
+
+      expect(res.status).toBe(200);
+      expect(res.body.record.id).toBe('person-123'); // Should use external_id
+      expect(res.body.record.first_name).toBe('John');
+      expect(res.body.record.lname).toBe('Doe');
+    });
+
+    test('single endpoint flattening with multiple attributes', async () => {
+      const ctx = await buildAppAndModels();
+      const { Person, PersonNames, app } = ctx;
+      const { person3 } = await seedData(Person, PersonNames);
+
+      app.use(
+        '/persons',
+        single(
+          Person,
+          {
+            flattening: {
+              model: PersonNames,
+              as: 'Names',
+              attributes: ['first_name', 'last_name', 'age', 'is_preferred'],
+            },
+          },
+          {
+            include: [{ model: PersonNames, as: 'Names', required: true }],
+          }
+        )
+      );
+
+      const res = await request(app).get(`/persons/${person3.id}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.record.first_name).toBe('Bob');
+      expect(res.body.record.last_name).toBe('Johnson');
+      expect(res.body.record.age).toBe(35);
+      expect(res.body.record.is_preferred).toBe(true);
+      expect(res.body.record.Names).toBeUndefined();
+    });
+
+    test('single endpoint returns 404 when record not found with flattening', async () => {
+      const ctx = await buildAppAndModels();
+      const { Person, PersonNames, app } = ctx;
+      await seedData(Person, PersonNames);
+
+      app.use(
+        '/persons',
+        single(
+          Person,
+          {
+            flattening: {
+              model: PersonNames,
+              as: 'Names',
+              attributes: ['first_name', 'last_name'],
+            },
+          },
+          {
+            include: [{ model: PersonNames, as: 'Names', required: true }],
+          }
+        )
+      );
+
+      const res = await request(app).get('/persons/99999');
+
+      expect(res.status).toBe(404);
+    });
+
+    test('single endpoint flattening works with array config', async () => {
+      const ctx = await buildAppAndModels();
+      const { Person, PersonNames, app } = ctx;
+      const { person1 } = await seedData(Person, PersonNames);
+
+      app.use(
+        '/persons',
+        single(
+          Person,
+          {
+            flattening: [
+              {
+                model: PersonNames,
+                as: 'Names',
+                attributes: ['first_name', ['last_name', 'family_name']],
+              },
+            ],
+          },
+          {
+            include: [{ model: PersonNames, as: 'Names', required: true }],
+          }
+        )
+      );
+
+      const res = await request(app).get(`/persons/${person1.id}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.record.first_name).toBe('John');
+      expect(res.body.record.family_name).toBe('Doe');
+      expect(res.body.record.last_name).toBeUndefined();
+      expect(res.body.record.Names).toBeUndefined();
     });
   });
 });

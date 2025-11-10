@@ -51,13 +51,12 @@ describe('create operation: batch array body', () => {
 
     const res = await request(app).post('/items').send(payload);
     expect(res.status).toBe(201);
-    expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body.length).toBe(2);
-    // Ensure ids are present on returned objects
-    for (const row of res.body) {
-      expect(row).toHaveProperty('id');
-      expect(row).toHaveProperty('external_id');
-    }
+    expect(res.body.success).toBe(true);
+    expect(Array.isArray(res.body.ids)).toBe(true);
+    expect(res.body.ids.length).toBe(2);
+    // Ensure ids are numeric (auto-incremented)
+    expect(typeof res.body.ids[0]).toBe('number');
+    expect(typeof res.body.ids[1]).toBe('number');
 
     // Verify persisted via list
     const listRes = await request(app).get('/items');
@@ -99,8 +98,9 @@ describe('create operation: batch array body', () => {
 
     const res = await request(app).post('/items').send(payload);
     expect(res.status).toBe(201);
-    expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body.map((r) => r.id)).toEqual(['m1', 'm2']);
+    expect(res.body.success).toBe(true);
+    expect(Array.isArray(res.body.ids)).toBe(true);
+    expect(res.body.ids).toEqual(['m1', 'm2']);
   });
 
   test('returns 400 when allow_bulk_create is false (default) and body is array', async () => {
