@@ -100,6 +100,7 @@ const OPERATION_DEFAULTS = {
     post: null,
     related: [],
     member_routes: [],
+    flattening: null,
   },
 };
 

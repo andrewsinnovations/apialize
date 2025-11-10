@@ -4,6 +4,9 @@ const {
   notFoundWithRollback,
   normalizeId,
 } = require('../operationUtils');
+const {
+  flattenResponseData,
+} = require('../listUtils');
 
 /**
  * Converts record to plain object
@@ -96,6 +99,12 @@ async function processSingleRequest(context, config, req, res) {
   context.record = result;
   let recordPayload = convertToPlainObject(result);
   recordPayload = normalizeId(recordPayload, config.id_mapping);
+
+  // Apply flattening if configured
+  if (config.flattening) {
+    const flattenedArray = flattenResponseData([recordPayload], config.flattening);
+    recordPayload = flattenedArray[0];
+  }
 
   context.payload = { success: true, record: recordPayload };
   return context.payload;
