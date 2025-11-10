@@ -197,30 +197,30 @@ function setupRelatedEndpoints(
 
         const hasParentId =
           parentInternalId !== null && typeof parentInternalId !== 'undefined';
-        
+
         if (hasParentId) {
           // Check if this is a many-to-many relationship with a through table
           const hasThroughModel = relatedConfig.through;
-          
+
           if (hasThroughModel) {
             // Many-to-many: use include with through table
             if (!req.apialize.options.include) {
               req.apialize.options.include = [];
             }
-            
+
             // Build the include object for the through table
             const throughInclude = {
               model: relatedConfig.through,
               where: { [relatedForeignKey]: parentInternalId },
               required: true,
-              attributes: [] // Don't include through table attributes in results
+              attributes: [], // Don't include through table attributes in results
             };
-            
+
             // Add the 'as' alias if provided in the related config
             if (relatedConfig.as) {
               throughInclude.as = relatedConfig.as;
             }
-            
+
             req.apialize.options.include.push(throughInclude);
           } else {
             // Direct foreign key relationship
@@ -233,18 +233,18 @@ function setupRelatedEndpoints(
             if (!req.apialize.options.include) {
               req.apialize.options.include = [];
             }
-            
+
             const throughInclude = {
               model: relatedConfig.through,
               where: { [relatedForeignKey]: '__apialize_none__' },
               required: true,
-              attributes: []
+              attributes: [],
             };
-            
+
             if (relatedConfig.as) {
               throughInclude.as = relatedConfig.as;
             }
-            
+
             req.apialize.options.include.push(throughInclude);
           } else {
             req.apialize.options.where[relatedForeignKey] = '__apialize_none__';
