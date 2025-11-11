@@ -53,6 +53,18 @@ function setupRelatedEndpoints(
 
     const endpointPath = path || modelNameToPath(relatedModel.name);
 
+    // Use configurable param_name, respecting model's underscored setting
+    // If underscored=true: {model}_id, otherwise: {model}Id
+    const isUnderscored =
+      relatedModel.options && relatedModel.options.underscored;
+    const modelNameLower = relatedModel.name.toLowerCase();
+    const defaultParamName = isUnderscored
+      ? modelNameLower + '_id'
+      : modelNameLower.charAt(0).toLowerCase() +
+        relatedModel.name.slice(1) +
+        'Id';
+    const relatedParamName = relatedConfig.param_name || defaultParamName;
+
     const relatedForeignKey =
       foreignKey || parentModel.name.toLowerCase() + '_id';
 
@@ -188,6 +200,10 @@ function setupRelatedEndpoints(
 
       return asyncHandler(async function (req, res, next) {
         initializeApializeContext(req);
+
+        // Clear WHERE clause for this nested level to avoid accumulating
+        // constraints from parent levels that don't apply to this model
+        req.apialize.options.where = {};
 
         const parentInternalId = await resolveParentInternalId(
           req,
@@ -388,9 +404,12 @@ function setupRelatedEndpoints(
     const resolveOpConfig = function (opName) {
       const op = getOperationConfig(perOperation, opName);
       const isWrite = isWriteOperation(opName);
-      const baseMw = isWrite ? baseWriteMiddleware : baseReadMiddleware;
+
+      // Get operation-specific middleware only (not including parent filters)
+      // Parent filters will be applied at the router level instead
       const opMiddleware = getOperationMiddleware(op);
-      const mergedMiddleware = mergeMiddleware(baseMw, opMiddleware);
+      const relatedMiddleware = getRelatedMiddleware(relatedOptions);
+      const mergedMiddleware = mergeMiddleware(relatedMiddleware, opMiddleware);
 
       const mergedOptions = Object.assign({}, relatedOptions, op);
       mergedOptions.middleware = mergedMiddleware;
@@ -406,6 +425,12 @@ function setupRelatedEndpoints(
         id_mapping: op.id_mapping || relatedOptions.id_mapping || 'id',
         middleware: mergedMiddleware,
         allow_bulk_delete: allowBulkDelete,
+        // Return parent filters separately so they can be applied at router level
+        parentFilterForRead: isWrite ? null : parentFilterForRead,
+        parentFilterForWrite: isWrite ? parentFilterForWrite : null,
+        setForeignKeyMiddleware: isWrite
+          ? setForeignKeyMiddlewareFactory(parentParamName, true)
+          : null,
       };
     };
 
@@ -423,14 +448,22 @@ function setupRelatedEndpoints(
 
     const hasListOperation = hasOperation(operations, 'list');
     if (hasListOperation) {
-      const { options: listOptions, modelOptions: listModelOptions } =
-        resolveOpConfig('list');
+      const {
+        options: listOptions,
+        modelOptions: listModelOptions,
+        parentFilterForRead,
+      } = resolveOpConfig('list');
       const relatedListRouter = list(
         relatedModel,
         listOptions,
         listModelOptions
       );
-      relatedRouter.use('/', relatedListRouter);
+      // Apply parent filter before the list operation
+      if (parentFilterForRead) {
+        relatedRouter.use('/', parentFilterForRead, relatedListRouter);
+      } else {
+        relatedRouter.use('/', relatedListRouter);
+      }
     }
 
     const hasPostOperation = hasOperation(operations, 'post');
@@ -438,14 +471,28 @@ function setupRelatedEndpoints(
     const hasCreateOrPost = hasPostOperation || hasCreateOperation;
 
     if (hasCreateOrPost) {
-      const { options: createOptions, modelOptions: postModelOptions } =
-        resolveOpConfig('post');
+      const {
+        options: createOptions,
+        modelOptions: postModelOptions,
+        parentFilterForWrite,
+        setForeignKeyMiddleware,
+      } = resolveOpConfig('post');
       const relatedCreateRouter = create(
         relatedModel,
         createOptions,
         postModelOptions
       );
-      relatedRouter.use('/', relatedCreateRouter);
+      // Apply parent filter and foreign key setter before create operation
+      const writeMiddleware = [];
+      if (parentFilterForWrite) writeMiddleware.push(parentFilterForWrite);
+      if (setForeignKeyMiddleware)
+        writeMiddleware.push(setForeignKeyMiddleware);
+
+      if (writeMiddleware.length > 0) {
+        relatedRouter.use('/', ...writeMiddleware, relatedCreateRouter);
+      } else {
+        relatedRouter.use('/', relatedCreateRouter);
+      }
     }
 
     const hasGetOperation = hasOperation(operations, 'get');
@@ -454,10 +501,10 @@ function setupRelatedEndpoints(
         options: getOptions,
         modelOptions: getModelOptions,
         id_mapping: relatedIdMapping,
+        parentFilterForRead,
       } = resolveOpConfig('get');
 
       const childSingleOptions = Object.assign({}, getOptions);
-      const relatedParamName = relatedModel.name.toLowerCase() + 'Id';
       childSingleOptions.param_name = relatedParamName;
       childSingleOptions.id_mapping = relatedIdMapping;
 
@@ -479,7 +526,13 @@ function setupRelatedEndpoints(
         next();
       };
 
-      nested.use('/', storeRelatedParentIdMiddleware, childSingleRouter);
+      // Apply parent filter at router level (before child operation's pre/post hooks)
+      const nestedMiddleware = [];
+      if (parentFilterForRead) nestedMiddleware.push(parentFilterForRead);
+      nestedMiddleware.push(storeRelatedParentIdMiddleware);
+      nestedMiddleware.push(childSingleRouter);
+
+      nested.use('/', ...nestedMiddleware);
       relatedRouter.use('/', nested);
     }
 
@@ -488,26 +541,46 @@ function setupRelatedEndpoints(
     const hasUpdateOrPut = hasPutOperation || hasUpdateOperation;
 
     if (hasUpdateOrPut) {
-      const { options: updateOptions, modelOptions: putModelOptions } =
-        resolveOpConfig('put');
+      const {
+        options: updateOptions,
+        modelOptions: putModelOptions,
+        parentFilterForWrite,
+        setForeignKeyMiddleware,
+      } = resolveOpConfig('put');
       const relatedUpdateRouter = update(
         relatedModel,
         updateOptions,
         putModelOptions || {}
       );
-      relatedRouter.use('/', storeParentIdMiddleware, relatedUpdateRouter);
+      // Apply parent filter at router level (before child operation's pre/post hooks)
+      const writeMiddleware = [storeParentIdMiddleware];
+      if (parentFilterForWrite) writeMiddleware.push(parentFilterForWrite);
+      if (setForeignKeyMiddleware)
+        writeMiddleware.push(setForeignKeyMiddleware);
+
+      relatedRouter.use('/', ...writeMiddleware, relatedUpdateRouter);
     }
 
     const hasPatchOperation = hasOperation(operations, 'patch');
     if (hasPatchOperation) {
-      const { options: patchOptions, modelOptions: patchModelOptions } =
-        resolveOpConfig('patch');
+      const {
+        options: patchOptions,
+        modelOptions: patchModelOptions,
+        parentFilterForWrite,
+        setForeignKeyMiddleware,
+      } = resolveOpConfig('patch');
       const relatedPatchRouter = patch(
         relatedModel,
         patchOptions,
         patchModelOptions || {}
       );
-      relatedRouter.use('/', storeParentIdMiddleware, relatedPatchRouter);
+      // Apply parent filter at router level (before child operation's pre/post hooks)
+      const writeMiddleware = [storeParentIdMiddleware];
+      if (parentFilterForWrite) writeMiddleware.push(parentFilterForWrite);
+      if (setForeignKeyMiddleware)
+        writeMiddleware.push(setForeignKeyMiddleware);
+
+      relatedRouter.use('/', ...writeMiddleware, relatedPatchRouter);
     }
 
     const hasDeleteOperation = hasOperation(operations, 'delete');
@@ -515,20 +588,31 @@ function setupRelatedEndpoints(
     const hasDeleteOrDestroy = hasDeleteOperation || hasDestroyOperation;
 
     if (hasDeleteOrDestroy) {
-      const { options: destroyOptions, modelOptions: deleteModelOptions } =
-        resolveOpConfig('delete');
+      const {
+        options: destroyOptions,
+        modelOptions: deleteModelOptions,
+        parentFilterForWrite,
+        setForeignKeyMiddleware,
+      } = resolveOpConfig('delete');
       const relatedDestroyRouter = destroy(
         relatedModel,
         destroyOptions,
         deleteModelOptions || {}
       );
-      relatedRouter.use('/', storeParentIdMiddleware, relatedDestroyRouter);
+      // Apply parent filter at router level (before child operation's pre/post hooks)
+      const writeMiddleware = [storeParentIdMiddleware];
+      if (parentFilterForWrite) writeMiddleware.push(parentFilterForWrite);
+      if (setForeignKeyMiddleware)
+        writeMiddleware.push(setForeignKeyMiddleware);
+
+      relatedRouter.use('/', ...writeMiddleware, relatedDestroyRouter);
 
       const {
         modelOptions: bulkDelModelOptions,
         id_mapping: bulkDelIdMapping,
         middleware: bulkDelMiddleware,
         allow_bulk_delete,
+        parentFilterForWrite: bulkDelParentFilter,
       } = resolveOpConfig('delete');
 
       const shouldAllowBulkDelete = allow_bulk_delete;
@@ -579,11 +663,17 @@ function setupRelatedEndpoints(
           return ids;
         };
 
+        // Build middleware for bulk delete route
+        const bulkDelRouteMiddleware = [storeParentIdMiddleware];
+        if (bulkDelParentFilter) {
+          bulkDelRouteMiddleware.push(bulkDelParentFilter);
+        }
+        bulkDelRouteMiddleware.push(apializeContext);
+        bulkDelRouteMiddleware.push(...bulkDelMiddleware);
+
         relatedRouter.delete(
           '/',
-          storeParentIdMiddleware,
-          apializeContext,
-          ...bulkDelMiddleware,
+          ...bulkDelRouteMiddleware,
           asyncHandler(async (req, res) => {
             const confirmed = isConfirmed(req.query);
             const baseWhere = getBaseWhere(req);
@@ -884,7 +974,6 @@ function setupMemberRoutes(
 }
 
 function single(model, options = {}, modelOptions = {}) {
-  // Create the base router using the standard operation handler
   const router = baseSingle(model, options, modelOptions);
 
   const idMapping = extractStringOption(options, 'id_mapping', 'id');

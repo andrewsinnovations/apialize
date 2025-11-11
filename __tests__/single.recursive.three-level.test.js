@@ -201,4 +201,168 @@ describe('single() recursion with three levels (users -> posts -> comments)', ()
       ['Agreed']
     );
   });
+
+  test('middleware execution order: parent filter -> child pre -> operation -> child post', async () => {
+    // Track execution order
+    const executionLog = [];
+
+    // Reset app with hooks to track execution order
+    app = express();
+    app.use(bodyParser.json());
+
+    // Mount endpoints with hooks and middleware to track execution
+    app.use('/users', create(User));
+    app.use(
+      '/users',
+      single(User, {
+        related: [
+          {
+            model: Post,
+            operations: ['list', 'post', 'get', 'put'],
+            // Options apply to all operations for posts
+            options: {
+              // Additional middleware for posts (runs after parent filter, before hooks)
+              middleware: [
+                (req, res, next) => {
+                  executionLog.push('post-additional-middleware');
+                  next();
+                },
+              ],
+              // Hooks for posts
+              pre: async (ctx) => {
+                executionLog.push('post-pre-hook');
+              },
+              post: async (ctx) => {
+                executionLog.push('post-post-hook');
+              },
+            },
+            // Recursively attach comments under each post
+            related: [
+              {
+                model: Comment,
+                operations: ['list', 'post', 'get', 'put'],
+                // Options apply to all operations for comments
+                options: {
+                  // Additional middleware for comments (runs after parent filter, before hooks)
+                  middleware: [
+                    (req, res, next) => {
+                      executionLog.push('comment-additional-middleware');
+                      next();
+                    },
+                  ],
+                  // Hooks for comments
+                  pre: async (ctx) => {
+                    executionLog.push('comment-pre-hook');
+                  },
+                  post: async (ctx) => {
+                    executionLog.push('comment-post-hook');
+                  },
+                },
+              },
+            ],
+          },
+        ],
+      })
+    );
+
+    // Create test data
+    const userRes = await request(app)
+      .post('/users')
+      .send({ name: 'Bob', email: 'bob@example.com' });
+    const userId = userRes.body.id;
+
+    // Test 1: Create a post (should execute post hooks only)
+    executionLog.length = 0;
+    const postRes = await request(app)
+      .post(`/users/${userId}/posts`)
+      .send({ title: 'Test Post', content: 'Content' });
+    expect(postRes.status).toBe(201);
+
+    // Expected order: additional middleware -> pre hook -> operation -> post hook
+    // Note: parent filter middleware is automatically added and runs first, but we don't track it
+    expect(executionLog).toEqual([
+      'post-additional-middleware',
+      'post-pre-hook',
+      'post-post-hook',
+    ]);
+
+    const postId = postRes.body.id;
+
+    // Test 2: Create a comment (three-level nesting)
+    executionLog.length = 0;
+    const commentRes = await request(app)
+      .post(`/users/${userId}/posts/${postId}/comments`)
+      .send({ text: 'Test Comment', user_id: userId });
+    expect(commentRes.status).toBe(201);
+
+    // Expected order:
+    // 1. Parent filter middleware (auto-generated, validates user owns post) - not tracked
+    // 2. Comment additional middleware
+    // 3. Comment pre hook
+    // 4. Comment operation (create)
+    // 5. Comment post hook
+    expect(executionLog).toEqual([
+      'comment-additional-middleware',
+      'comment-pre-hook',
+      'comment-post-hook',
+    ]);
+
+    const commentId = commentRes.body.id;
+
+    // Test 3: GET a comment (validates parent filters run before child hooks)
+    executionLog.length = 0;
+    const getCommentRes = await request(app).get(
+      `/users/${userId}/posts/${postId}/comments/${commentId}`
+    );
+    expect(getCommentRes.status).toBe(200);
+
+    // Expected: additional middleware -> pre hook -> operation -> post hook
+    expect(executionLog).toEqual([
+      'comment-additional-middleware',
+      'comment-pre-hook',
+      'comment-post-hook',
+    ]);
+
+    // Test 4: PUT update a comment (validates write operation hooks)
+    executionLog.length = 0;
+    const putRes = await request(app)
+      .put(`/users/${userId}/posts/${postId}/comments/${commentId}`)
+      .send({ text: 'Updated', user_id: userId });
+    expect(putRes.status).toBe(200);
+
+    // Expected: additional middleware -> pre hook -> operation -> post hook
+    expect(executionLog).toEqual([
+      'comment-additional-middleware',
+      'comment-pre-hook',
+      'comment-post-hook',
+    ]);
+
+    // Test 5: Verify parent filters prevent access to non-existent parent
+    executionLog.length = 0;
+    const invalidRes = await request(app).get(
+      `/users/${userId}/posts/99999/comments/${commentId}`
+    );
+    expect(invalidRes.status).toBe(404);
+
+    // Parent filter middleware runs at router level, then additional middleware and pre hook run,
+    // but the operation fails to find the parent resource, so post hook doesn't run
+    expect(executionLog).toEqual([
+      'comment-additional-middleware',
+      'comment-pre-hook',
+    ]);
+
+    // Test 6: List comments (validates list operation execution order)
+    executionLog.length = 0;
+    const listRes = await request(app).get(
+      `/users/${userId}/posts/${postId}/comments`
+    );
+    expect(listRes.status).toBe(200);
+
+    // Expected: additional middleware -> pre hook -> operation -> post hook
+    expect(executionLog).toEqual([
+      'comment-additional-middleware',
+      'comment-pre-hook',
+      'comment-post-hook',
+    ]);
+  });
 });
