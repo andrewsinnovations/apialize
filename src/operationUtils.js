@@ -472,7 +472,7 @@ async function mapForeignKeyValues(rows, relationIdMapping, sourceModel) {
   }
 
   try {
-    const lookupsNeeded = collectForeignKeyValues(rows, fkMappings);
+    const lookupsNeeded = collectForeignKeyValues(rows, fkMappings, false);
     const lookupResults = await performBulkLookups(lookupsNeeded);
     const mappedRows = applyMappingsToAllRows(rows, fkMappings, lookupResults);
     return mappedRows;
@@ -494,27 +494,53 @@ function initializeLookupEntry(mapping) {
   };
 }
 
-function processRowForForeignKeys(row, mappingKeys, fkMappings, lookupsNeeded) {
+function processRowForForeignKeys(
+  row,
+  mappingKeys,
+  fkMappings,
+  lookupsNeeded,
+  includeNested
+) {
   for (let j = 0; j < mappingKeys.length; j++) {
     const fkField = mappingKeys[j];
     const mapping = fkMappings[fkField];
 
     const fieldHasValue = row[fkField] != null;
-    if (!fieldHasValue) {
-      continue;
-    }
+    if (fieldHasValue) {
+      const modelKey = getModelKey(mapping);
+      const lookupNotInitialized = !lookupsNeeded[modelKey];
+      if (lookupNotInitialized) {
+        lookupsNeeded[modelKey] = initializeLookupEntry(mapping);
+      }
 
-    const modelKey = getModelKey(mapping);
-    const lookupNotInitialized = !lookupsNeeded[modelKey];
-    if (lookupNotInitialized) {
-      lookupsNeeded[modelKey] = initializeLookupEntry(mapping);
+      lookupsNeeded[modelKey].values.add(row[fkField]);
     }
+  }
 
-    lookupsNeeded[modelKey].values.add(row[fkField]);
+  // If includeNested is true, recursively process nested objects
+  if (includeNested) {
+    const keys = Object.keys(row);
+    for (let k = 0; k < keys.length; k++) {
+      const key = keys[k];
+      const value = row[key];
+
+      // Check if this is a nested object (included model)
+      const isNestedObject =
+        value && typeof value === 'object' && !Array.isArray(value);
+      if (isNestedObject) {
+        processRowForForeignKeys(
+          value,
+          mappingKeys,
+          fkMappings,
+          lookupsNeeded,
+          includeNested
+        );
+      }
+    }
   }
 }
 
-function collectForeignKeyValues(rows, fkMappings) {
+function collectForeignKeyValues(rows, fkMappings, includeNested) {
   const lookupsNeeded = {};
   const mappingKeys = Object.keys(fkMappings);
 
@@ -525,7 +551,13 @@ function collectForeignKeyValues(rows, fkMappings) {
       continue;
     }
 
-    processRowForForeignKeys(row, mappingKeys, fkMappings, lookupsNeeded);
+    processRowForForeignKeys(
+      row,
+      mappingKeys,
+      fkMappings,
+      lookupsNeeded,
+      includeNested
+    );
   }
 
   return lookupsNeeded;
@@ -603,6 +635,68 @@ function applyMappingToSingleField(mappedRow, fkField, mapping, lookupResults) {
   }
 }
 
+function normalizeNestedIncludedModels(
+  row,
+  relationIdMapping,
+  fkMappings,
+  lookupResults
+) {
+  if (!row || typeof row !== 'object') {
+    return;
+  }
+
+  // Iterate through all properties looking for nested included models
+  const keys = Object.keys(row);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const value = row[key];
+
+    // Skip null/undefined values
+    if (value == null) {
+      continue;
+    }
+
+    // Check if this is a nested object (included model)
+    const isNestedObject = typeof value === 'object' && !Array.isArray(value);
+    if (!isNestedObject) {
+      continue;
+    }
+
+    // Apply foreign key mappings to nested object
+    if (fkMappings && lookupResults) {
+      const mappingKeys = Object.keys(fkMappings);
+      for (let j = 0; j < mappingKeys.length; j++) {
+        const fkField = mappingKeys[j];
+        const mapping = fkMappings[fkField];
+        applyMappingToSingleField(value, fkField, mapping, lookupResults);
+      }
+    }
+
+    // Try to find a mapping for this nested model's id field
+    for (let j = 0; j < relationIdMapping.length; j++) {
+      const mapping = relationIdMapping[j];
+      if (!mapping.model || !mapping.id_field) {
+        continue;
+      }
+
+      // If the nested object has the id_field, normalize it
+      const hasIdField = value.hasOwnProperty(mapping.id_field);
+      if (hasIdField && value.id !== undefined) {
+        value.id = value[mapping.id_field];
+        delete value[mapping.id_field];
+      }
+    }
+
+    // Recursively normalize any further nested objects
+    normalizeNestedIncludedModels(
+      value,
+      relationIdMapping,
+      fkMappings,
+      lookupResults
+    );
+  }
+}
+
 function applyAllMappingsToRow(row, fkMappings, lookupResults) {
   const isValidRow = isValidRowForNormalization(row);
   if (!isValidRow) {
@@ -649,11 +743,43 @@ async function normalizeRowsWithForeignKeys(
   const hasForeignKeyMapping =
     Array.isArray(relationIdMapping) && relationIdMapping.length > 0;
   if (hasForeignKeyMapping) {
-    return await mapForeignKeyValues(
+    // Get the foreign key mappings for reuse in nested objects
+    const modelForAssociations = getModelForAssociations(
+      sourceModel,
+      relationIdMapping
+    );
+    const allFkMappings = modelForAssociations
+      ? identifyForeignKeyFields(modelForAssociations, relationIdMapping)
+      : {};
+    const fkMappings = filterMappingsByExistingFields(
+      allFkMappings,
+      normalized
+    );
+
+    const mapped = await mapForeignKeyValues(
       normalized,
       relationIdMapping,
       sourceModel
     );
+
+    // Also normalize id and foreign key fields of nested included models
+    // Collect foreign key values from the entire object tree (including nested)
+    const lookupsNeeded = collectForeignKeyValues(mapped, fkMappings, true);
+    const lookupResults =
+      Object.keys(lookupsNeeded).length > 0
+        ? await performBulkLookups(lookupsNeeded)
+        : {};
+
+    for (let i = 0; i < mapped.length; i++) {
+      normalizeNestedIncludedModels(
+        mapped[i],
+        relationIdMapping,
+        fkMappings,
+        lookupResults
+      );
+    }
+
+    return mapped;
   }
 
   return normalized;

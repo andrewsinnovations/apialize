@@ -3,6 +3,7 @@ const {
   optionsWithTransaction,
   notFoundWithRollback,
   normalizeId,
+  normalizeRowsWithForeignKeys,
 } = require('../operationUtils');
 const {
   flattenResponseData,
@@ -125,7 +126,11 @@ async function processSingleRequest(context, config, req, res) {
 
   // Validate and auto-create includes from flattening config if needed
   if (config.flattening) {
-    const includes = getIncludesFromContext(req, context.model, context.modelOptions);
+    const includes = getIncludesFromContext(
+      req,
+      context.model,
+      context.modelOptions
+    );
     const validation = validateFlatteningConfig(
       config.flattening,
       context.model,
@@ -165,6 +170,17 @@ async function processSingleRequest(context, config, req, res) {
   context.record = result;
   let recordPayload = convertToPlainObject(result);
   recordPayload = normalizeId(recordPayload, config.id_mapping);
+
+  // Apply relation_id_mapping if configured
+  if (config.relation_id_mapping) {
+    const normalizedRows = await normalizeRowsWithForeignKeys(
+      [recordPayload],
+      config.id_mapping,
+      config.relation_id_mapping,
+      context.model
+    );
+    recordPayload = normalizedRows[0];
+  }
 
   // Apply flattening if configured
   if (config.flattening) {

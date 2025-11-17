@@ -101,6 +101,7 @@ const OPERATION_DEFAULTS = {
     related: [],
     member_routes: [],
     flattening: null,
+    relation_id_mapping: null,
   },
 };
 
