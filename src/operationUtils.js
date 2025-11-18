@@ -325,10 +325,11 @@ function processSequelizeAssociations(model, relationIdMapping, fkMappings) {
     const mapping = findMappingForTargetModel(relationIdMapping, targetModel);
 
     if (mapping) {
+      const pkField = targetModel.primaryKeyAttribute || 'id';
       fkMappings[fkField] = {
         model: mapping.model,
         id_field: mapping.id_field,
-        pk_field: 'id',
+        pk_field: mapping.pk_field || 'id',
         association: associationName,
       };
     }
@@ -377,10 +378,11 @@ function identifyForeignKeyFields(model, relationIdMapping) {
         const notAlreadyMapped = !fkMappings[fkName];
 
         if (attributeExists && notAlreadyMapped) {
+          const pkField = mapping.model.primaryKeyAttribute || 'id';
           fkMappings[fkName] = {
             model: mapping.model,
             id_field: mapping.id_field,
-            pk_field: 'id',
+            pk_field: mapping.pk_field || 'id',
             association: null,
           };
         }
@@ -756,20 +758,22 @@ async function normalizeRowsWithForeignKeys(
       normalized
     );
 
-    const mapped = await mapForeignKeyValues(
-      normalized,
-      relationIdMapping,
-      sourceModel
-    );
-
-    // Also normalize id and foreign key fields of nested included models
-    // Collect foreign key values from the entire object tree (including nested)
-    const lookupsNeeded = collectForeignKeyValues(mapped, fkMappings, true);
+    // Collect foreign key values from the ORIGINAL normalized data (before mapping)
+    // This includes nested objects for the second lookup
+    const lookupsNeeded = collectForeignKeyValues(normalized, fkMappings, true);
     const lookupResults =
       Object.keys(lookupsNeeded).length > 0
         ? await performBulkLookups(lookupsNeeded)
         : {};
 
+    // Apply the mappings to transform foreign key values
+    const mapped = applyMappingsToAllRows(
+      normalized,
+      fkMappings,
+      lookupResults
+    );
+
+    // Also normalize id and foreign key fields of nested included models
     for (let i = 0; i < mapped.length; i++) {
       normalizeNestedIncludedModels(
         mapped[i],

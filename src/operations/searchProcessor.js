@@ -210,6 +210,37 @@ function processFieldForIncludes(key, model, includes, relationIdMapping) {
   };
 }
 
+function findForeignKeyRelationMapping(fieldName, model, relationIdMapping) {
+  if (!Array.isArray(relationIdMapping) || !model || !model.associations) {
+    return null;
+  }
+
+  // Check if this field is a foreign key in any association
+  const associationNames = Object.keys(model.associations);
+  for (let i = 0; i < associationNames.length; i++) {
+    const association = model.associations[associationNames[i]];
+
+    if (
+      association.associationType === 'BelongsTo' &&
+      association.foreignKey === fieldName
+    ) {
+      // This is a foreign key field - find the relation mapping for the target model
+      const targetModel = association.target;
+      const mapping = findRelationMapping(relationIdMapping, targetModel);
+
+      if (mapping && mapping.id_field) {
+        return {
+          targetModel: targetModel,
+          idField: mapping.id_field,
+          association: association,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
 function resolveFieldContext(
   key,
   model,
@@ -264,6 +295,88 @@ function buildFieldPredicate(
 ) {
   const dialect = getDatabaseDialect(model);
   const operators = getCaseInsensitiveOperators(dialect, Op);
+
+  // Check if this is a foreign key field with relation_id_mapping
+  // If so, we need to reverse-map: query the related model's id_field instead
+  const fkMapping = findForeignKeyRelationMapping(
+    key,
+    model,
+    relationIdMapping
+  );
+  if (fkMapping) {
+    // Build a where condition using the association alias
+    const alias =
+      fkMapping.association.as || fkMapping.association.associationAccessor;
+
+    // Create the where condition for the external ID
+    let externalIdWhere;
+    if (rawVal && typeof rawVal === 'object' && !Array.isArray(rawVal)) {
+      // Handle operators like {in: [...], gte: ...}
+      const operatorMapping = getOperatorMapping(Op, operators);
+      externalIdWhere = {};
+
+      const opKeys = Object.keys(rawVal);
+
+      for (let i = 0; i < opKeys.length; i++) {
+        const opKey = opKeys[i];
+        const opValue = rawVal[opKey];
+
+        if (Object.prototype.hasOwnProperty.call(operatorMapping, opKey)) {
+          const sequelizeOp = operatorMapping[opKey];
+          const transformedValue = transformOperatorValue(opKey, opValue);
+          externalIdWhere[sequelizeOp] = transformedValue;
+        }
+      }
+
+      // If no operators were found, treat whole object as equality
+      if (
+        Object.keys(externalIdWhere).length === 0 &&
+        Object.getOwnPropertySymbols(externalIdWhere).length === 0
+      ) {
+        externalIdWhere = rawVal;
+      }
+    } else {
+      // Simple equality
+      externalIdWhere = rawVal;
+    }
+
+    // For complex operators (objects with Symbol keys), we need to use a different approach
+    // The $alias.field$ syntax doesn't work well with operators in Sequelize
+    // Instead, we'll add the where clause to the include definition
+    const hasOperators =
+      typeof externalIdWhere === 'object' &&
+      !Array.isArray(externalIdWhere) &&
+      Object.getOwnPropertySymbols(externalIdWhere).length > 0;
+
+    if (hasOperators) {
+      // Use include-level where clause for operators
+      const predicate = {};
+      predicate.__requiredInclude = {
+        model: fkMapping.targetModel,
+        as: alias,
+        attributes: [],
+        required: false,
+        where: {
+          [fkMapping.idField]: externalIdWhere,
+        },
+      };
+      return predicate;
+    } else {
+      // Use $alias.field$ syntax for simple equality
+      const predicate = {
+        [`$${alias}.${fkMapping.idField}$`]: externalIdWhere,
+      };
+
+      predicate.__requiredInclude = {
+        model: fkMapping.targetModel,
+        as: alias,
+        attributes: [],
+        required: false,
+      };
+
+      return predicate;
+    }
+  }
 
   const fieldContext = resolveFieldContext(
     key,
@@ -431,7 +544,12 @@ function buildEqualityPredicate(
 }
 
 function mergeObjectProperties(target, source) {
-  for (const key of Object.keys(source)) {
+  // Handle both string keys and symbol keys (for Sequelize operators)
+  const stringKeys = Object.keys(source);
+  const symbolKeys = Object.getOwnPropertySymbols(source);
+  const allKeys = [...stringKeys, ...symbolKeys];
+
+  for (const key of allKeys) {
     if (
       target[key] &&
       typeof target[key] === 'object' &&
@@ -531,6 +649,7 @@ function processImplicitAndFilters(
 ) {
   const keys = Object.keys(filters);
   const andParts = [];
+  const requiredIncludes = [];
 
   for (const key of keys) {
     if (key === 'and' || key === 'or') {
@@ -561,24 +680,41 @@ function processImplicitAndFilters(
     }
 
     if (predicate && Object.keys(predicate).length) {
+      // Extract required include if present
+      if (predicate.__requiredInclude) {
+        requiredIncludes.push(predicate.__requiredInclude);
+        delete predicate.__requiredInclude;
+      }
+
       andParts.push(predicate);
     }
   }
 
   if (andParts.length === 0) {
-    return {};
+    return requiredIncludes.length > 0
+      ? { __whereTree: {}, __requiredIncludes: requiredIncludes }
+      : {};
   }
 
+  let result;
   if (andParts.length === 1) {
-    return andParts[0];
+    result = andParts[0];
+  } else {
+    const merged = {};
+    for (const part of andParts) {
+      mergeObjectProperties(merged, part);
+    }
+    result = merged;
   }
 
-  const merged = {};
-  for (const part of andParts) {
-    mergeObjectProperties(merged, part);
+  if (requiredIncludes.length > 0) {
+    return {
+      __whereTree: result,
+      __requiredIncludes: requiredIncludes,
+    };
   }
 
-  return merged;
+  return result;
 }
 
 function buildWhere(
@@ -1071,6 +1207,7 @@ async function processSearchRequest(context, config, req, res) {
 
   const includes = getIncludesFromContext(req, context.model);
 
+  // Validate flattening config if provided
   if (config.flattening) {
     const { validateFlatteningConfig } = require('../listUtils');
     const validation = validateFlatteningConfig(
@@ -1103,7 +1240,7 @@ async function processSearchRequest(context, config, req, res) {
 
   configureSubqueryOptions(config, filters, ordering, req);
 
-  const whereTree = buildWhere(
+  const whereResult = buildWhere(
     context.model,
     filters || {},
     Op,
@@ -1112,9 +1249,68 @@ async function processSearchRequest(context, config, req, res) {
     config.flattening
   );
 
+  let whereTree = whereResult;
+  let requiredIncludes = [];
+
+  // Check if buildWhere returned additional includes needed for FK reverse mapping
+  if (whereResult && whereResult.__whereTree) {
+    whereTree = whereResult.__whereTree;
+    requiredIncludes = whereResult.__requiredIncludes || [];
+  }
+
   if (whereTree && whereTree.__error) {
     logBadRequest('Search bad request', whereTree.__error, body, req);
     throw new ValidationError('Bad request');
+  }
+
+  // Add any required includes for FK reverse mapping
+  if (requiredIncludes.length > 0) {
+    const currentIncludes = req.apialize.options.include || [];
+    const includeMap = new Map();
+
+    // Index existing includes by association name
+    currentIncludes.forEach((inc) => {
+      const key = inc.as || (inc.association && inc.association.as);
+      if (key) {
+        includeMap.set(key, inc);
+      }
+    });
+
+    // Add new required includes or merge where clauses if include already exists
+    requiredIncludes.forEach((reqInc) => {
+      const key = reqInc.as || (reqInc.association && reqInc.association.as);
+      if (key) {
+        const existing = includeMap.get(key);
+        if (existing) {
+          // Merge where clauses
+          if (reqInc.where) {
+            if (existing.where) {
+              // Both have where clauses - merge them
+              existing.where = Object.assign({}, existing.where, reqInc.where);
+            } else {
+              // Only new one has where clause
+              existing.where = reqInc.where;
+            }
+          }
+          // Keep attributes minimal for filtering
+          if (reqInc.attributes && reqInc.attributes.length === 0) {
+            existing.attributes = [];
+          }
+        } else {
+          // New include
+          currentIncludes.push(reqInc);
+          includeMap.set(key, reqInc);
+        }
+      }
+    });
+
+    req.apialize.options.include = currentIncludes;
+
+    // Disable subqueries when using FK reverse mapping with $alias.field$ syntax
+    // This prevents "missing FROM-clause entry" errors
+    if (config.disableSubqueryOnIncludeRequest) {
+      req.apialize.options.subQuery = false;
+    }
   }
 
   if (Reflect.ownKeys(whereTree).length) {

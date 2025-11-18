@@ -374,9 +374,9 @@ function list(model, options, modelOptions) {
   );
 
   const filteringMiddleware = function (req, _res, next) {
-    if (!config.allowFiltering) {
-      req._apializeDisableQueryFilters = true;
-    }
+    // Always disable automatic query filtering for list endpoint
+    // The list processor converts query params to search body and passes to search processor
+    req._apializeDisableQueryFilters = true;
     next();
   };
 

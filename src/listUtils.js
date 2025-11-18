@@ -741,25 +741,23 @@ function setupFiltering(
     const parts = rawKey.split('.');
     const originalColumn = parts[parts.length - 1];
 
-    const needsIdMapping =
-      originalColumn === 'id' && Array.isArray(relationIdMapping);
-    if (needsIdMapping) {
-      const relationMapping = relationIdMapping.find((mapping) => {
-        return modelsMatch(mapping.model, resolved.foundModel);
-      });
+    // Use the same applyIdMappingToAttribute logic as ordering
+    const mappedAttr = applyIdMappingToAttribute(
+      originalColumn,
+      relationIdMapping,
+      resolved.foundModel
+    );
 
-      const hasMappedIdField = relationMapping && relationMapping.id_field;
-      if (hasMappedIdField) {
-        const actualColumn = relationMapping.id_field;
-        const newAliasPath = buildMappedAliasPath(resolved, actualColumn);
-        const attrs = getModelAttributes(resolved.foundModel);
+    // If the attribute was mapped to a different field, rebuild the alias path
+    if (mappedAttr !== originalColumn) {
+      const newAliasPath = buildMappedAliasPath(resolved, mappedAttr);
+      const attrs = getModelAttributes(resolved.foundModel);
 
-        return {
-          outKey: `$${newAliasPath}$`,
-          attribute: attrs && attrs[actualColumn],
-          targetModel: resolved.foundModel,
-        };
-      }
+      return {
+        outKey: `$${newAliasPath}$`,
+        attribute: attrs && attrs[mappedAttr],
+        targetModel: resolved.foundModel,
+      };
     }
 
     return {
@@ -767,6 +765,38 @@ function setupFiltering(
       attribute: resolved.attribute,
       targetModel: resolved.foundModel,
     };
+  }
+
+  function isForeignKeyWithReverseMapping(fieldName, model, relationIdMapping) {
+    if (!Array.isArray(relationIdMapping) || !model || !model.associations) {
+      return false;
+    }
+
+    const associationNames = Object.keys(model.associations);
+    for (let i = 0; i < associationNames.length; i++) {
+      const association = model.associations[associationNames[i]];
+
+      if (
+        association.associationType === 'BelongsTo' &&
+        association.foreignKey === fieldName
+      ) {
+        const targetModel = association.target;
+        const mapping = relationIdMapping.find((m) => {
+          if (m.model === targetModel) return true;
+          if (m.model && targetModel) {
+            if (m.model.name === targetModel.name) return true;
+            if (m.model.tableName === targetModel.tableName) return true;
+          }
+          return false;
+        });
+
+        if (mapping && mapping.id_field) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   function processSimpleFilterField(rawKey, model, req, res) {
@@ -853,6 +883,20 @@ function setupFiltering(
     }
 
     const { outKey, attribute, targetModel } = fieldInfo;
+
+    // Skip FK fields with reverse mapping - they'll be handled by search processor
+    const isReverseMappedFK = isForeignKeyWithReverseMapping(
+      rawKey,
+      model,
+      relationIdMapping
+    );
+    console.log(
+      `[FK CHECK] rawKey=${rawKey}, isReverseMappedFK=${isReverseMappedFK}, relationIdMapping=`,
+      relationIdMapping
+    );
+    if (isReverseMappedFK) {
+      continue;
+    }
 
     function validateFilterValue(
       attribute,
