@@ -8,6 +8,7 @@ const { validateData } = require('../validationMiddleware');
 const {
   optionsWithTransaction,
   notFoundWithRollback,
+  reverseMapForeignKeys,
 } = require('../operationUtils');
 
 /**
@@ -157,6 +158,22 @@ async function processUpdateRequest(context, config, req, res) {
   const id = req.params.id;
   const providedValues = getProvidedValues(req);
   const ownershipWhere = getOwnershipWhere(req);
+
+  // Reverse-map foreign key fields from external IDs to internal IDs
+  try {
+    await reverseMapForeignKeys(
+      providedValues,
+      context.model,
+      config.relation_id_mapping,
+      context.transaction
+    );
+  } catch (error) {
+    context.res.status(400).json({
+      success: false,
+      error: error.message || 'Invalid foreign key reference',
+    });
+    return;
+  }
 
   const existingInstance = await findExistingRecord(
     context,

@@ -984,6 +984,163 @@ async function withHooksOnly(config, run) {
   }
 }
 
+/**
+ * Finds the relation_id_mapping configuration for a given model
+ */
+function findRelationMapping(relationIdMapping, targetModel) {
+  if (!Array.isArray(relationIdMapping)) {
+    return null;
+  }
+
+  return relationIdMapping.find((mapping) => {
+    if (mapping.model === targetModel) {
+      return true;
+    }
+
+    if (mapping.model && targetModel) {
+      if (mapping.model.name === targetModel.name) {
+        return true;
+      }
+      if (mapping.model.tableName === targetModel.tableName) {
+        return true;
+      }
+    }
+
+    return false;
+  });
+}
+
+/**
+ * Checks if a field is a foreign key and has relation_id_mapping configured
+ * Returns mapping info if found, null otherwise
+ */
+function findForeignKeyMapping(fieldName, model, relationIdMapping) {
+  if (!Array.isArray(relationIdMapping) || !model || !model.associations) {
+    return null;
+  }
+
+  const associationNames = Object.keys(model.associations);
+  for (let i = 0; i < associationNames.length; i++) {
+    const association = model.associations[associationNames[i]];
+
+    if (
+      association.associationType === 'BelongsTo' &&
+      association.foreignKey === fieldName
+    ) {
+      const targetModel = association.target;
+      const mapping = findRelationMapping(relationIdMapping, targetModel);
+
+      if (mapping && mapping.id_field) {
+        return {
+          targetModel: targetModel,
+          idField: mapping.id_field,
+          association: association,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Looks up the internal ID for a related model using the external ID
+ */
+async function lookupInternalId(
+  targetModel,
+  externalIdField,
+  externalIdValue,
+  transaction
+) {
+  const findOptions = {
+    where: { [externalIdField]: externalIdValue },
+    attributes: ['id'],
+  };
+
+  if (transaction) {
+    findOptions.transaction = transaction;
+  }
+
+  const record = await targetModel.findOne(findOptions);
+  return record ? record.id : null;
+}
+
+/**
+ * Reverse-maps foreign key fields from external IDs to internal IDs
+ * Modifies the provided object in place
+ */
+async function reverseMapForeignKeys(
+  provided,
+  model,
+  relationIdMapping,
+  transaction
+) {
+  if (!Array.isArray(relationIdMapping) || relationIdMapping.length === 0) {
+    return;
+  }
+
+  const providedKeys = Object.keys(provided);
+  const lookupPromises = [];
+
+  for (let i = 0; i < providedKeys.length; i++) {
+    const key = providedKeys[i];
+    const value = provided[key];
+
+    // Skip if value is null or undefined
+    if (value == null) {
+      continue;
+    }
+
+    const fkMapping = findForeignKeyMapping(key, model, relationIdMapping);
+    if (fkMapping) {
+      // Queue up the lookup
+      lookupPromises.push(
+        lookupInternalId(
+          fkMapping.targetModel,
+          fkMapping.idField,
+          value,
+          transaction
+        ).then((internalId) => ({ key, internalId, value }))
+      );
+    }
+  }
+
+  if (lookupPromises.length > 0) {
+    const results = await Promise.all(lookupPromises);
+
+    for (const result of results) {
+      if (result.internalId === null) {
+        throw new Error(
+          `Related record not found for ${result.key} = '${result.value}'`
+        );
+      }
+      provided[result.key] = result.internalId;
+    }
+  }
+}
+
+/**
+ * Reverse-maps foreign key fields in an array of objects (for bulk operations)
+ * Modifies the provided array in place
+ */
+async function reverseMapForeignKeysInBulk(
+  providedArray,
+  model,
+  relationIdMapping,
+  transaction
+) {
+  if (!Array.isArray(providedArray) || providedArray.length === 0) {
+    return;
+  }
+
+  // Process all records in parallel
+  await Promise.all(
+    providedArray.map((provided) =>
+      reverseMapForeignKeys(provided, model, relationIdMapping, transaction)
+    )
+  );
+}
+
 module.exports = {
   buildContext: buildContext,
   withTransactionAndHooks: withTransactionAndHooks,
@@ -994,4 +1151,9 @@ module.exports = {
   normalizeRowsWithForeignKeys: normalizeRowsWithForeignKeys,
   applyEndpointConfiguration: applyEndpointConfiguration,
   withHooksOnly: withHooksOnly,
+  findRelationMapping: findRelationMapping,
+  findForeignKeyMapping: findForeignKeyMapping,
+  lookupInternalId: lookupInternalId,
+  reverseMapForeignKeys: reverseMapForeignKeys,
+  reverseMapForeignKeysInBulk: reverseMapForeignKeysInBulk,
 };

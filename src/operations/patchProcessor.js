@@ -12,6 +12,7 @@ const { validateData } = require('../validationMiddleware');
 const {
   optionsWithTransaction,
   notFoundWithRollback,
+  reverseMapForeignKeys,
 } = require('../operationUtils');
 
 function removeIdMappingFromProvided(provided, idMapping) {
@@ -144,6 +145,22 @@ async function validatePatchData(model, provided, validate, res) {
 async function processPatchRequest(context, config, req, res) {
   const id = extractIdFromRequest(req);
   const provided = getProvidedValues(req);
+
+  // Reverse-map foreign key fields from external IDs to internal IDs
+  try {
+    await reverseMapForeignKeys(
+      provided,
+      context.model,
+      config.relation_id_mapping,
+      context.transaction
+    );
+  } catch (error) {
+    context.res.status(400).json({
+      success: false,
+      error: error.message || 'Invalid foreign key reference',
+    });
+    return;
+  }
 
   const isValid = await validatePatchData(
     context.model,

@@ -45,6 +45,7 @@ const OPERATION_DEFAULTS = {
   [OPERATION_TYPES.UPDATE]: {
     validate: true,
     id_mapping: 'id',
+    relation_id_mapping: null,
     middleware: [],
     pre: null,
     post: null,
@@ -52,6 +53,7 @@ const OPERATION_DEFAULTS = {
   [OPERATION_TYPES.PATCH]: {
     validate: true,
     id_mapping: 'id',
+    relation_id_mapping: null,
     middleware: [],
     pre: null,
     post: null,

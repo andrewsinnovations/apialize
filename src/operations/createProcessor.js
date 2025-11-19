@@ -9,7 +9,11 @@ const {
   handleValidationError,
 } = require('../utils');
 const { validateData } = require('../validationMiddleware');
-const { optionsWithTransaction } = require('../operationUtils');
+const {
+  optionsWithTransaction,
+  reverseMapForeignKeys,
+  reverseMapForeignKeysInBulk,
+} = require('../operationUtils');
 
 /**
  * Validates bulk create request
@@ -145,6 +149,32 @@ async function processCreateRequest(context, config, req, res) {
     context
   );
   if (!isValidRequest) {
+    return;
+  }
+
+  // Reverse-map foreign key fields from external IDs to internal IDs
+  try {
+    if (Array.isArray(rawBody)) {
+      await reverseMapForeignKeysInBulk(
+        rawBody,
+        context.model,
+        config.relation_id_mapping,
+        context.transaction
+      );
+    } else {
+      const provided = getProvidedValues(req);
+      await reverseMapForeignKeys(
+        provided,
+        context.model,
+        config.relation_id_mapping,
+        context.transaction
+      );
+    }
+  } catch (error) {
+    context.res.status(400).json({
+      success: false,
+      error: error.message || 'Invalid foreign key reference',
+    });
     return;
   }
 
