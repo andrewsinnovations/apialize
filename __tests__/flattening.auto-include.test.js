@@ -301,7 +301,7 @@ describe('Response Flattening - Auto Include Creation', () => {
           filtering: {
             first_name: { icontains: 'jo' },
           },
-          ordering: [{ orderby: 'surname', direction: 'ASC' }],
+          ordering: [{ order_by: 'surname', direction: 'ASC' }],
         });
 
       expect(res.status).toBe(200);

@@ -161,6 +161,41 @@ function buildOperationConfig(options = {}, operationType) {
     config[key] = options[key];
   }
 
+  // Handle backward compatibility: snake_case -> camelCase for LIST and SEARCH options
+  if (
+    operationType === OPERATION_TYPES.LIST ||
+    operationType === OPERATION_TYPES.SEARCH
+  ) {
+    if (options.default_page_size !== undefined) {
+      config.defaultPageSize = options.default_page_size;
+    }
+    if (options.default_order_by !== undefined) {
+      config.defaultOrderBy = options.default_order_by;
+    }
+    if (options.default_order_dir !== undefined) {
+      config.defaultOrderDir = options.default_order_dir;
+    }
+    if (options.meta_show_ordering !== undefined) {
+      config.metaShowOrdering = options.meta_show_ordering;
+    }
+    if (options.meta_show_filters !== undefined) {
+      config.metaShowFilters = options.meta_show_filters;
+    }
+    if (options.disable_subquery !== undefined) {
+      config.disableSubqueryOnIncludeRequest = options.disable_subquery;
+    }
+  }
+
+  // Handle backward compatibility for LIST-specific options
+  if (operationType === OPERATION_TYPES.LIST) {
+    if (options.allow_filtering !== undefined) {
+      config.allowFiltering = options.allow_filtering;
+    }
+    if (options.allow_ordering !== undefined) {
+      config.allowOrdering = options.allow_ordering;
+    }
+  }
+
   return config;
 }
 
@@ -205,7 +240,7 @@ function validateOperationConfig(config, operationType) {
     }
   }
 
-  if (operationType === OPERATION_TYPES.LIST) {
+  if (operationType === OPERATION_TYPES.LIST || operationType === OPERATION_TYPES.SEARCH) {
     if (
       typeof config.defaultPageSize !== 'number' ||
       config.defaultPageSize <= 0

@@ -1364,7 +1364,7 @@ async function processSearchRequest(context, config, req, res) {
     page,
     pageSize,
     undefined,
-    false,
+    config.metaShowFilters || false,
     config.metaShowOrdering,
     false,
     req,
