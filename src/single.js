@@ -8,6 +8,7 @@ const { normalizeId, applyEndpointConfiguration } = require('./operationUtils');
 
 // Import operation handlers for related endpoints
 const list = require('./list');
+const search = require('./search');
 const create = require('./create');
 const update = require('./update');
 const patch = require('./patch');
@@ -463,6 +464,26 @@ function setupRelatedEndpoints(
         relatedRouter.use('/', parentFilterForRead, relatedListRouter);
       } else {
         relatedRouter.use('/', relatedListRouter);
+      }
+    }
+
+    const hasSearchOperation = hasOperation(operations, 'search');
+    if (hasSearchOperation) {
+      const {
+        options: searchOptions,
+        modelOptions: searchModelOptions,
+        parentFilterForRead,
+      } = resolveOpConfig('search');
+      const relatedSearchRouter = search(
+        relatedModel,
+        searchOptions,
+        searchModelOptions
+      );
+      // Apply parent filter before the search operation
+      if (parentFilterForRead) {
+        relatedRouter.use('/', parentFilterForRead, relatedSearchRouter);
+      } else {
+        relatedRouter.use('/', relatedSearchRouter);
       }
     }
 

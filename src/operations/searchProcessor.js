@@ -1324,9 +1324,28 @@ async function processSearchRequest(context, config, req, res) {
           cleanedWhere[key] = value;
         }
       }
-      req.apialize.options.where = Object.assign({}, cleanedWhere, whereTree);
+      
+      // Use Op.and to combine existing constraints with user filters
+      // This prevents users from overriding parent filters in related endpoints
+      const hasExistingConstraints = Reflect.ownKeys(cleanedWhere).length > 0;
+      if (hasExistingConstraints) {
+        req.apialize.options.where = {
+          [Op.and]: [cleanedWhere, whereTree],
+        };
+      } else {
+        req.apialize.options.where = whereTree;
+      }
     } else {
-      req.apialize.options.where = Object.assign({}, existingWhere, whereTree);
+      // Use Op.and to combine existing constraints with user filters
+      // This prevents users from overriding parent filters in related endpoints
+      const hasExistingConstraints = Reflect.ownKeys(existingWhere).length > 0;
+      if (hasExistingConstraints) {
+        req.apialize.options.where = {
+          [Op.and]: [existingWhere, whereTree],
+        };
+      } else {
+        req.apialize.options.where = whereTree;
+      }
     }
   }
 
