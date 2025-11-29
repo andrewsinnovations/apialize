@@ -144,12 +144,12 @@ describe('multi-user ownership with default numeric id (bearer auth)', () => {
     // List endpoints only show each user's own data
     const listA = await request(app).get('/records').set(authA);
     expect(listA.status).toBe(200);
-    expect(listA.body.meta.count).toBe(2);
+    expect(listA.body.meta.paging.count).toBe(2);
     expect(listA.body.data.map((r) => r.data).sort()).toEqual(['A1', 'A2']);
 
     const listB = await request(app).get('/records').set(authB);
     expect(listB.status).toBe(200);
-    expect(listB.body.meta.count).toBe(1);
+    expect(listB.body.meta.paging.count).toBe(1);
     expect(listB.body.data[0].data).toBe('B1');
 
     // User A can read own record
@@ -202,7 +202,7 @@ describe('multi-user ownership with default numeric id (bearer auth)', () => {
 
     // Final list userA should have 1 remaining
     const finalListA = await request(app).get('/records').set(authA);
-    expect(finalListA.body.meta.count).toBe(1);
+    expect(finalListA.body.meta.paging.count).toBe(1);
     expect(finalListA.body.data[0].id).toBe(a1);
   });
 });

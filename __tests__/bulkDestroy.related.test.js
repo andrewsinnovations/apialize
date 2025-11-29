@@ -101,19 +101,19 @@ describe('bulk delete on related collections', () => {
     const userId = u.body.id;
     const p = await request(app)
       .post(`/users/${userId}/posts`)
-      .send({ title: 'T' });
+      .send({ title: 'T', user_id: userId });
     const postId = p.body.id;
 
     // create 3 comments
     const c1 = await request(app)
       .post(`/users/${userId}/posts/${postId}/comments`)
-      .send({ text: 'A', comment_key: 'k1' });
+      .send({ text: 'A', comment_key: 'k1', post_id: postId });
     const c2 = await request(app)
       .post(`/users/${userId}/posts/${postId}/comments`)
-      .send({ text: 'B', comment_key: 'k2' });
+      .send({ text: 'B', comment_key: 'k2', post_id: postId });
     const c3 = await request(app)
       .post(`/users/${userId}/posts/${postId}/comments`)
-      .send({ text: 'C', comment_key: 'k3' });
+      .send({ text: 'C', comment_key: 'k3', post_id: postId });
     expect(c1.status).toBe(201);
     expect(c2.status).toBe(201);
     expect(c3.status).toBe(201);
@@ -138,15 +138,15 @@ describe('bulk delete on related collections', () => {
     const userId = u.body.id;
     const p = await request(app)
       .post(`/users/${userId}/posts`)
-      .send({ title: 'T2' });
+      .send({ title: 'T2', user_id: userId });
     const postId = p.body.id;
 
     await request(app)
       .post(`/users/${userId}/posts/${postId}/comments`)
-      .send({ text: 'A', comment_key: 'd1' });
+      .send({ text: 'A', comment_key: 'd1', post_id: postId });
     await request(app)
       .post(`/users/${userId}/posts/${postId}/comments`)
-      .send({ text: 'B', comment_key: 'd2' });
+      .send({ text: 'B', comment_key: 'd2', post_id: postId });
 
     const ok = await request(app).delete(
       `/users/${userId}/posts/${postId}/comments?confirm=true`
@@ -167,17 +167,17 @@ describe('bulk delete on related collections', () => {
     const u2 = await request(app).post('/users').send({ name: 'B' });
     const p1 = await request(app)
       .post(`/users/${u1.body.id}/posts`)
-      .send({ title: 'X' });
+      .send({ title: 'X', user_id: u1.body.id });
     const p2 = await request(app)
       .post(`/users/${u2.body.id}/posts`)
-      .send({ title: 'Y' });
+      .send({ title: 'Y', user_id: u2.body.id });
 
     await request(app)
       .post(`/users/${u1.body.id}/posts/${p1.body.id}/comments`)
-      .send({ text: '1', comment_key: 'x1' });
+      .send({ text: '1', comment_key: 'x1', post_id: p1.body.id });
     await request(app)
       .post(`/users/${u2.body.id}/posts/${p2.body.id}/comments`)
-      .send({ text: '2', comment_key: 'y1' });
+      .send({ text: '2', comment_key: 'y1', post_id: p2.body.id });
 
     const ok = await request(app).delete(
       `/users/${u1.body.id}/posts/${p1.body.id}/comments?confirm=true`

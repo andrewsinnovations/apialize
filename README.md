@@ -327,7 +327,7 @@ Pagination & ordering precedence (within `list()`):
 Success responses:
 
 - `list` → `{ success: true, meta: { page, page_size, total_pages, count[, order] }, data: [...] }`
-  - `meta.order` is included only when `metaShowOrdering: true` is set in list options.
+  - `meta.ordering` is included only when `metaShowOrdering: true` is set in list options.
 - `single` → `{ success: true, record: { ... } }`
 - `create` → `201 { success: true, id }`
 - `update` → `{ success: true }`
@@ -375,7 +375,7 @@ model.findAndCountAll({
 
 If you don't supply `api:order_by`, results default to ascending by `id` (ensuring stable pagination): `ORDER BY id ASC`.
 
-The applied ordering is echoed back in `meta.order` as an array of `[field, direction]` pairs.
+The applied ordering is echoed back in `meta.ordering` as an array of `[field, direction]` pairs.
 
 Ordering examples:
 
@@ -2020,7 +2020,7 @@ app.use(
 //   ]
 // }
 
-// meta.order echoes readable paths, e.g.:
+// meta.ordering echoes readable paths, e.g.:
 // [["artist.label.name","DESC"],["artist.name","ASC"],["title","ASC"]]
 ```
 

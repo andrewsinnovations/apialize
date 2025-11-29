@@ -157,7 +157,7 @@ describe('single operation: comprehensive options coverage', () => {
     // List child via related list
     const listRes = await request(app).get(`/users/${u.body.id}/posts`);
     expect(listRes.status).toBe(200);
-    expect(listRes.body.meta.count).toBe(1);
+    expect(listRes.body.meta.paging.count).toBe(1);
 
     // GET child via nested single
     const post = await P2.findOne({ where: { user_id: u.body.id } });

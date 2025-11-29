@@ -71,7 +71,7 @@ describe('middleware access control for odd numbers (Sequelize)', () => {
 
   test('list returns only odd numbers', async () => {
     const res = await request(app).get('/numbers');
-    expect(res.body.meta.count).toBe(50);
+    expect(res.body.meta.paging.count).toBe(50);
     expect(res.body.data.every((row) => row.value % 2 === 1)).toBe(true);
   });
 

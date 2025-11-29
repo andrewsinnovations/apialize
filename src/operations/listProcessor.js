@@ -294,12 +294,8 @@ function convertSearchFiltersToListFormat(searchBody) {
     const value = searchBody.filtering[key];
 
     if (isOperatorObject(value)) {
-      const valueKeys = Object.keys(value);
-      for (let j = 0; j < valueKeys.length; j++) {
-        const operator = valueKeys[j];
-        const operatorValue = value[operator];
-        filters[`${key}:${operator}`] = operatorValue;
-      }
+      // Keep the nested object structure instead of flattening to "key:operator"
+      filters[key] = value;
     } else {
       filters[key] = value;
     }
@@ -315,7 +311,7 @@ function addListMetaFilters(
   allowFiltering
 ) {
   if (payload.meta && metaShowFilters && allowFiltering) {
-    payload.meta.filters = convertSearchFiltersToListFormat(searchBody);
+    payload.meta.filtering = convertSearchFiltersToListFormat(searchBody);
   }
 }
 

@@ -37,6 +37,11 @@ function executeDestroy(
   context
 ) {
   const where = buildWhereClause(ownershipWhere, idMapping, id);
+
+  // Populate context with id and where for use in hooks
+  context.id = id;
+  context.where = where;
+
   const destroyOptions = buildDestroyOptions(
     modelOptions,
     where,
@@ -51,6 +56,12 @@ function executeDestroy(
 async function processDestroyRequest(context, config, req, res) {
   const id = extractIdFromRequest(req);
   const ownershipWhere = getOwnershipWhere(req);
+
+  // Populate context with id and where BEFORE calling executeDestroy
+  // This ensures pre hooks have access to these values
+  context.id = id;
+  const where = buildWhereClause(ownershipWhere, config.id_mapping, id);
+  context.where = where;
 
   return await executeDestroy(
     context.model,

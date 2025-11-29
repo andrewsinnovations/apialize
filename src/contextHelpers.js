@@ -257,10 +257,34 @@ function replaceWhere(newWhere) {
   return req.apialize.options.where;
 }
 
-function createHelpers(req, model) {
+function cancel_operation(customResponse) {
+  const ctx = this._ctx;
+  if (!ctx) {
+    throw new Error('cancel_operation must be called on context object');
+  }
+
+  ctx._cancelled = true;
+
+  if (customResponse !== undefined && customResponse !== null) {
+    ctx._cancelResponse = customResponse;
+  } else {
+    ctx._cancelResponse = {
+      success: false,
+      message: 'Operation cancelled',
+    };
+  }
+
+  // Mark the response so the handler knows it's a cancellation
+  ctx._cancelResponse._apializeCancelled = true;
+
+  return ctx._cancelResponse;
+}
+
+function createHelpers(req, model, ctx) {
   const context = {
     _req: req,
     _model: model,
+    _ctx: ctx,
   };
 
   const helpers = {
@@ -269,6 +293,7 @@ function createHelpers(req, model) {
     applyWhereIfNotExists: applyWhereIfNotExists.bind(context),
     removeWhere: removeWhere.bind(context),
     replaceWhere: replaceWhere.bind(context),
+    cancel_operation: cancel_operation.bind(context),
   };
 
   if (model) {
@@ -287,5 +312,6 @@ module.exports = {
   applyScopes,
   removeWhere,
   replaceWhere,
+  cancel_operation,
   createHelpers,
 };

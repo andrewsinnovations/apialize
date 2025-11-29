@@ -1066,9 +1066,9 @@ describe('Response Flattening', () => {
       const res = await request(app).get('/persons?api:page=1&api:page_size=2');
 
       expect(res.status).toBe(200);
-      expect(res.body.meta.count).toBe(3);
-      expect(res.body.meta.page).toBe(1);
-      expect(res.body.meta.page_size).toBe(2);
+      expect(res.body.meta.paging.count).toBe(3);
+      expect(res.body.meta.paging.page).toBe(1);
+      expect(res.body.meta.paging.size).toBe(2);
       expect(res.body.data).toHaveLength(2);
       expect(res.body.data[0].first_name).toBeDefined();
     });

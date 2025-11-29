@@ -47,7 +47,7 @@ describe('model.apialize default page_size + ordering', () => {
   test('uses model default page_size when query missing', async () => {
     const res = await request(app).get('/items');
     expect(res.status).toBe(200);
-    expect(res.body.meta.page_size).toBe(7);
+    expect(res.body.meta.paging.size).toBe(7);
     expect(res.body.data.length).toBe(7);
     // Ordered by name DESC (n30..n24)
     const names = res.body.data.map((r) => r.name);
@@ -57,7 +57,7 @@ describe('model.apialize default page_size + ordering', () => {
 
   test('query api:page_size overrides model default', async () => {
     const res = await request(app).get('/items?api:page_size=3');
-    expect(res.body.meta.page_size).toBe(3);
+    expect(res.body.meta.paging.size).toBe(3);
     expect(res.body.data.length).toBe(3);
   });
 

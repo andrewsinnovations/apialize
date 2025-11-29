@@ -77,6 +77,24 @@ function apializeContext(req, res, next) {
   copyOwnProperties(existingValues, values);
 
   const body = safeGetObject(req && req.body);
+  // If body is an array, keep it as an array (for bulk create)
+  if (Array.isArray(body)) {
+    // Store the array directly as values
+    req.apialize = req.apialize || {};
+    req.apialize.values = body;
+    req.apialize.options = options;
+    for (const key in existing) {
+      if (
+        Object.prototype.hasOwnProperty.call(existing, key) &&
+        key !== 'options' &&
+        key !== 'values'
+      ) {
+        req.apialize[key] = existing[key];
+      }
+    }
+    return next();
+  }
+
   copyOwnProperties(body, values);
 
   const apialize = {};
@@ -201,17 +219,7 @@ function tryGetValueFromInstance(instance, key) {
 
 function getIdFromInstance(instance, idMapping) {
   const primaryKey = idMapping || 'id';
-
-  let idValue = tryGetValueFromInstance(instance, primaryKey);
-  if (typeof idValue !== 'undefined') {
-    return idValue;
-  }
-
-  if (primaryKey !== 'id') {
-    idValue = tryGetValueFromInstance(instance, 'id');
-  }
-
-  return idValue;
+  return tryGetValueFromInstance(instance, primaryKey);
 }
 
 function mergeReqOptionsIntoModelOptions(req, baseModelOptions) {

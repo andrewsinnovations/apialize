@@ -86,6 +86,11 @@ function applyEndpointConfiguration(model, modelOptions) {
   effectiveModel = applyScopesToModel(effectiveModel, modelOptions.scopes);
   effectiveModel = applySchemaToModel(effectiveModel, modelOptions.schema);
 
+  // Preserve apialize configuration from original model
+  if (model.apialize && !effectiveModel.apialize) {
+    effectiveModel.apialize = model.apialize;
+  }
+
   return effectiveModel;
 }
 
@@ -112,12 +117,12 @@ function createBaseContext(params) {
   return ctx;
 }
 
-function createContextHelpers(req, model) {
+function createContextHelpers(req, model, ctx) {
   const hasModel = model;
   if (hasModel) {
-    return createHelpers(req, model);
+    return createHelpers(req, model, ctx);
   }
-  return createHelpers(req);
+  return createHelpers(req, undefined, ctx);
 }
 
 function attachHelpersToObjects(helpers, req, ctx) {
@@ -136,7 +141,7 @@ function addHelpersToContext(ctx, params) {
     return;
   }
 
-  const helpers = createContextHelpers(params.req, params.model);
+  const helpers = createContextHelpers(params.req, params.model, ctx);
   attachHelpersToObjects(helpers, params.req, ctx);
 }
 
@@ -798,6 +803,7 @@ function extractConfigParams(config) {
     modelOptions: (config && config.modelOptions) || {},
     idMapping: (config && config.idMapping) || 'id',
     useReqOptionsTransaction: !!(config && config.useReqOptionsTransaction),
+    contextExtras: (config && config.contextExtras) || null,
   };
 }
 
@@ -832,6 +838,11 @@ async function executePreHookArray(preHooks, context) {
   for (let i = 0; i < preHooks.length; i++) {
     const preHook = preHooks[i];
     await executeSinglePreHook(preHook, context);
+
+    // Check if operation was cancelled
+    if (context._cancelled) {
+      return;
+    }
   }
 }
 
@@ -864,6 +875,11 @@ async function executePostHookArray(postHooks, context) {
   for (let i = 0; i < postHooks.length; i++) {
     const postHook = postHooks[i];
     await executeSinglePostHook(postHook, context);
+
+    // Check if operation was cancelled
+    if (context._cancelled) {
+      return;
+    }
   }
 }
 
@@ -936,6 +952,11 @@ async function withTransactionAndHooks(config, run) {
     idMapping: params.idMapping,
   });
 
+  // Apply any additional context properties (e.g., for destroy operations)
+  if (params.contextExtras) {
+    Object.assign(context, params.contextExtras);
+  }
+
   const transaction = await setupTransaction(
     params.model,
     context,
@@ -945,8 +966,32 @@ async function withTransactionAndHooks(config, run) {
 
   try {
     await executePreHooks(context, params.options);
+
+    // If cancelled during pre hooks, rollback and return cancel response
+    // But only if the user hasn't already sent a response manually
+    if (context._cancelled && !context._responseSent) {
+      await rollbackTransaction(transaction);
+      markContextAsRolledBack(context);
+      return context._cancelResponse;
+    }
+
+    // If response was already sent manually, skip the operation
+    if (context._responseSent) {
+      await rollbackTransaction(transaction);
+      markContextAsRolledBack(context);
+      return undefined;
+    }
+
     const result = await run(context);
     await executePostHooks(context, params.options);
+
+    // If cancelled during post hooks, rollback and return cancel response
+    if (context._cancelled && !context._responseSent) {
+      await rollbackTransaction(transaction);
+      markContextAsRolledBack(context);
+      return context._cancelResponse;
+    }
+
     await commitTransaction(context, transaction);
 
     return determineReturnValue(context, result);
@@ -968,8 +1013,26 @@ async function withHooksOnly(config, run) {
     idMapping: params.idMapping,
   });
 
+  // Apply any additional context properties (e.g., for destroy operations)
+  if (params.contextExtras) {
+    Object.assign(context, params.contextExtras);
+  }
+
   try {
     await executePreHooks(context, params.options);
+
+    // If cancelled during pre hooks, return cancel response
+    // But only if the user hasn't already sent a response manually
+    if (context._cancelled && !context._responseSent) {
+      context._responseSent = true;
+      return context._cancelResponse;
+    }
+
+    // If response was already sent manually, skip the operation
+    if (context._responseSent) {
+      return undefined;
+    }
+
     const result = await run(context);
     // If the processor didn't explicitly populate context.payload, attach the result
     // so post hooks can safely mutate the payload (parity with transactional path).
@@ -977,6 +1040,13 @@ async function withHooksOnly(config, run) {
       context.payload = result;
     }
     await executePostHooks(context, params.options);
+
+    // If cancelled during post hooks, return cancel response
+    if (context._cancelled && !context._responseSent) {
+      context._responseSent = true;
+      return context._cancelResponse;
+    }
+
     // Return the (possibly mutated) payload
     return context.payload;
   } catch (error) {

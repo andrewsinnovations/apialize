@@ -76,7 +76,7 @@ describe('list operation: comprehensive options coverage', () => {
     const res = await request(app).get('/items');
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.meta.count).toBe(3);
+    expect(res.body.meta.paging.count).toBe(3);
     // Default order is id ASC (in insertion order => 1,2,3)
     expect(names(res)).toEqual(['Charlie', 'Alpha', 'Bravo']);
   });
@@ -96,10 +96,10 @@ describe('list operation: comprehensive options coverage', () => {
 
     const res = await request(app).get('/items?category=A');
     expect(res.status).toBe(200);
-    expect(res.body.meta.count).toBe(2);
+    expect(res.body.meta.paging.count).toBe(2);
     expect(names(res)).toEqual(['A1', 'A2']);
-    // meta.filters included when metaShowFilters is true
-    expect(res.body.meta.filters).toEqual({ category: 'A' });
+    // meta.filtering included when metaShowFilters is true
+    expect(res.body.meta.filtering).toEqual({ category: 'A' });
   });
 
   test('ordering by one and multiple fields with global direction', async () => {
@@ -119,7 +119,7 @@ describe('list operation: comprehensive options coverage', () => {
     const res1 = await request(app).get('/items?api:order_by=-name');
     expect(res1.status).toBe(200);
     expect(names(res1)).toEqual(['Zeta', 'Alpha', 'Alpha']);
-    expect(res1.body.meta.order).toEqual([['name', 'DESC']]);
+    expect(res1.body.meta.ordering).toEqual([{order_by: 'name', direction: 'DESC'}]);
 
     // Multiple fields with global ASC direction: category asc, then name asc
     const res2 = await request(app).get(
@@ -127,9 +127,9 @@ describe('list operation: comprehensive options coverage', () => {
     );
     expect(res2.status).toBe(200);
     expect(names(res2)).toEqual(['Alpha', 'Zeta', 'Alpha']); // A: Alpha, Zeta; then B: Alpha
-    expect(res2.body.meta.order).toEqual([
-      ['category', 'ASC'],
-      ['name', 'ASC'],
+    expect(res2.body.meta.ordering).toEqual([
+      {order_by: 'category', direction: 'ASC'},
+      {order_by: 'name', direction: 'ASC'},
     ]);
   });
 
@@ -199,7 +199,7 @@ describe('list operation: comprehensive options coverage', () => {
     // in on category (comma-separated)
     const res3 = await request(app).get('/items?category:in=A,B');
     expect(res3.status).toBe(200);
-    expect(res3.body.meta.count).toBe(3);
+    expect(res3.body.meta.paging.count).toBe(3);
   });
 
   test('colon operators: not_icontains, starts_with, ends_with, neq, not_in', async () => {
@@ -299,15 +299,15 @@ describe('list operation: comprehensive options coverage', () => {
     // No api:page_size specified -> uses model apialize page_size (2)
     const page1 = await request(app).get('/items?api:page=1');
     expect(page1.status).toBe(200);
-    expect(page1.body.meta.page).toBe(1);
-    expect(page1.body.meta.page_size).toBe(2);
-    expect(page1.body.meta.total_pages).toBe(3);
-    expect(page1.body.meta.count).toBe(5);
+    expect(page1.body.meta.paging.page).toBe(1);
+    expect(page1.body.meta.paging.size).toBe(2);
+    expect(page1.body.meta.paging.total_pages).toBe(3);
+    expect(page1.body.meta.paging.count).toBe(5);
     expect(names(page1)).toEqual(['N1', 'N2']);
 
     const page2 = await request(app).get('/items?api:page=2');
     expect(page2.status).toBe(200);
-    expect(page2.body.meta.page).toBe(2);
+    expect(page2.body.meta.paging.page).toBe(2);
     expect(names(page2)).toEqual(['N3', 'N4']);
 
     // Explicit pagesize overrides model config
@@ -315,9 +315,9 @@ describe('list operation: comprehensive options coverage', () => {
       '/items?api:page=2&api:page_size=3'
     );
     expect(page2size3.status).toBe(200);
-    expect(page2size3.body.meta.page).toBe(2);
-    expect(page2size3.body.meta.page_size).toBe(3);
-    expect(page2size3.body.meta.total_pages).toBe(2); // ceil(5/3) = 2
+    expect(page2size3.body.meta.paging.page).toBe(2);
+    expect(page2size3.body.meta.paging.size).toBe(3);
+    expect(page2size3.body.meta.paging.total_pages).toBe(2); // ceil(5/3) = 2
     expect(names(page2size3)).toEqual(['N4', 'N5']);
 
     // Out-of-range page returns empty data but preserves meta
@@ -325,8 +325,8 @@ describe('list operation: comprehensive options coverage', () => {
       '/items?api:page=3&api:page_size=3'
     );
     expect(page3size3.status).toBe(200);
-    expect(page3size3.body.meta.page).toBe(3);
-    expect(page3size3.body.meta.total_pages).toBe(2);
+    expect(page3size3.body.meta.paging.page).toBe(3);
+    expect(page3size3.body.meta.paging.total_pages).toBe(2);
     expect(names(page3size3)).toEqual([]);
   });
 
@@ -344,7 +344,7 @@ describe('list operation: comprehensive options coverage', () => {
     const resFilt = await request(app1).get('/items?category=A');
     expect(resFilt.status).toBe(200);
     // Without filtering, all rows are returned (default page size is large enough)
-    expect(resFilt.body.meta.count).toBe(2);
+    expect(resFilt.body.meta.paging.count).toBe(2);
 
     await sequelize.close();
 
@@ -387,7 +387,9 @@ describe('list operation: comprehensive options coverage', () => {
     const res = await request(app).get('/items');
     expect(res.status).toBe(200);
     expect(names(res)).toEqual(['Aye', 'Bee', 'Cee']);
-    expect(res.body.meta.order).toEqual([['external_id', 'ASC']]);
+    expect(res.body.meta.ordering).toEqual([
+      { order_by: 'external_id', direction: 'ASC' },
+    ]);
     // Confirm id is the external_id for all records, and external_id is not separately present
     const rows = res.body.data;
     const expectedIds = ['a-uuid', 'b-uuid', 'c-uuid'];
@@ -397,7 +399,7 @@ describe('list operation: comprehensive options coverage', () => {
     // Filter by external_id still works even when it's aliased to id in output
     const resFilter = await request(app).get('/items?external_id=b-uuid');
     expect(resFilter.status).toBe(200);
-    expect(resFilter.body.meta.count).toBe(1);
+    expect(resFilter.body.meta.paging.count).toBe(1);
     expect(names(resFilter)).toEqual(['Bee']);
     expect(resFilter.body.data[0].id).toBe('b-uuid');
     expect('external_id' in resFilter.body.data[0]).toBe(false);
@@ -470,7 +472,7 @@ describe('list operation: comprehensive options coverage', () => {
     // Filter on include attribute using dotted path
     const res = await request(app).get('/items?Parent.parent_name=Acme');
     expect(res.status).toBe(200);
-    expect(res.body.meta.count).toBe(2);
+    expect(res.body.meta.paging.count).toBe(2);
     expect(res.body.data.map((r) => r.name)).toEqual(['Alpha', 'Charlie']);
   });
 
