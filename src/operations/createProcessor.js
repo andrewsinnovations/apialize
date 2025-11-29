@@ -53,7 +53,10 @@ function createBulkOptions(createOptions) {
   copyOwnProperties(createOptions, bulkOptions);
 
   bulkOptions.returning = true;
-  bulkOptions.validate = true;
+  // Only set validate: true if not already specified in createOptions
+  if (typeof bulkOptions.validate === 'undefined') {
+    bulkOptions.validate = true;
+  }
   bulkOptions.individualHooks = true;
 
   return bulkOptions;
@@ -194,6 +197,12 @@ async function processCreateRequest(context, config, req, res) {
     req,
     context.modelOptions
   );
+
+  // Add validate option from config to createOptions
+  if (typeof config.validate !== 'undefined') {
+    mergedCreateOptions.validate = config.validate;
+  }
+
   const createOptions = optionsWithTransaction(
     mergedCreateOptions,
     context.transaction

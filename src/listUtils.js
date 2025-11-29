@@ -1181,18 +1181,24 @@ async function buildResponse(
     allowFiltering
   ) {
     const meta = {
-      page: page,
-      page_size: pageSize,
-      total_pages: totalPages,
-      count: count,
+      paging: {
+        page: page,
+        size: pageSize,
+        total_pages: totalPages,
+        count: count,
+      },
     };
 
-    if (metaShowOrdering) {
-      meta.order = orderOut;
+    if (metaShowOrdering && orderOut) {
+      // Convert from [[field, direction], ...] to [{order_by, direction}, ...]
+      meta.ordering = orderOut.map((entry) => ({
+        order_by: entry[0],
+        direction: entry[1],
+      }));
     }
 
     if (metaShowFilters) {
-      meta.filters = allowFiltering ? appliedFilters : {};
+      meta.filtering = allowFiltering ? appliedFilters : {};
     }
 
     return meta;

@@ -49,9 +49,9 @@ describe('list operation: snake_case configuration backward compatibility', () =
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(5);
-    expect(res.body.meta.page_size).toBe(5);
-    expect(res.body.meta.total_pages).toBe(5);
-    expect(res.body.meta.count).toBe(25);
+    expect(res.body.meta.paging.size).toBe(5);
+    expect(res.body.meta.paging.total_pages).toBe(5);
+    expect(res.body.meta.paging.count).toBe(25);
   });
 
   test('should accept default_page_size (snake_case)', async () => {
@@ -62,9 +62,9 @@ describe('list operation: snake_case configuration backward compatibility', () =
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(7);
-    expect(res.body.meta.page_size).toBe(7);
-    expect(res.body.meta.total_pages).toBe(4);
-    expect(res.body.meta.count).toBe(25);
+    expect(res.body.meta.paging.size).toBe(7);
+    expect(res.body.meta.paging.total_pages).toBe(4);
+    expect(res.body.meta.paging.count).toBe(25);
   });
 
   test('should prioritize default_page_size over defaultPageSize when both provided', async () => {
@@ -78,8 +78,8 @@ describe('list operation: snake_case configuration backward compatibility', () =
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(3);
-    expect(res.body.meta.page_size).toBe(3);
-    expect(res.body.meta.total_pages).toBe(9);
+    expect(res.body.meta.paging.size).toBe(3);
+    expect(res.body.meta.paging.total_pages).toBe(9);
   });
 
   test('should use default of 100 when neither is provided', async () => {
@@ -90,8 +90,8 @@ describe('list operation: snake_case configuration backward compatibility', () =
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(25);
-    expect(res.body.meta.page_size).toBe(100);
-    expect(res.body.meta.total_pages).toBe(1);
+    expect(res.body.meta.paging.size).toBe(100);
+    expect(res.body.meta.paging.total_pages).toBe(1);
   });
 
   test('should validate that default_page_size is a positive number', async () => {
@@ -206,7 +206,7 @@ describe('list operation: snake_case configuration backward compatibility', () =
     const res = await request(app).get('/items');
     
     expect(res.status).toBe(200);
-    expect(res.body.meta.order).toBeDefined();
+    expect(res.body.meta.ordering).toBeDefined();
   });
 
   test('should accept meta_show_filters (snake_case)', async () => {
@@ -230,7 +230,7 @@ describe('list operation: snake_case configuration backward compatibility', () =
     const res = await request(app).get('/items');
     
     expect(res.status).toBe(200);
-    expect(res.body.meta.filters).toBeDefined();
+    expect(res.body.meta.filtering).toBeDefined();
   });
 
   test('should accept allow_filtering (snake_case)', async () => {
@@ -349,7 +349,7 @@ describe('list operation: snake_case configuration backward compatibility', () =
     expect(res.body.data[1].score).toBe(2);
     expect(res.body.data[2].score).toBe(1);
     // Should show ordering in meta
-    expect(res.body.meta.order).toBeDefined();
+    expect(res.body.meta.ordering).toBeDefined();
   });
 
   test('should accept all snake_case options together', async () => {
@@ -383,9 +383,9 @@ describe('list operation: snake_case configuration backward compatibility', () =
     
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(5);
-    expect(res.body.meta.page_size).toBe(5);
-    expect(res.body.meta.total_pages).toBe(3);
-    expect(res.body.meta.order).toBeDefined();
+    expect(res.body.meta.paging.size).toBe(5);
+    expect(res.body.meta.paging.total_pages).toBe(3);
+    expect(res.body.meta.ordering).toBeDefined();
     // First item should start with lowest letter (alphabetically)
     expect(res.body.data[0].name).toMatch(/^Item [K-O]/);
   });

@@ -118,10 +118,10 @@ describe('search: multi-level include ordering (three levels)', () => {
     // Within Warner by artist.name ASC -> Prince
     // Within Prince by title ASC -> 1999, Purple Rain
     expect(titles(res)).toEqual(['1999', 'Purple Rain', 'Symphony No. 5']);
-    expect(res.body.meta.order).toEqual([
-      ['artist.label.name', 'DESC'],
-      ['artist.name', 'ASC'],
-      ['title', 'ASC'],
+    expect(res.body.meta.ordering).toEqual([
+      { order_by: 'artist.label.name', direction: 'DESC' },
+      { order_by: 'artist.name', direction: 'ASC' },
+      { order_by: 'title', direction: 'ASC' },
     ]);
   });
 });

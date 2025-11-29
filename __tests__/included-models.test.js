@@ -238,9 +238,15 @@ describe('included models filtering and ordering for list and search operations'
       expect(res.status).toBe(200);
       // Beethoven first, then Prince (ordered by title within artist)
       expect(titles(res)).toEqual(['Symphony No. 5', '1999', 'Purple Rain']);
-      expect(res.body.meta.order).toEqual([
-        ['artist.name', 'ASC'],
-        ['title', 'ASC'],
+      expect(res.body.meta.ordering).toEqual([
+        {
+  order_by: "artist.name",
+  direction: "ASC",
+},
+        {
+  order_by: "title",
+  direction: "ASC",
+},
       ]);
     });
 
@@ -260,9 +266,15 @@ describe('included models filtering and ordering for list and search operations'
       expect(res.status).toBe(200);
       // Prince first (1999, Purple Rain), then Beethoven
       expect(titles(res)).toEqual(['1999', 'Purple Rain', 'Symphony No. 5']);
-      expect(res.body.meta.order).toEqual([
-        ['artist.name', 'DESC'],
-        ['title', 'ASC'],
+      expect(res.body.meta.ordering).toEqual([
+        {
+  order_by: "artist.name",
+  direction: "DESC",
+},
+        {
+  order_by: "title",
+  direction: "ASC",
+},
       ]);
     });
 
@@ -295,7 +307,7 @@ describe('included models filtering and ordering for list and search operations'
       expect(listTitles).toEqual(['Symphony No. 5', '1999', 'Purple Rain']);
 
       // Both should show the same ordering metadata
-      expect(listRes.body.meta.order).toEqual(searchRes.body.meta.order);
+      expect(listRes.body.meta.ordering).toEqual(searchRes.body.meta.ordering);
     });
   });
 
@@ -408,9 +420,9 @@ describe('included models filtering and ordering for list and search operations'
       expect(res.status).toBe(200);
       // Only prince albums (label Warner), ordered by label then artist
       expect(titles(res)).toEqual(['1999', 'Purple Rain']);
-      expect(res.body.meta.order).toEqual([
-        ['artist.label.name', 'ASC'],
-        ['artist.name', 'ASC'],
+      expect(res.body.meta.ordering).toEqual([
+        { order_by: 'artist.label.name', direction: 'ASC' },
+        { order_by: 'artist.name', direction: 'ASC' },
       ]);
     });
 

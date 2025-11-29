@@ -199,15 +199,30 @@ function buildOperationConfig(options = {}, operationType) {
   return config;
 }
 
-function validateOperationConfig(config, operationType) {
+function validateOperationConfig(config, operationType, model) {
   // Validate middleware
   if (config.middleware && !Array.isArray(config.middleware)) {
     throw new Error(`[${operationType}] middleware must be an array`);
   }
 
-  // Validate id_mapping
+  // Validate id_mapping type
   if (config.id_mapping && typeof config.id_mapping !== 'string') {
     throw new Error(`[${operationType}] id_mapping must be a string`);
+  }
+
+  // Validate id_mapping field exists on model (skip 'id' as it's the default)
+  if (config.id_mapping && config.id_mapping !== 'id' && model) {
+    const hasRawAttributes =
+      model.rawAttributes && typeof model.rawAttributes === 'object';
+    if (hasRawAttributes) {
+      const fieldExists = config.id_mapping in model.rawAttributes;
+      if (!fieldExists) {
+        const availableFields = Object.keys(model.rawAttributes).join(', ');
+        throw new Error(
+          `[${operationType}] id_mapping field '${config.id_mapping}' does not exist on model. Available fields: ${availableFields}`
+        );
+      }
+    }
   }
 
   // Validate hooks
@@ -240,7 +255,10 @@ function validateOperationConfig(config, operationType) {
     }
   }
 
-  if (operationType === OPERATION_TYPES.LIST || operationType === OPERATION_TYPES.SEARCH) {
+  if (
+    operationType === OPERATION_TYPES.LIST ||
+    operationType === OPERATION_TYPES.SEARCH
+  ) {
     if (
       typeof config.defaultPageSize !== 'number' ||
       config.defaultPageSize <= 0
@@ -263,7 +281,7 @@ function createOperationHandler(
 
   // Step 2: Build and validate configuration
   const config = buildOperationConfig(options, operationType);
-  validateOperationConfig(config, operationType);
+  validateOperationConfig(config, operationType, model);
 
   // Step 3: Get operation processor
   const processor = OPERATION_PROCESSORS[operationType];
@@ -296,6 +314,20 @@ function createOperationHandler(
         ? withHooksOnly
         : withTransactionAndHooks;
 
+      // For destroy operations, extract context data that hooks need
+      let contextExtras = {};
+      if (operationType === OPERATION_TYPES.DESTROY) {
+        const {
+          extractIdFromRequest,
+          getOwnershipWhere,
+          buildWhereClause,
+        } = require('./utils');
+        const id = extractIdFromRequest(req);
+        const ownershipWhere = getOwnershipWhere(req);
+        const where = buildWhereClause(ownershipWhere, config.id_mapping, id);
+        contextExtras = { id, where };
+      }
+
       const payload = await executeWithContext(
         {
           model: effectiveModel,
@@ -304,6 +336,7 @@ function createOperationHandler(
           res,
           modelOptions,
           idMapping: config.id_mapping,
+          contextExtras, // Pass additional context data
         },
         async (context) => {
           // Delegate to operation-specific processor
@@ -312,14 +345,23 @@ function createOperationHandler(
       );
 
       // Send response if not already sent
-      if (!res.headersSent && payload) {
-        // Determine status code based on operation
-        let statusCode = 200;
-        if (operationType === OPERATION_TYPES.CREATE) {
-          statusCode = 201;
-        }
+      if (!res.headersSent) {
+        if (payload) {
+          // Check if this is a cancelled operation
+          const isCancelled = payload._apializeCancelled === true;
 
-        res.status(statusCode).json(payload);
+          let statusCode = 200;
+          if (!isCancelled && operationType === OPERATION_TYPES.CREATE) {
+            statusCode = 201;
+          }
+
+          // Remove internal flag before sending response
+          if (isCancelled) {
+            delete payload._apializeCancelled;
+          }
+
+          res.status(statusCode).json(payload);
+        }
       }
     } catch (error) {
       // Enhanced error handling with operation context
@@ -335,7 +377,7 @@ function createOperationHandler(
         // Handle validation errors
         if (error.name === 'ValidationError' || error.statusCode === 400) {
           statusCode = 400;
-          errorMessage = 'Bad request';
+          errorMessage = isDevelopment ? error.message : 'Bad request';
         }
 
         res.status(statusCode).json({

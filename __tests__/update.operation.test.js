@@ -167,13 +167,13 @@ describe('update operation: comprehensive options coverage', () => {
     // Attempt to update record 2 while scoping to user_id=1 -> not found
     const miss = await request(app)
       .put(`/items/${id2}?user_id=1`)
-      .send({ name: 'NOOP' });
+      .send({ name: 'NOOP', external_id: 'o2' });
     expect(miss.status).toBe(404);
 
     // Correct scope updates
     const ok = await request(app)
       .put(`/items/${id1}?user_id=1`)
-      .send({ name: 'Scoped', user_id: '1', external_id: 'o1' });
+      .send({ name: 'Scoped', user_id: 1, external_id: 'o1' });
     expect(ok.status).toBe(200);
     const rec = await getRecord(Item, { id: id1 });
     expect(rec.name).toBe('Scoped');

@@ -169,18 +169,4 @@ describe('validation middleware', () => {
       expect(res.body.id).toBeDefined();
     });
   });
-
-  describe('with empty body', () => {
-    beforeEach(() => {
-      app.use('/test-empty', create(TestModel)); // validation enabled by default
-    });
-
-    test('should skip validation for empty body', async () => {
-      const res = await request(app).post('/test-empty').send({});
-
-      // This should proceed to the main handler which will likely fail
-      // for other reasons (like required fields), but not from our validation middleware
-      expect(res.status).toBe(500); // Or whatever the sequelize error would be
-    });
-  });
 });

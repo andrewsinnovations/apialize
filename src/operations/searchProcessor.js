@@ -1324,7 +1324,7 @@ async function processSearchRequest(context, config, req, res) {
           cleanedWhere[key] = value;
         }
       }
-      
+
       // Use Op.and to combine existing constraints with user filters
       // This prevents users from overriding parent filters in related endpoints
       const hasExistingConstraints = Reflect.ownKeys(cleanedWhere).length > 0;

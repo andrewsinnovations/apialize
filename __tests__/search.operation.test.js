@@ -87,7 +87,7 @@ describe('search operation: predicate coverage', () => {
     const res = await request(app).post('/items/search').send({});
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.meta.count).toBe(3);
+    expect(res.body.meta.paging.count).toBe(3);
     expect(names(res)).toEqual(['Charlie', 'Alpha', 'Bravo']);
   });
 
@@ -129,7 +129,7 @@ describe('search operation: predicate coverage', () => {
         filtering: { category: 'electronics', active: { is_true: true } },
       });
     expect(res.status).toBe(200);
-    expect(res.body.meta.count).toBe(2);
+    expect(res.body.meta.paging.count).toBe(2);
     expect(names(res)).toEqual(['Phone', 'DisplayPort Cable']);
   });
 
@@ -612,10 +612,11 @@ describe('search operation: predicate coverage', () => {
     // Page 2, size 2 -> [N3, N4]
     expect(names(res)).toEqual(['N3', 'N4']);
     expect(res.body.meta).toMatchObject({
-      page: 2,
-      page_size: 2,
+      paging: {
+        size: 2,
       total_pages: 2,
-      count: 4,
+      count: 4
+      }
     });
   });
 

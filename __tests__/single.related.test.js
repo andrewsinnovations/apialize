@@ -335,8 +335,8 @@ describe('single() with related models', () => {
       expect(postsRes.status).toBe(200);
       expect(postsRes.body.success).toBe(true);
       expect(postsRes.body.data).toHaveLength(5); // Should be limited by defaultPageSize
-      expect(postsRes.body.meta.page_size).toBe(5);
-      expect(postsRes.body.meta.total_pages).toBe(2);
+      expect(postsRes.body.meta.paging.size).toBe(5);
+      expect(postsRes.body.meta.paging.total_pages).toBe(2);
     });
   });
 
@@ -494,7 +494,7 @@ describe('single() with related models', () => {
           related: [
             {
               model: Post,
-              operations: ['list', 'post', 'get', 'put', 'patch', 'delete'],
+              operations: ['list', 'search', 'post', 'get', 'put', 'patch', 'delete'],
             },
           ],
         })
@@ -509,7 +509,7 @@ describe('single() with related models', () => {
       // CREATE: POST /:id/posts
       const createRes = await request(app)
         .post(`/users/${userId}/posts`)
-        .send({ title: 'New Post', content: 'Content via API' });
+        .send({ title: 'New Post', content: 'Content via API', user_id: userId });
       expect(createRes.status).toBe(201);
       const postId = createRes.body.id;
 
@@ -527,18 +527,17 @@ describe('single() with related models', () => {
       expect(getRes.status).toBe(200);
       expect(getRes.body.record.title).toBe('New Post');
 
-      // UPDATE: PUT /:id/posts/:postId (skip for now to test other operations)
+      // UPDATE: PUT /:id/posts/:postId
       const updateRes = await request(app)
         .put(`/users/${userId}/posts/${postId}`)
-        .send({ title: 'Updated Post', content: null });
-
-      // expect(updateRes.status).toBe(200);
-      // expect(updateRes.body.success).toBe(true);
+        .send({ title: 'Updated Post', content: 'Updated content', user_id: userId });
+      expect(updateRes.status).toBe(200);
+      expect(updateRes.body.success).toBe(true);
 
       // PATCH: PATCH /:id/posts/:postId
       const patchRes = await request(app)
         .patch(`/users/${userId}/posts/${postId}`)
-        .send({ content: 'Patched content' });
+        .send({ content: 'Patched content', user_id: userId });
       expect(patchRes.status).toBe(200);
       expect(patchRes.body.success).toBe(true);
 
@@ -548,6 +547,14 @@ describe('single() with related models', () => {
       );
       expect(verifyRes.body.record.title).toBe('Updated Post');
       expect(verifyRes.body.record.content).toBe('Patched content');
+
+      // SEARCH: POST /:id/posts/search
+      const searchRes = await request(app)
+        .post(`/users/${userId}/posts/search`)
+        .send({ filters: { title: 'Updated Post' } });
+      expect(searchRes.status).toBe(200);
+      expect(searchRes.body.data).toHaveLength(1);
+      expect(searchRes.body.data[0].title).toBe('Updated Post');
 
       // DELETE: DELETE /:id/posts/:postId
       const deleteRes = await request(app).delete(

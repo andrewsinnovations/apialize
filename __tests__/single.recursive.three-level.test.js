@@ -97,10 +97,10 @@ describe('single() recursion with three levels (users -> posts -> comments)', ()
     // Create two posts for the user via related POST (FK auto-injected)
     const p1 = await request(app)
       .post(`/users/${userId}/posts`)
-      .send({ title: 'Hello', content: 'One' });
+      .send({ title: 'Hello', content: 'One', user_id: userId });
     const p2 = await request(app)
       .post(`/users/${userId}/posts`)
-      .send({ title: 'World', content: 'Two' });
+      .send({ title: 'World', content: 'Two', user_id: userId });
     expect(p1.status).toBe(201);
     expect(p2.status).toBe(201);
     const post1Id = p1.body.id;
@@ -118,10 +118,10 @@ describe('single() recursion with three levels (users -> posts -> comments)', ()
     // Create comments under the first post via nested related POST
     const c1 = await request(app)
       .post(`/users/${userId}/posts/${post1Id}/comments`)
-      .send({ text: 'Nice!', user_id: userId });
+      .send({ text: 'Nice!', user_id: userId, post_id: post1Id });
     const c2 = await request(app)
       .post(`/users/${userId}/posts/${post1Id}/comments`)
-      .send({ text: 'Agreed', user_id: userId });
+      .send({ text: 'Agreed', user_id: userId, post_id: post1Id });
     expect(c1.status).toBe(201);
     expect(c2.status).toBe(201);
 
@@ -155,7 +155,7 @@ describe('single() recursion with three levels (users -> posts -> comments)', ()
     // UPDATE third-level comment via PUT (must include required fields)
     const putComment = await request(app)
       .put(`/users/${userId}/posts/${post1Id}/comments/${commentId}`)
-      .send({ text: 'Updated comment', user_id: userId });
+      .send({ text: 'Updated comment', user_id: userId, post_id: post1Id });
     expect(putComment.status).toBe(200);
     expect(putComment.body.success).toBe(true);
 
@@ -172,7 +172,7 @@ describe('single() recursion with three levels (users -> posts -> comments)', ()
     // PATCH third-level comment (partial update)
     const patchComment = await request(app)
       .patch(`/users/${userId}/posts/${post1Id}/comments/${commentId}`)
-      .send({ text: 'Patched comment' });
+      .send({ text: 'Patched comment', user_id: userId, post_id: post1Id });
     expect(patchComment.status).toBe(200);
     expect(patchComment.body.success).toBe(true);
     expect(patchComment.body.id).toBe(String(commentId));
@@ -275,7 +275,7 @@ describe('single() recursion with three levels (users -> posts -> comments)', ()
     executionLog.length = 0;
     const postRes = await request(app)
       .post(`/users/${userId}/posts`)
-      .send({ title: 'Test Post', content: 'Content' });
+      .send({ title: 'Test Post', content: 'Content', user_id: userId });
     expect(postRes.status).toBe(201);
 
     // Expected order: additional middleware -> pre hook -> operation -> post hook
@@ -292,7 +292,7 @@ describe('single() recursion with three levels (users -> posts -> comments)', ()
     executionLog.length = 0;
     const commentRes = await request(app)
       .post(`/users/${userId}/posts/${postId}/comments`)
-      .send({ text: 'Test Comment', user_id: userId });
+      .send({ text: 'Test Comment', user_id: userId, post_id: postId });
     expect(commentRes.status).toBe(201);
 
     // Expected order:
@@ -327,7 +327,7 @@ describe('single() recursion with three levels (users -> posts -> comments)', ()
     executionLog.length = 0;
     const putRes = await request(app)
       .put(`/users/${userId}/posts/${postId}/comments/${commentId}`)
-      .send({ text: 'Updated', user_id: userId });
+      .send({ text: 'Updated', user_id: userId, post_id: postId });
     expect(putRes.status).toBe(200);
 
     // Expected: additional middleware -> pre hook -> operation -> post hook

@@ -95,7 +95,11 @@ function validateOwnership(instance, ownershipWhere) {
   for (let i = 0; i < ownershipEntries.length; i++) {
     const [key, expectedValue] = ownershipEntries[i];
     const actualValue = instance[key];
-    const valuesMatch = actualValue === expectedValue;
+    
+    // Use type-coerced comparison to handle query params (strings) vs instance values (typed)
+    // This allows ownership validation to work when query params like ?user_id=1 are compared
+    // with integer fields in the database
+    const valuesMatch = actualValue == expectedValue;
 
     if (!valuesMatch) {
       return false;

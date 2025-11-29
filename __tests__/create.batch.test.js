@@ -61,7 +61,7 @@ describe('create operation: batch array body', () => {
     // Verify persisted via list
     const listRes = await request(app).get('/items');
     expect(listRes.status).toBe(200);
-    expect(listRes.body.meta.count).toBe(2);
+    expect(listRes.body.meta.paging.count).toBe(2);
   });
 
   test('fails entire batch when one insert violates a constraint (rollback)', async () => {
@@ -82,7 +82,7 @@ describe('create operation: batch array body', () => {
     // Ensure rollback: no rows persisted
     const listRes = await request(app).get('/items');
     expect(listRes.status).toBe(200);
-    expect(listRes.body.meta.count).toBe(0);
+    expect(listRes.body.meta.paging.count).toBe(0);
   });
 
   test('respects id_mapping in batch response by mirroring mapped value into id', async () => {
