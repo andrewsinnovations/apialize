@@ -171,13 +171,31 @@ async function processSingleRequest(context, config, req, res) {
   let recordPayload = convertToPlainObject(result);
   recordPayload = normalizeId(recordPayload, config.id_mapping);
 
+  // Get includes for nested model normalization
+  const includes = getIncludesFromContext(
+    req,
+    context.model,
+    context.modelOptions
+  );
+
   // Apply relation_id_mapping if configured
   if (config.relation_id_mapping) {
     const normalizedRows = await normalizeRowsWithForeignKeys(
       [recordPayload],
       config.id_mapping,
       config.relation_id_mapping,
-      context.model
+      context.model,
+      includes
+    );
+    recordPayload = normalizedRows[0];
+  } else if (includes && includes.length > 0) {
+    // Even without relation_id_mapping, normalize nested models using their own configs
+    const normalizedRows = await normalizeRowsWithForeignKeys(
+      [recordPayload],
+      config.id_mapping,
+      [],
+      context.model,
+      includes
     );
     recordPayload = normalizedRows[0];
   }

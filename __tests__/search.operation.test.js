@@ -614,9 +614,9 @@ describe('search operation: predicate coverage', () => {
     expect(res.body.meta).toMatchObject({
       paging: {
         size: 2,
-      total_pages: 2,
-      count: 4
-      }
+        total_pages: 2,
+        count: 4,
+      },
     });
   });
 

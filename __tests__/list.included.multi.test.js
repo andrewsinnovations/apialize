@@ -110,8 +110,8 @@ describe('list: multi-level include filtering and ordering', () => {
     // Only prince albums (label Warner), ordered by label then artist
     expect(titles(res)).toEqual(['1999', 'Purple Rain']);
     expect(res.body.meta.ordering).toEqual([
-      {order_by: 'artist.label.name', direction: 'ASC'},
-      {order_by: 'artist.name', direction: 'ASC'},
+      { order_by: 'artist.label.name', direction: 'ASC' },
+      { order_by: 'artist.name', direction: 'ASC' },
     ]);
   });
 });

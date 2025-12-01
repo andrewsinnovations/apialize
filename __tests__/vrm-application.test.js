@@ -245,7 +245,10 @@ describe('VRM Multi-Tenant Application', () => {
     // PROTECTED ROUTES - Customers
     // =================================================================
 
-    const customerOptions = { middleware: authAndScope, id_mapping: 'externalId' };
+    const customerOptions = {
+      middleware: authAndScope,
+      id_mapping: 'externalId',
+    };
 
     app.use('/api/customers', list(Customer, customerOptions));
     app.use('/api/customers', search(Customer, customerOptions));
@@ -291,7 +294,10 @@ describe('VRM Multi-Tenant Application', () => {
       next();
     };
 
-    const vehicleOptions = { middleware: [requireAuth, vehicleScopeMiddleware], id_mapping: 'externalId' };
+    const vehicleOptions = {
+      middleware: [requireAuth, vehicleScopeMiddleware],
+      id_mapping: 'externalId',
+    };
 
     app.use('/api/vehicles', list(Vehicle, vehicleOptions));
     app.use('/api/vehicles', search(Vehicle, vehicleOptions));
@@ -335,18 +341,39 @@ describe('VRM Multi-Tenant Application', () => {
       ],
     };
 
-    app.use('/api/service-records', list(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions));
-    app.use('/api/service-records', search(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions));
-    app.use('/api/service-records', create(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions));
-    app.use('/api/service-records', single(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions));
-    app.use('/api/service-records', patch(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions));
-    app.use('/api/service-records', destroy(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions));
+    app.use(
+      '/api/service-records',
+      list(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions)
+    );
+    app.use(
+      '/api/service-records',
+      search(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions)
+    );
+    app.use(
+      '/api/service-records',
+      create(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions)
+    );
+    app.use(
+      '/api/service-records',
+      single(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions)
+    );
+    app.use(
+      '/api/service-records',
+      patch(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions)
+    );
+    app.use(
+      '/api/service-records',
+      destroy(ServiceRecord, serviceRecordOptions, serviceRecordModelOptions)
+    );
 
     // =================================================================
     // PROTECTED ROUTES - Parts (global, not org-scoped - shared inventory)
     // =================================================================
 
-    const partsOptions = { middleware: [requireAuth], id_mapping: 'externalId' };
+    const partsOptions = {
+      middleware: [requireAuth],
+      id_mapping: 'externalId',
+    };
 
     app.use('/api/parts', list(Part, partsOptions));
     app.use('/api/parts', search(Part, partsOptions));
@@ -461,7 +488,12 @@ describe('VRM Multi-Tenant Application', () => {
 
     beforeEach(async () => {
       org1 = await createOrganization('Test Dealership', 'test-dealership');
-      user1 = await createUser(org1.id, 'testuser', 'password123', 'test@example.com');
+      user1 = await createUser(
+        org1.id,
+        'testuser',
+        'password123',
+        'test@example.com'
+      );
     });
 
     test('successful login returns token and user info', async () => {
@@ -502,9 +534,7 @@ describe('VRM Multi-Tenant Application', () => {
       const loginRes = await login('testuser', 'password123');
       const token = loginRes.body.token;
 
-      const res = await request(app)
-        .get('/auth/me')
-        .set(authHeader(token));
+      const res = await request(app).get('/auth/me').set(authHeader(token));
 
       expect(res.status).toBe(200);
       expect(res.body.user.username).toBe('testuser');
@@ -521,20 +551,14 @@ describe('VRM Multi-Tenant Application', () => {
       const token = loginRes.body.token;
 
       // Token works before logout
-      let meRes = await request(app)
-        .get('/auth/me')
-        .set(authHeader(token));
+      let meRes = await request(app).get('/auth/me').set(authHeader(token));
       expect(meRes.status).toBe(200);
 
       // Logout
-      await request(app)
-        .post('/auth/logout')
-        .set(authHeader(token));
+      await request(app).post('/auth/logout').set(authHeader(token));
 
       // Token no longer works
-      meRes = await request(app)
-        .get('/auth/me')
-        .set(authHeader(token));
+      meRes = await request(app).get('/auth/me').set(authHeader(token));
       expect(meRes.status).toBe(401);
     });
   });
@@ -550,8 +574,18 @@ describe('VRM Multi-Tenant Application', () => {
       org2 = await createOrganization('Elite Motors', 'elite-motors');
 
       // Create users for each org
-      user1 = await createUser(org1.id, 'downtown_user', 'pass123', 'user@downtown.com');
-      user2 = await createUser(org2.id, 'elite_user', 'pass456', 'user@elite.com');
+      user1 = await createUser(
+        org1.id,
+        'downtown_user',
+        'pass123',
+        'user@downtown.com'
+      );
+      user2 = await createUser(
+        org2.id,
+        'elite_user',
+        'pass456',
+        'user@elite.com'
+      );
 
       // Login both users
       const login1 = await login('downtown_user', 'pass123');
@@ -594,7 +628,10 @@ describe('VRM Multi-Tenant Application', () => {
 
       expect(res1.status).toBe(200);
       expect(res1.body.meta.paging.count).toBe(2);
-      expect(res1.body.data.map((c) => c.firstName).sort()).toEqual(['Jane', 'John']);
+      expect(res1.body.data.map((c) => c.firstName).sort()).toEqual([
+        'Jane',
+        'John',
+      ]);
 
       // User 2 should see only Elite Motors customers
       const res2 = await request(app)
@@ -646,7 +683,7 @@ describe('VRM Multi-Tenant Application', () => {
       // Verify the customer was created with the correct organization
       // Note: res.body.id is the externalId (UUID) due to id_mapping
       const customer = await db.models.Customer.findOne({
-        where: { externalId: res.body.id }
+        where: { externalId: res.body.id },
       });
       expect(customer).not.toBeNull();
       expect(customer.organizationId).toBe(org1.id);
@@ -824,7 +861,9 @@ describe('VRM Multi-Tenant Application', () => {
       expect(deleted).toBeNull();
 
       // But should exist if we include paranoid: false
-      const paranoid = await db.models.Customer.findByPk(customer.id, { paranoid: false });
+      const paranoid = await db.models.Customer.findByPk(customer.id, {
+        paranoid: false,
+      });
       expect(paranoid).not.toBeNull();
       expect(paranoid.deletedAt).not.toBeNull();
     });
@@ -835,7 +874,12 @@ describe('VRM Multi-Tenant Application', () => {
 
     beforeEach(async () => {
       org = await createOrganization('Auto Shop', 'auto-shop');
-      user = await createUser(org.id, 'mechanic', 'wrench123', 'mechanic@shop.com');
+      user = await createUser(
+        org.id,
+        'mechanic',
+        'wrench123',
+        'mechanic@shop.com'
+      );
       const loginRes = await login('mechanic', 'wrench123');
       token = loginRes.body.token;
 
@@ -919,7 +963,12 @@ describe('VRM Multi-Tenant Application', () => {
 
     beforeEach(async () => {
       org = await createOrganization('Service Center', 'service-center');
-      user = await createUser(org.id, 'advisor', 'service123', 'advisor@service.com');
+      user = await createUser(
+        org.id,
+        'advisor',
+        'service123',
+        'advisor@service.com'
+      );
       const loginRes = await login('advisor', 'service123');
       token = loginRes.body.token;
 
@@ -956,8 +1005,8 @@ describe('VRM Multi-Tenant Application', () => {
           serviceType: 'maintenance',
           description: 'Oil change',
           serviceDate: '2025-01-15',
-          laborCost: 45.00,
-          totalCost: 75.00,
+          laborCost: 45.0,
+          totalCost: 75.0,
           status: 'completed',
         },
         {
@@ -966,8 +1015,8 @@ describe('VRM Multi-Tenant Application', () => {
           serviceType: 'repair',
           description: 'Brake replacement',
           serviceDate: '2025-06-20',
-          laborCost: 180.00,
-          totalCost: 450.00,
+          laborCost: 180.0,
+          totalCost: 450.0,
           status: 'completed',
         },
       ]);
@@ -978,7 +1027,10 @@ describe('VRM Multi-Tenant Application', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.meta.paging.count).toBe(2);
-      expect(res.body.data.map((s) => s.serviceType).sort()).toEqual(['maintenance', 'repair']);
+      expect(res.body.data.map((s) => s.serviceType).sort()).toEqual([
+        'maintenance',
+        'repair',
+      ]);
     });
 
     test('service records include vehicle and customer details', async () => {
@@ -1037,17 +1089,13 @@ describe('VRM Multi-Tenant Application', () => {
       ]);
 
       // User from org1 can see parts
-      const res1 = await request(app)
-        .get('/api/parts')
-        .set(authHeader(token1));
+      const res1 = await request(app).get('/api/parts').set(authHeader(token1));
 
       expect(res1.status).toBe(200);
       expect(res1.body.meta.paging.count).toBe(2);
 
       // User from org2 can also see the same parts
-      const res2 = await request(app)
-        .get('/api/parts')
-        .set(authHeader(token2));
+      const res2 = await request(app).get('/api/parts').set(authHeader(token2));
 
       expect(res2.status).toBe(200);
       expect(res2.body.meta.paging.count).toBe(2);
@@ -1055,9 +1103,24 @@ describe('VRM Multi-Tenant Application', () => {
 
     test('search parts by category', async () => {
       await db.models.Part.bulkCreate([
-        { partNumber: 'BRK-001', name: 'Brake Pads', category: 'brakes', unitPrice: 89.99 },
-        { partNumber: 'BRK-002', name: 'Brake Rotors', category: 'brakes', unitPrice: 125.00 },
-        { partNumber: 'ENG-001', name: 'Spark Plugs', category: 'engine', unitPrice: 52.00 },
+        {
+          partNumber: 'BRK-001',
+          name: 'Brake Pads',
+          category: 'brakes',
+          unitPrice: 89.99,
+        },
+        {
+          partNumber: 'BRK-002',
+          name: 'Brake Rotors',
+          category: 'brakes',
+          unitPrice: 125.0,
+        },
+        {
+          partNumber: 'ENG-001',
+          name: 'Spark Plugs',
+          category: 'engine',
+          unitPrice: 52.0,
+        },
       ]);
 
       const res = await request(app)
@@ -1163,7 +1226,7 @@ describe('VRM Multi-Tenant Application', () => {
         email: 'dummy@test.com',
         isActive: true,
       });
-      
+
       // Now search for Smith - should only find our org's John Smith
       const res = await request(app)
         .post('/api/customers/search')
@@ -1209,8 +1272,16 @@ describe('VRM Multi-Tenant Application', () => {
   describe('Full User Journey', () => {
     test('complete workflow: login, manage customers and vehicles, create service', async () => {
       // Setup: Create organization and user
-      const org = await createOrganization('Premium Auto Service', 'premium-auto');
-      await createUser(org.id, 'service_advisor', 'welcome123', 'advisor@premium.com');
+      const org = await createOrganization(
+        'Premium Auto Service',
+        'premium-auto'
+      );
+      await createUser(
+        org.id,
+        'service_advisor',
+        'welcome123',
+        'advisor@premium.com'
+      );
 
       // Step 1: Login
       const loginRes = await request(app)
@@ -1290,9 +1361,9 @@ describe('VRM Multi-Tenant Application', () => {
           serviceType: 'maintenance',
           description: 'First scheduled service at 5000 miles',
           serviceDate: new Date().toISOString().split('T')[0],
-          laborCost: 120.00,
-          partsCost: 85.00,
-          totalCost: 205.00,
+          laborCost: 120.0,
+          partsCost: 85.0,
+          totalCost: 205.0,
           laborHours: 1.5,
           mileageAtService: 5000,
           technicianName: 'Expert Tech',
@@ -1335,9 +1406,7 @@ describe('VRM Multi-Tenant Application', () => {
       expect(searchRes.body.data[0].firstName).toBe('Michael');
 
       // Step 10: Logout
-      await request(app)
-        .post('/auth/logout')
-        .set(authHeader(token));
+      await request(app).post('/auth/logout').set(authHeader(token));
 
       // Verify can no longer access data
       const afterLogoutRes = await request(app)
@@ -1383,7 +1452,7 @@ describe('VRM Multi-Tenant Application', () => {
         testApp.use(bodyParser.json());
 
         const authAndScope = [requireAuth, scopeToOrganization];
-        
+
         testApp.use(
           '/test-parts',
           list(db.models.Part, {
@@ -1394,8 +1463,18 @@ describe('VRM Multi-Tenant Application', () => {
 
         // Create parts
         await db.models.Part.bulkCreate([
-          { partNumber: 'P1', name: 'Part 1', category: 'brakes', unitPrice: 10 },
-          { partNumber: 'P2', name: 'Part 2', category: 'engine', unitPrice: 20 },
+          {
+            partNumber: 'P1',
+            name: 'Part 1',
+            category: 'brakes',
+            unitPrice: 10,
+          },
+          {
+            partNumber: 'P2',
+            name: 'Part 2',
+            category: 'engine',
+            unitPrice: 20,
+          },
         ]);
 
         // Try to filter - should be ignored and return all parts
@@ -1719,7 +1798,9 @@ describe('VRM Multi-Tenant Application', () => {
 
         expect(res.status).toBe(200);
         expect(res.body.meta.paging.count).toBe(3);
-        expect(res.body.data.every((c) => !c.email.includes('alice'))).toBe(true);
+        expect(res.body.data.every((c) => !c.email.includes('alice'))).toBe(
+          true
+        );
       });
     });
 
@@ -1934,16 +2015,14 @@ describe('VRM Multi-Tenant Application', () => {
                   as: 'vehicle',
                   attributes: [
                     ['make', 'vehicle_make'],
-                    ['model', 'vehicle_model']
-                  ]
+                    ['model', 'vehicle_model'],
+                  ],
                 },
                 {
                   model: db.models.Customer,
                   as: 'customer',
-                  attributes: [
-                    ['firstName', 'customer_first_name']
-                  ]
-                }
+                  attributes: [['firstName', 'customer_first_name']],
+                },
               ],
             },
             {
@@ -1961,13 +2040,13 @@ describe('VRM Multi-Tenant Application', () => {
 
         expect(res.status).toBe(200);
         expect(res.body.data.length).toBe(1);
-        
+
         // Check that flattened fields are in the response
         const record = res.body.data[0];
         expect(record.vehicle_make).toBe('Honda');
         expect(record.vehicle_model).toBe('Accord');
         expect(record.customer_first_name).toBe('Flatten');
-        
+
         // Original nested objects should be removed after flattening
         expect(record.vehicle).toBeUndefined();
         expect(record.customer).toBeUndefined();
@@ -1999,8 +2078,18 @@ describe('VRM Multi-Tenant Application', () => {
         });
 
         await db.models.CustomerVehicle.bulkCreate([
-          { customerId: customer.id, vehicleId: vehicle1.id, relationship: 'owner', startDate: '2020-01-01' },
-          { customerId: customer.id, vehicleId: vehicle2.id, relationship: 'owner', startDate: '2021-01-01' },
+          {
+            customerId: customer.id,
+            vehicleId: vehicle1.id,
+            relationship: 'owner',
+            startDate: '2020-01-01',
+          },
+          {
+            customerId: customer.id,
+            vehicleId: vehicle2.id,
+            relationship: 'owner',
+            startDate: '2021-01-01',
+          },
         ]);
 
         await db.models.ServiceRecord.bulkCreate([
@@ -2080,7 +2169,7 @@ describe('VRM Multi-Tenant Application', () => {
         expect(res.status).toBe(200);
         expect(res.body.meta.paging.count).toBe(3);
         expect(res.body.data.length).toBe(3);
-        
+
         // Verify includes are present
         expect(res.body.data[0].vehicle).toBeDefined();
         expect(res.body.data[0].customer).toBeDefined();

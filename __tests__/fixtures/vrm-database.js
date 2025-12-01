@@ -4,7 +4,7 @@ const { loadSampleData } = require('./vrm-sample-data');
 /**
  * Creates and configures a complete VRM (Vehicle Relationship Management) database
  * with realistic tables, relationships, and varying data types for testing.
- * 
+ *
  * Includes:
  * - Organizations table
  * - Users table with username/password
@@ -14,7 +14,7 @@ const { loadSampleData } = require('./vrm-sample-data');
  * - Parts inventory with various datatypes
  * - Many-to-many relationships (CustomerVehicles, ServiceParts)
  * - One-to-many relationships
- * 
+ *
  * @param {Object} options - Configuration options
  * @param {boolean} options.logging - Enable SQL logging (default: false)
  * @param {boolean} options.loadData - Automatically load sample data (default: true)
@@ -22,9 +22,9 @@ const { loadSampleData } = require('./vrm-sample-data');
  */
 async function createVrmDatabase(options = {}) {
   const { logging = false, loadData = true } = options;
-  
-  const sequelize = new Sequelize('sqlite::memory:', { 
-    logging 
+
+  const sequelize = new Sequelize('sqlite::memory:', {
+    logging,
   });
 
   // ==================== ORGANIZATIONS TABLE ====================
@@ -78,7 +78,7 @@ async function createVrmDatabase(options = {}) {
         field: 'is_active',
       },
     },
-    { 
+    {
       tableName: 'organizations',
       timestamps: true,
       underscored: true,
@@ -146,7 +146,7 @@ async function createVrmDatabase(options = {}) {
       },
       accountBalance: {
         type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00,
+        defaultValue: 0.0,
         field: 'account_balance',
       },
       isActive: {
@@ -159,7 +159,7 @@ async function createVrmDatabase(options = {}) {
         allowNull: true,
       },
     },
-    { 
+    {
       tableName: 'customers',
       timestamps: true,
       underscored: true,
@@ -219,7 +219,7 @@ async function createVrmDatabase(options = {}) {
         field: 'last_login',
       },
     },
-    { 
+    {
       tableName: 'users',
       timestamps: true,
       underscored: true,
@@ -279,7 +279,13 @@ async function createVrmDatabase(options = {}) {
         },
       },
       engineType: {
-        type: DataTypes.ENUM('gasoline', 'diesel', 'electric', 'hybrid', 'plugin-hybrid'),
+        type: DataTypes.ENUM(
+          'gasoline',
+          'diesel',
+          'electric',
+          'hybrid',
+          'plugin-hybrid'
+        ),
         allowNull: true,
         field: 'engine_type',
       },
@@ -313,7 +319,7 @@ async function createVrmDatabase(options = {}) {
         allowNull: true,
       },
     },
-    { 
+    {
       tableName: 'vehicles',
       timestamps: true,
       underscored: true,
@@ -349,7 +355,12 @@ async function createVrmDatabase(options = {}) {
         field: 'vehicle_id',
       },
       relationship: {
-        type: DataTypes.ENUM('owner', 'co-owner', 'authorized-driver', 'lessee'),
+        type: DataTypes.ENUM(
+          'owner',
+          'co-owner',
+          'authorized-driver',
+          'lessee'
+        ),
         defaultValue: 'owner',
       },
       startDate: {
@@ -372,7 +383,7 @@ async function createVrmDatabase(options = {}) {
         allowNull: true,
       },
     },
-    { 
+    {
       tableName: 'customer_vehicles',
       timestamps: true,
       underscored: true,
@@ -421,7 +432,13 @@ async function createVrmDatabase(options = {}) {
         field: 'customer_id',
       },
       serviceType: {
-        type: DataTypes.ENUM('maintenance', 'repair', 'inspection', 'warranty', 'recall'),
+        type: DataTypes.ENUM(
+          'maintenance',
+          'repair',
+          'inspection',
+          'warranty',
+          'recall'
+        ),
         allowNull: false,
         field: 'service_type',
       },
@@ -436,22 +453,22 @@ async function createVrmDatabase(options = {}) {
       },
       laborCost: {
         type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00,
+        defaultValue: 0.0,
         field: 'labor_cost',
       },
       partsCost: {
         type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00,
+        defaultValue: 0.0,
         field: 'parts_cost',
       },
       totalCost: {
         type: DataTypes.DECIMAL(10, 2),
-        defaultValue: 0.00,
+        defaultValue: 0.0,
         field: 'total_cost',
       },
       laborHours: {
         type: DataTypes.DECIMAL(5, 2),
-        defaultValue: 0.00,
+        defaultValue: 0.0,
         field: 'labor_hours',
       },
       mileageAtService: {
@@ -465,7 +482,12 @@ async function createVrmDatabase(options = {}) {
         field: 'technician_name',
       },
       status: {
-        type: DataTypes.ENUM('scheduled', 'in-progress', 'completed', 'cancelled'),
+        type: DataTypes.ENUM(
+          'scheduled',
+          'in-progress',
+          'completed',
+          'cancelled'
+        ),
         defaultValue: 'scheduled',
       },
       warranty: {
@@ -477,7 +499,7 @@ async function createVrmDatabase(options = {}) {
         allowNull: true,
       },
     },
-    { 
+    {
       tableName: 'service_records',
       timestamps: true,
       underscored: true,
@@ -516,7 +538,16 @@ async function createVrmDatabase(options = {}) {
         allowNull: true,
       },
       category: {
-        type: DataTypes.ENUM('engine', 'transmission', 'brakes', 'suspension', 'electrical', 'body', 'interior', 'other'),
+        type: DataTypes.ENUM(
+          'engine',
+          'transmission',
+          'brakes',
+          'suspension',
+          'electrical',
+          'body',
+          'interior',
+          'other'
+        ),
         allowNull: false,
       },
       manufacturer: {
@@ -562,7 +593,7 @@ async function createVrmDatabase(options = {}) {
         field: 'last_restock_date',
       },
     },
-    { 
+    {
       tableName: 'parts',
       timestamps: true,
       underscored: true,
@@ -625,7 +656,7 @@ async function createVrmDatabase(options = {}) {
         field: 'warranty_months',
       },
     },
-    { 
+    {
       tableName: 'service_parts',
       timestamps: true,
       underscored: true,
@@ -634,7 +665,7 @@ async function createVrmDatabase(options = {}) {
   );
 
   // ==================== DEFINE RELATIONSHIPS ====================
-  
+
   // Organization -> Users (One-to-Many)
   Organization.hasMany(User, {
     foreignKey: 'organization_id',

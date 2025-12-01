@@ -591,10 +591,10 @@ app.use(
   )
 );
 
-// Filter: label name (case-insensitive equality by default)
+// Filtering: label name (case-insensitive equality by default)
 // GET /albums?artist.label.name=warner
 
-// Order: first by label name, then by artist name
+// Ordering: first by label name, then by artist name
 // GET /albums?api:order_by=artist.label.name,artist.name
 ```
 

@@ -4,7 +4,11 @@ const express = utils.express;
 const apializeContext = utils.apializeContext;
 const asyncHandler = utils.asyncHandler;
 const defaultNotFound = utils.defaultNotFound;
-const { normalizeId, applyEndpointConfiguration } = require('./operationUtils');
+const {
+  normalizeId,
+  applyEndpointConfiguration,
+  mergeModelAndUserOptions,
+} = require('./operationUtils');
 
 // Import operation handlers for related endpoints
 const list = require('./list');
@@ -995,12 +999,22 @@ function setupMemberRoutes(
 }
 
 function single(model, options = {}, modelOptions = {}) {
-  const router = baseSingle(model, options, modelOptions);
+  // Merge model-based apialize configuration with user options for the single wrapper
+  // Use apialize_context if specified, otherwise use 'default'
+  const context = options.apialize_context || 'default';
+  const mergedOptions = mergeModelAndUserOptions(
+    model,
+    options,
+    'single',
+    context
+  );
 
-  const idMapping = extractStringOption(options, 'id_mapping', 'id');
-  const paramName = extractStringOption(options, 'param_name', 'id');
-  const related = extractArrayOption(options, 'related');
-  const memberRoutes = extractArrayOption(options, 'member_routes');
+  const router = baseSingle(model, mergedOptions, modelOptions);
+
+  const idMapping = extractStringOption(mergedOptions, 'id_mapping', 'id');
+  const paramName = extractStringOption(mergedOptions, 'param_name', 'id');
+  const related = extractArrayOption(mergedOptions, 'related');
+  const memberRoutes = extractArrayOption(mergedOptions, 'member_routes');
 
   // Add member routes (custom routes on the single resource)
   const hasMemberRoutes =
@@ -1013,7 +1027,7 @@ function single(model, options = {}, modelOptions = {}) {
       paramName,
       idMapping,
       modelOptions,
-      options
+      mergedOptions
     );
   }
 

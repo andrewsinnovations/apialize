@@ -494,7 +494,15 @@ describe('single() with related models', () => {
           related: [
             {
               model: Post,
-              operations: ['list', 'search', 'post', 'get', 'put', 'patch', 'delete'],
+              operations: [
+                'list',
+                'search',
+                'post',
+                'get',
+                'put',
+                'patch',
+                'delete',
+              ],
             },
           ],
         })
@@ -507,9 +515,11 @@ describe('single() with related models', () => {
       const userId = userRes.body.id;
 
       // CREATE: POST /:id/posts
-      const createRes = await request(app)
-        .post(`/users/${userId}/posts`)
-        .send({ title: 'New Post', content: 'Content via API', user_id: userId });
+      const createRes = await request(app).post(`/users/${userId}/posts`).send({
+        title: 'New Post',
+        content: 'Content via API',
+        user_id: userId,
+      });
       expect(createRes.status).toBe(201);
       const postId = createRes.body.id;
 
@@ -530,7 +540,11 @@ describe('single() with related models', () => {
       // UPDATE: PUT /:id/posts/:postId
       const updateRes = await request(app)
         .put(`/users/${userId}/posts/${postId}`)
-        .send({ title: 'Updated Post', content: 'Updated content', user_id: userId });
+        .send({
+          title: 'Updated Post',
+          content: 'Updated content',
+          user_id: userId,
+        });
       expect(updateRes.status).toBe(200);
       expect(updateRes.body.success).toBe(true);
 

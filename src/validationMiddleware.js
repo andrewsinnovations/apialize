@@ -45,7 +45,11 @@ function validateEnumFields(model, data) {
       }
 
       // Check if this is an enum field
-      if (attribute.type && attribute.type.values && Array.isArray(attribute.type.values)) {
+      if (
+        attribute.type &&
+        attribute.type.values &&
+        Array.isArray(attribute.type.values)
+      ) {
         const value = item[fieldName];
         if (value !== null && value !== undefined) {
           if (!attribute.type.values.includes(value)) {
@@ -94,8 +98,11 @@ function validateDataTypes(model, data) {
       }
 
       // Check INTEGER fields
-      if (attribute.type && attribute.type.constructor && 
-          attribute.type.constructor.name === 'INTEGER') {
+      if (
+        attribute.type &&
+        attribute.type.constructor &&
+        attribute.type.constructor.name === 'INTEGER'
+      ) {
         if (typeof value !== 'number' || !Number.isInteger(value)) {
           const error = new Error(
             `Validation error: Field '${fieldName}' must be an integer`
@@ -107,9 +114,12 @@ function validateDataTypes(model, data) {
       }
 
       // Check DECIMAL/FLOAT fields
-      if (attribute.type && attribute.type.constructor && 
-          (attribute.type.constructor.name === 'DECIMAL' || 
-           attribute.type.constructor.name === 'FLOAT')) {
+      if (
+        attribute.type &&
+        attribute.type.constructor &&
+        (attribute.type.constructor.name === 'DECIMAL' ||
+          attribute.type.constructor.name === 'FLOAT')
+      ) {
         if (typeof value !== 'number') {
           const error = new Error(
             `Validation error: Field '${fieldName}' must be a number`

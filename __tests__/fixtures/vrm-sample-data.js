@@ -25,7 +25,8 @@ async function loadSampleData(models) {
     {
       name: 'Downtown Auto Dealership',
       slug: 'downtown-auto',
-      description: 'Premium automotive sales and service in the heart of downtown',
+      description:
+        'Premium automotive sales and service in the heart of downtown',
       email: 'info@downtownauto.com',
       phoneNumber: '+1-555-1000',
       address: {

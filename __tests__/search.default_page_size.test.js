@@ -45,7 +45,7 @@ describe('search operation: snake_case configuration backward compatibility', ()
     const { app } = await setupTestApp({ defaultPageSize: 5 });
 
     const res = await request(app).post('/items/search').send({});
-    
+
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(5);
@@ -58,7 +58,7 @@ describe('search operation: snake_case configuration backward compatibility', ()
     const { app } = await setupTestApp({ default_page_size: 7 });
 
     const res = await request(app).post('/items/search').send({});
-    
+
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(7);
@@ -68,13 +68,13 @@ describe('search operation: snake_case configuration backward compatibility', ()
   });
 
   test('should prioritize default_page_size over defaultPageSize when both provided', async () => {
-    const { app } = await setupTestApp({ 
+    const { app } = await setupTestApp({
       defaultPageSize: 10,
-      default_page_size: 3 
+      default_page_size: 3,
     });
 
     const res = await request(app).post('/items/search').send({});
-    
+
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(3);
@@ -86,7 +86,7 @@ describe('search operation: snake_case configuration backward compatibility', ()
     const { app } = await setupTestApp({});
 
     const res = await request(app).post('/items/search').send({});
-    
+
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.data).toHaveLength(25);
@@ -98,12 +98,12 @@ describe('search operation: snake_case configuration backward compatibility', ()
     expect(() => {
       const app = express();
       app.use(bodyParser.json());
-      
+
       sequelize = new Sequelize('sqlite::memory:', { logging: false });
       const Item = sequelize.define('Item', {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       });
-      
+
       app.use('/items', search(Item, { default_page_size: -5 }));
     }).toThrow('defaultPageSize must be a positive number');
   });
@@ -112,12 +112,12 @@ describe('search operation: snake_case configuration backward compatibility', ()
     expect(() => {
       const app = express();
       app.use(bodyParser.json());
-      
+
       sequelize = new Sequelize('sqlite::memory:', { logging: false });
       const Item = sequelize.define('Item', {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       });
-      
+
       app.use('/items', search(Item, { default_page_size: 'invalid' }));
     }).toThrow('defaultPageSize must be a positive number');
   });
@@ -145,7 +145,7 @@ describe('search operation: snake_case configuration backward compatibility', ()
     app.use('/items', search(Item, { default_order_by: 'name' }));
 
     const res = await request(app).post('/items/search').send({});
-    
+
     expect(res.status).toBe(200);
     expect(res.body.data[0].name).toBe('Apple');
     expect(res.body.data[1].name).toBe('Mango');
@@ -172,13 +172,16 @@ describe('search operation: snake_case configuration backward compatibility', ()
 
     const app = express();
     app.use(bodyParser.json());
-    app.use('/items', search(Item, { 
-      default_order_by: 'name',
-      default_order_dir: 'DESC' 
-    }));
+    app.use(
+      '/items',
+      search(Item, {
+        default_order_by: 'name',
+        default_order_dir: 'DESC',
+      })
+    );
 
     const res = await request(app).post('/items/search').send({});
-    
+
     expect(res.status).toBe(200);
     expect(res.body.data[0].name).toBe('Zebra');
     expect(res.body.data[1].name).toBe('Mango');
@@ -204,7 +207,7 @@ describe('search operation: snake_case configuration backward compatibility', ()
     app.use('/items', search(Item, { meta_show_ordering: true }));
 
     const res = await request(app).post('/items/search').send({});
-    
+
     expect(res.status).toBe(200);
     expect(res.body.meta.ordering).toBeDefined();
   });
@@ -228,7 +231,7 @@ describe('search operation: snake_case configuration backward compatibility', ()
     app.use('/items', search(Item, { meta_show_filters: true }));
 
     const res = await request(app).post('/items/search').send({});
-    
+
     expect(res.status).toBe(200);
     expect(res.body.meta.filtering).toBeDefined();
   });
@@ -253,7 +256,7 @@ describe('search operation: snake_case configuration backward compatibility', ()
     app.use('/items', search(Item, { disable_subquery: false }));
 
     const res = await request(app).post('/items/search').send({});
-    
+
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
   });
@@ -279,17 +282,20 @@ describe('search operation: snake_case configuration backward compatibility', ()
 
     const app = express();
     app.use(bodyParser.json());
-    app.use('/items', search(Item, { 
-      defaultOrderBy: 'name',
-      default_order_by: 'score',  // This should take precedence
-      defaultOrderDir: 'ASC',
-      default_order_dir: 'DESC',  // This should take precedence
-      metaShowOrdering: false,
-      meta_show_ordering: true    // This should take precedence
-    }));
+    app.use(
+      '/items',
+      search(Item, {
+        defaultOrderBy: 'name',
+        default_order_by: 'score', // This should take precedence
+        defaultOrderDir: 'ASC',
+        default_order_dir: 'DESC', // This should take precedence
+        metaShowOrdering: false,
+        meta_show_ordering: true, // This should take precedence
+      })
+    );
 
     const res = await request(app).post('/items/search').send({});
-    
+
     expect(res.status).toBe(200);
     // Should be ordered by score DESC
     expect(res.body.data[0].score).toBe(3);
@@ -319,15 +325,18 @@ describe('search operation: snake_case configuration backward compatibility', ()
 
     const app = express();
     app.use(bodyParser.json());
-    app.use('/items', search(Item, { 
-      default_page_size: 5,
-      default_order_by: 'name',
-      default_order_dir: 'ASC',
-      meta_show_ordering: true
-    }));
+    app.use(
+      '/items',
+      search(Item, {
+        default_page_size: 5,
+        default_order_by: 'name',
+        default_order_dir: 'ASC',
+        meta_show_ordering: true,
+      })
+    );
 
     const res = await request(app).post('/items/search').send({});
-    
+
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(5);
     expect(res.body.meta.paging.size).toBe(5);
@@ -337,4 +346,3 @@ describe('search operation: snake_case configuration backward compatibility', ()
     expect(res.body.data[0].name).toMatch(/^Item [K-O]/);
   });
 });
-

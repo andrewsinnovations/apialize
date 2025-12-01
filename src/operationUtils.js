@@ -646,7 +646,8 @@ function normalizeNestedIncludedModels(
   row,
   relationIdMapping,
   fkMappings,
-  lookupResults
+  lookupResults,
+  includeConfig
 ) {
   if (!row || typeof row !== 'object') {
     return;
@@ -679,18 +680,51 @@ function normalizeNestedIncludedModels(
       }
     }
 
-    // Try to find a mapping for this nested model's id field
-    for (let j = 0; j < relationIdMapping.length; j++) {
-      const mapping = relationIdMapping[j];
-      if (!mapping.model || !mapping.id_field) {
-        continue;
+    // Find the include config for this nested relation to get the model
+    let nestedModel = null;
+    let nestedIncludeConfig = null;
+    if (includeConfig && Array.isArray(includeConfig)) {
+      for (let j = 0; j < includeConfig.length; j++) {
+        const inc = includeConfig[j];
+        // Match by 'as' alias if present, otherwise check if it's the key name
+        if ((inc.as && inc.as === key) || (!inc.as && inc.model)) {
+          nestedModel = inc.model;
+          nestedIncludeConfig = inc.include; // For recursive calls
+          break;
+        }
       }
+    }
 
-      // If the nested object has the id_field, normalize it
-      const hasIdField = value.hasOwnProperty(mapping.id_field);
-      if (hasIdField && value.id !== undefined) {
-        value.id = value[mapping.id_field];
-        delete value[mapping.id_field];
+    // Check if the nested model has its own apialize.default.id_mapping
+    let nestedIdMapping = null;
+    if (nestedModel && nestedModel.options && nestedModel.options.apialize) {
+      const apializeConfig = nestedModel.options.apialize;
+      if (apializeConfig.default && apializeConfig.default.id_mapping) {
+        nestedIdMapping = apializeConfig.default.id_mapping;
+      }
+    }
+
+    // Apply the nested model's own id_mapping if found
+    if (nestedIdMapping && nestedIdMapping !== 'id') {
+      const hasIdField = value.hasOwnProperty(nestedIdMapping);
+      if (hasIdField) {
+        value.id = value[nestedIdMapping];
+        delete value[nestedIdMapping];
+      }
+    } else {
+      // Fall back to relation_id_mapping if no model-level config
+      for (let j = 0; j < relationIdMapping.length; j++) {
+        const mapping = relationIdMapping[j];
+        if (!mapping.model || !mapping.id_field) {
+          continue;
+        }
+
+        // If the nested object has the id_field, normalize it
+        const hasIdField = value.hasOwnProperty(mapping.id_field);
+        if (hasIdField && value.id !== undefined) {
+          value.id = value[mapping.id_field];
+          delete value[mapping.id_field];
+        }
       }
     }
 
@@ -699,7 +733,8 @@ function normalizeNestedIncludedModels(
       value,
       relationIdMapping,
       fkMappings,
-      lookupResults
+      lookupResults,
+      nestedIncludeConfig
     );
   }
 }
@@ -739,7 +774,8 @@ async function normalizeRowsWithForeignKeys(
   rows,
   idMapping,
   relationIdMapping,
-  sourceModel
+  sourceModel,
+  includeConfig
 ) {
   if (!Array.isArray(rows)) {
     return rows;
@@ -784,11 +820,25 @@ async function normalizeRowsWithForeignKeys(
         mapped[i],
         relationIdMapping,
         fkMappings,
-        lookupResults
+        lookupResults,
+        includeConfig
       );
     }
 
     return mapped;
+  }
+
+  // Even without foreign key mapping, we should still normalize nested models' id fields
+  if (includeConfig && Array.isArray(includeConfig)) {
+    for (let i = 0; i < normalized.length; i++) {
+      normalizeNestedIncludedModels(
+        normalized[i],
+        relationIdMapping || [],
+        {},
+        {},
+        includeConfig
+      );
+    }
   }
 
   return normalized;
@@ -1211,6 +1261,78 @@ async function reverseMapForeignKeysInBulk(
   );
 }
 
+/**
+ * Extracts apialize configuration from a Sequelize model
+ * @param {Object} model - Sequelize model
+ * @param {String} operationType - The operation type (e.g., 'list', 'single', 'create')
+ * @param {String} context - Optional context name within the operation (e.g., 'default', 'other_context')
+ * @returns {Object} - Configuration object or empty object if not found
+ */
+function extractModelApializeConfig(model, operationType, context = 'default') {
+  if (!model || !model.options || !model.options.apialize) {
+    return {};
+  }
+
+  const apializeConfig = model.options.apialize;
+  const config = {};
+
+  // First, apply global default configuration if it exists
+  if (apializeConfig.default && typeof apializeConfig.default === 'object') {
+    Object.assign(config, apializeConfig.default);
+  }
+
+  // Then, apply operation-specific configuration if it exists
+  if (apializeConfig[operationType]) {
+    const operationConfig = apializeConfig[operationType];
+
+    // If the operation config has a default, apply it
+    if (
+      operationConfig.default &&
+      typeof operationConfig.default === 'object'
+    ) {
+      Object.assign(config, operationConfig.default);
+    }
+
+    // If a specific context is requested and exists, apply it
+    if (
+      context !== 'default' &&
+      operationConfig[context] &&
+      typeof operationConfig[context] === 'object'
+    ) {
+      Object.assign(config, operationConfig[context]);
+    }
+  }
+
+  return config;
+}
+
+/**
+ * Merges model-based apialize configuration with user-provided options
+ * Model configuration is applied first, then user options override
+ * @param {Object} model - Sequelize model
+ * @param {Object} userOptions - User-provided options
+ * @param {String} operationType - The operation type
+ * @param {String} context - Optional context name
+ * @returns {Object} - Merged configuration
+ */
+function mergeModelAndUserOptions(
+  model,
+  userOptions = {},
+  operationType,
+  context = 'default'
+) {
+  const modelConfig = extractModelApializeConfig(model, operationType, context);
+  const merged = {};
+
+  // Apply model configuration first
+  Object.assign(merged, modelConfig);
+
+  // Then apply user options (these take precedence)
+  Object.assign(merged, userOptions);
+
+  return merged;
+}
+
 module.exports = {
   buildContext: buildContext,
   withTransactionAndHooks: withTransactionAndHooks,
@@ -1226,4 +1348,6 @@ module.exports = {
   lookupInternalId: lookupInternalId,
   reverseMapForeignKeys: reverseMapForeignKeys,
   reverseMapForeignKeysInBulk: reverseMapForeignKeysInBulk,
+  extractModelApializeConfig: extractModelApializeConfig,
+  mergeModelAndUserOptions: mergeModelAndUserOptions,
 };

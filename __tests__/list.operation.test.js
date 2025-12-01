@@ -119,7 +119,9 @@ describe('list operation: comprehensive options coverage', () => {
     const res1 = await request(app).get('/items?api:order_by=-name');
     expect(res1.status).toBe(200);
     expect(names(res1)).toEqual(['Zeta', 'Alpha', 'Alpha']);
-    expect(res1.body.meta.ordering).toEqual([{order_by: 'name', direction: 'DESC'}]);
+    expect(res1.body.meta.ordering).toEqual([
+      { order_by: 'name', direction: 'DESC' },
+    ]);
 
     // Multiple fields with global ASC direction: category asc, then name asc
     const res2 = await request(app).get(
@@ -128,8 +130,8 @@ describe('list operation: comprehensive options coverage', () => {
     expect(res2.status).toBe(200);
     expect(names(res2)).toEqual(['Alpha', 'Zeta', 'Alpha']); // A: Alpha, Zeta; then B: Alpha
     expect(res2.body.meta.ordering).toEqual([
-      {order_by: 'category', direction: 'ASC'},
-      {order_by: 'name', direction: 'ASC'},
+      { order_by: 'category', direction: 'ASC' },
+      { order_by: 'name', direction: 'ASC' },
     ]);
   });
 

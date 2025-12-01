@@ -151,9 +151,9 @@ describe('single() with related search operation', () => {
       expect(searchRes.body.data.every((p) => p.user_id === userId1)).toBe(
         true
       );
-      expect(
-        searchRes.body.data.every((p) => p.status === 'published')
-      ).toBe(true);
+      expect(searchRes.body.data.every((p) => p.status === 'published')).toBe(
+        true
+      );
     });
 
     test('should filter search results by parent', async () => {
@@ -261,7 +261,9 @@ describe('single() with related search operation', () => {
       expect(searchRes.body.data[0].title).toBe('Post 1');
 
       // Test get endpoint
-      const getRes = await request(app).get(`/users/${userId}/posts/${post1Id}`);
+      const getRes = await request(app).get(
+        `/users/${userId}/posts/${post1Id}`
+      );
       expect(getRes.status).toBe(200);
       expect(getRes.body.record.id).toBe(post1Id);
     });
@@ -495,10 +497,7 @@ describe('single() with related search operation', () => {
         .post(`/users/${userId1}/posts/search`)
         .send({
           filtering: {
-            or: [
-              { status: 'published' },
-              { status: 'draft' },
-            ],
+            or: [{ status: 'published' }, { status: 'draft' }],
           },
         });
 
@@ -506,7 +505,9 @@ describe('single() with related search operation', () => {
       expect(searchRes.body.success).toBe(true);
       expect(searchRes.body.data).toHaveLength(2);
       // All results should belong to user1, not user2
-      expect(searchRes.body.data.every((p) => p.user_id === userId1)).toBe(true);
+      expect(searchRes.body.data.every((p) => p.user_id === userId1)).toBe(
+        true
+      );
       // Should have one published and one draft
       const statuses = searchRes.body.data.map((p) => p.status).sort();
       expect(statuses).toEqual(['draft', 'published']);

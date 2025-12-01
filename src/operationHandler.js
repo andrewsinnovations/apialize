@@ -12,9 +12,9 @@ const {
   withTransactionAndHooks,
   withHooksOnly,
   applyEndpointConfiguration,
+  mergeModelAndUserOptions,
 } = require('./operationUtils');
 
-// Import individual operation processors
 const { processCreateRequest } = require('./operations/createProcessor');
 const { processUpdateRequest } = require('./operations/updateProcessor');
 const { processPatchRequest } = require('./operations/patchProcessor');
@@ -139,60 +139,53 @@ function validateModelForOperation(model, operationType) {
   }
 }
 
-function buildOperationConfig(options = {}, operationType) {
+function buildOperationConfig(model, options = {}, operationType) {
   const defaults = OPERATION_DEFAULTS[operationType];
   if (!defaults) {
     throw new Error(`Unknown operation type: ${operationType}`);
   }
 
-  const config = {};
+  const context = options.apialize_context || 'default';
+  const mergedOptions = mergeModelAndUserOptions(
+    model,
+    options,
+    operationType,
+    context
+  );
 
-  // Apply defaults first
-  const defaultKeys = Object.keys(defaults);
-  for (let i = 0; i < defaultKeys.length; i++) {
-    const key = defaultKeys[i];
-    config[key] = defaults[key];
-  }
+  const config = { ...defaults, ...mergedOptions };
 
-  // Override with user options
-  const optionKeys = Object.keys(options);
-  for (let i = 0; i < optionKeys.length; i++) {
-    const key = optionKeys[i];
-    config[key] = options[key];
-  }
-
-  // Handle backward compatibility: snake_case -> camelCase for LIST and SEARCH options
-  if (
+  const isListOrSearch =
     operationType === OPERATION_TYPES.LIST ||
-    operationType === OPERATION_TYPES.SEARCH
-  ) {
-    if (options.default_page_size !== undefined) {
-      config.defaultPageSize = options.default_page_size;
+    operationType === OPERATION_TYPES.SEARCH;
+
+  if (isListOrSearch) {
+    if (mergedOptions.default_page_size !== undefined) {
+      config.defaultPageSize = mergedOptions.default_page_size;
     }
-    if (options.default_order_by !== undefined) {
-      config.defaultOrderBy = options.default_order_by;
+    if (mergedOptions.default_order_by !== undefined) {
+      config.defaultOrderBy = mergedOptions.default_order_by;
     }
-    if (options.default_order_dir !== undefined) {
-      config.defaultOrderDir = options.default_order_dir;
+    if (mergedOptions.default_order_dir !== undefined) {
+      config.defaultOrderDir = mergedOptions.default_order_dir;
     }
-    if (options.meta_show_ordering !== undefined) {
-      config.metaShowOrdering = options.meta_show_ordering;
+    if (mergedOptions.meta_show_ordering !== undefined) {
+      config.metaShowOrdering = mergedOptions.meta_show_ordering;
     }
-    if (options.meta_show_filters !== undefined) {
-      config.metaShowFilters = options.meta_show_filters;
+    if (mergedOptions.meta_show_filters !== undefined) {
+      config.metaShowFilters = mergedOptions.meta_show_filters;
     }
-    if (options.disable_subquery !== undefined) {
-      config.disableSubqueryOnIncludeRequest = options.disable_subquery;
+    if (mergedOptions.disable_subquery !== undefined) {
+      config.disableSubqueryOnIncludeRequest = mergedOptions.disable_subquery;
     }
   }
 
-  // Handle backward compatibility for LIST-specific options
   if (operationType === OPERATION_TYPES.LIST) {
-    if (options.allow_filtering !== undefined) {
-      config.allowFiltering = options.allow_filtering;
+    if (mergedOptions.allow_filtering !== undefined) {
+      config.allowFiltering = mergedOptions.allow_filtering;
     }
-    if (options.allow_ordering !== undefined) {
-      config.allowOrdering = options.allow_ordering;
+    if (mergedOptions.allow_ordering !== undefined) {
+      config.allowOrdering = mergedOptions.allow_ordering;
     }
   }
 
@@ -200,32 +193,25 @@ function buildOperationConfig(options = {}, operationType) {
 }
 
 function validateOperationConfig(config, operationType, model) {
-  // Validate middleware
   if (config.middleware && !Array.isArray(config.middleware)) {
     throw new Error(`[${operationType}] middleware must be an array`);
   }
 
-  // Validate id_mapping type
   if (config.id_mapping && typeof config.id_mapping !== 'string') {
     throw new Error(`[${operationType}] id_mapping must be a string`);
   }
 
-  // Validate id_mapping field exists on model (skip 'id' as it's the default)
   if (config.id_mapping && config.id_mapping !== 'id' && model) {
     const hasRawAttributes =
       model.rawAttributes && typeof model.rawAttributes === 'object';
-    if (hasRawAttributes) {
-      const fieldExists = config.id_mapping in model.rawAttributes;
-      if (!fieldExists) {
-        const availableFields = Object.keys(model.rawAttributes).join(', ');
-        throw new Error(
-          `[${operationType}] id_mapping field '${config.id_mapping}' does not exist on model. Available fields: ${availableFields}`
-        );
-      }
+    if (hasRawAttributes && !(config.id_mapping in model.rawAttributes)) {
+      const availableFields = Object.keys(model.rawAttributes).join(', ');
+      throw new Error(
+        `[${operationType}] id_mapping field '${config.id_mapping}' does not exist on model. Available fields: ${availableFields}`
+      );
     }
   }
 
-  // Validate hooks
   if (
     config.pre &&
     typeof config.pre !== 'function' &&
@@ -255,10 +241,11 @@ function validateOperationConfig(config, operationType, model) {
     }
   }
 
-  if (
+  const isListOrSearch =
     operationType === OPERATION_TYPES.LIST ||
-    operationType === OPERATION_TYPES.SEARCH
-  ) {
+    operationType === OPERATION_TYPES.SEARCH;
+
+  if (isListOrSearch) {
     if (
       typeof config.defaultPageSize !== 'number' ||
       config.defaultPageSize <= 0
@@ -276,36 +263,27 @@ function createOperationHandler(
   options = {},
   modelOptions = {}
 ) {
-  // Step 1: Validate model has required methods
   validateModelForOperation(model, operationType);
 
-  // Step 2: Build and validate configuration
-  const config = buildOperationConfig(options, operationType);
+  const config = buildOperationConfig(model, options, operationType);
   validateOperationConfig(config, operationType, model);
 
-  // Step 3: Get operation processor
   const processor = OPERATION_PROCESSORS[operationType];
   if (!processor) {
     throw new Error(`No processor found for operation type: ${operationType}`);
   }
 
-  // Step 4: Setup middleware and handlers
   const router = express.Router({ mergeParams: true });
-
-  // Step 5: Create the unified handler
   const handlers = buildHandlers(config.middleware, async (req, res) => {
     try {
-      // Apply endpoint configuration (scopes, schema)
       const effectiveModel = applyEndpointConfiguration(model, modelOptions);
 
-      // Create effective options with hooks
       const effectiveOptions = {
         ...options,
         pre: config.pre,
         post: config.post,
       };
 
-      // Execute with or without transactions based on operation type
       const isReadOnlyOperation =
         operationType === OPERATION_TYPES.SEARCH ||
         operationType === OPERATION_TYPES.LIST ||
@@ -314,7 +292,6 @@ function createOperationHandler(
         ? withHooksOnly
         : withTransactionAndHooks;
 
-      // For destroy operations, extract context data that hooks need
       let contextExtras = {};
       if (operationType === OPERATION_TYPES.DESTROY) {
         const {
@@ -336,18 +313,15 @@ function createOperationHandler(
           res,
           modelOptions,
           idMapping: config.id_mapping,
-          contextExtras, // Pass additional context data
+          contextExtras,
         },
         async (context) => {
-          // Delegate to operation-specific processor
           return await processor(context, config, req, res);
         }
       );
 
-      // Send response if not already sent
       if (!res.headersSent) {
         if (payload) {
-          // Check if this is a cancelled operation
           const isCancelled = payload._apializeCancelled === true;
 
           let statusCode = 200;
@@ -355,7 +329,6 @@ function createOperationHandler(
             statusCode = 201;
           }
 
-          // Remove internal flag before sending response
           if (isCancelled) {
             delete payload._apializeCancelled;
           }
@@ -364,7 +337,6 @@ function createOperationHandler(
         }
       }
     } catch (error) {
-      // Enhanced error handling with operation context
       console.error(`[Apialize ${operationType}] Error:`, error);
 
       if (!res.headersSent) {
@@ -374,7 +346,6 @@ function createOperationHandler(
           ? error.message
           : 'Internal Server Error';
 
-        // Handle validation errors
         if (error.name === 'ValidationError' || error.statusCode === 400) {
           statusCode = 400;
           errorMessage = isDevelopment ? error.message : 'Bad request';
@@ -452,14 +423,12 @@ function list(model, options, modelOptions) {
     modelOptions
   );
 
-  const filteringMiddleware = function (req, _res, next) {
-    // Always disable automatic query filtering for list endpoint
-    // The list processor converts query params to search body and passes to search processor
+  const disableAutomaticFiltering = function (req, _res, next) {
     req._apializeDisableQueryFilters = true;
     next();
   };
 
-  router.get('/', filteringMiddleware, ...handlers);
+  router.get('/', disableAutomaticFiltering, ...handlers);
   router.apialize = {};
   return router;
 }

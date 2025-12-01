@@ -240,13 +240,13 @@ describe('included models filtering and ordering for list and search operations'
       expect(titles(res)).toEqual(['Symphony No. 5', '1999', 'Purple Rain']);
       expect(res.body.meta.ordering).toEqual([
         {
-  order_by: "artist.name",
-  direction: "ASC",
-},
+          order_by: 'artist.name',
+          direction: 'ASC',
+        },
         {
-  order_by: "title",
-  direction: "ASC",
-},
+          order_by: 'title',
+          direction: 'ASC',
+        },
       ]);
     });
 
@@ -268,13 +268,13 @@ describe('included models filtering and ordering for list and search operations'
       expect(titles(res)).toEqual(['1999', 'Purple Rain', 'Symphony No. 5']);
       expect(res.body.meta.ordering).toEqual([
         {
-  order_by: "artist.name",
-  direction: "DESC",
-},
+          order_by: 'artist.name',
+          direction: 'DESC',
+        },
         {
-  order_by: "title",
-  direction: "ASC",
-},
+          order_by: 'title',
+          direction: 'ASC',
+        },
       ]);
     });
 
