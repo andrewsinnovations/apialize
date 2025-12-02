@@ -257,13 +257,17 @@ function replaceWhere(newWhere) {
   return req.apialize.options.where;
 }
 
-function cancel_operation(customResponse) {
+function cancel_operation(statusCode, customResponse) {
   const ctx = this._ctx;
   if (!ctx) {
     throw new Error('cancel_operation must be called on context object');
   }
 
+  // Default statusCode to 400 if not provided
+  statusCode = statusCode ?? 400;
+
   ctx._cancelled = true;
+  ctx._cancelStatusCode = statusCode;
 
   if (customResponse !== undefined && customResponse !== null) {
     ctx._cancelResponse = customResponse;
@@ -276,6 +280,8 @@ function cancel_operation(customResponse) {
 
   // Mark the response so the handler knows it's a cancellation
   ctx._cancelResponse._apializeCancelled = true;
+  // Attach statusCode to the response for access in the handler
+  ctx._cancelResponse._cancelStatusCode = statusCode;
 
   return ctx._cancelResponse;
 }

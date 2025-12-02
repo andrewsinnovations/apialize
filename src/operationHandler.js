@@ -341,6 +341,13 @@ function createOperationHandler(
 
           if (isCancelled) {
             delete payload._apializeCancelled;
+            // Use the custom statusCode from cancel_operation if provided
+            if (payload._cancelStatusCode !== undefined) {
+              statusCode = payload._cancelStatusCode;
+              delete payload._cancelStatusCode;
+            } else {
+              statusCode = 400;
+            }
           }
 
           res.status(statusCode).json(payload);
