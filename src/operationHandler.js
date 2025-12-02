@@ -13,6 +13,7 @@ const {
   withHooksOnly,
   applyEndpointConfiguration,
   mergeModelAndUserOptions,
+  mergeModelAndUserModelOptions,
 } = require('./operationUtils');
 
 const { processCreateRequest } = require('./operations/createProcessor');
@@ -273,10 +274,19 @@ function createOperationHandler(
     throw new Error(`No processor found for operation type: ${operationType}`);
   }
 
+  // Merge modelOptions from apialize context with provided modelOptions
+  const context = options.apialize_context || 'default';
+  const effectiveModelOptions = mergeModelAndUserModelOptions(
+    model,
+    modelOptions,
+    operationType,
+    context
+  );
+
   const router = express.Router({ mergeParams: true });
   const handlers = buildHandlers(config.middleware, async (req, res) => {
     try {
-      const effectiveModel = applyEndpointConfiguration(model, modelOptions);
+      const effectiveModel = applyEndpointConfiguration(model, effectiveModelOptions);
 
       const effectiveOptions = {
         ...options,
@@ -311,7 +321,7 @@ function createOperationHandler(
           options: effectiveOptions,
           req,
           res,
-          modelOptions,
+          modelOptions: effectiveModelOptions,
           idMapping: config.id_mapping,
           contextExtras,
         },

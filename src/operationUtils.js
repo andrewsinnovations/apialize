@@ -1307,6 +1307,54 @@ function extractModelApializeConfig(model, operationType, context = 'default') {
 }
 
 /**
+/**
+ * Extracts model_options from apialize configuration
+ * @param {Object} model - Sequelize model
+ * @param {String} operationType - The operation type (e.g., 'list', 'single', 'create')
+ * @param {String} context - Optional context name within the operation (e.g., 'default', 'other_context')
+ * @returns {Object} - model_options object or empty object if not found
+ */
+function extractModelApializeModelOptions(model, operationType, context = 'default') {
+  if (!model || !model.options || !model.options.apialize) {
+    return {};
+  }
+
+  const apializeConfig = model.options.apialize;
+  const model_options = {};
+
+  // First, apply global default model_options if it exists
+  if (apializeConfig.default && apializeConfig.default.model_options && typeof apializeConfig.default.model_options === 'object') {
+    Object.assign(model_options, apializeConfig.default.model_options);
+  }
+
+  // Then, apply operation-specific model_options if it exists
+  if (apializeConfig[operationType]) {
+    const operationConfig = apializeConfig[operationType];
+
+    // If the operation config has a default model_options, apply it
+    if (
+      operationConfig.default &&
+      operationConfig.default.model_options &&
+      typeof operationConfig.default.model_options === 'object'
+    ) {
+      Object.assign(model_options, operationConfig.default.model_options);
+    }
+
+    // If a specific context is requested and exists with model_options, apply it
+    if (
+      context !== 'default' &&
+      operationConfig[context] &&
+      operationConfig[context].model_options &&
+      typeof operationConfig[context].model_options === 'object'
+    ) {
+      Object.assign(model_options, operationConfig[context].model_options);
+    }
+  }
+
+  return model_options;
+}
+
+/**
  * Merges model-based apialize configuration with user-provided options
  * Model configuration is applied first, then user options override
  * @param {Object} model - Sequelize model
@@ -1333,6 +1381,33 @@ function mergeModelAndUserOptions(
   return merged;
 }
 
+/**
+ * Merges model-based model_options with user-provided model_options
+ * Model configuration is applied first, then user options override
+ * @param {Object} model - Sequelize model
+ * @param {Object} userModelOptions - User-provided model_options
+ * @param {String} operationType - The operation type
+ * @param {String} context - Optional context name
+ * @returns {Object} - Merged model_options
+ */
+function mergeModelAndUserModelOptions(
+  model,
+  userModelOptions = {},
+  operationType,
+  context = 'default'
+) {
+  const model_model_options = extractModelApializeModelOptions(model, operationType, context);
+  const merged = {};
+
+  // Apply model model_options first
+  Object.assign(merged, model_model_options);
+
+  // Then apply user model_options (these take precedence)
+  Object.assign(merged, userModelOptions);
+
+  return merged;
+}
+
 module.exports = {
   buildContext: buildContext,
   withTransactionAndHooks: withTransactionAndHooks,
@@ -1349,5 +1424,7 @@ module.exports = {
   reverseMapForeignKeys: reverseMapForeignKeys,
   reverseMapForeignKeysInBulk: reverseMapForeignKeysInBulk,
   extractModelApializeConfig: extractModelApializeConfig,
+  extractModelApializeModelOptions: extractModelApializeModelOptions,
   mergeModelAndUserOptions: mergeModelAndUserOptions,
+  mergeModelAndUserModelOptions: mergeModelAndUserModelOptions,
 };
