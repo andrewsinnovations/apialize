@@ -1371,12 +1371,11 @@ function isFlattenedField(field, flattening) {
     const config = flatteningConfigs[i];
     const attributeMap = buildFlatteningAttributeMap(config);
 
-    // Check if field matches any target alias or source attribute
-    const isInMap =
-      Object.values(attributeMap).includes(field) ||
-      Object.keys(attributeMap).includes(field);
+    // Check if field matches any target alias (renamed field)
+    // Only check values, not keys, to avoid collision with main model fields
+    const isTargetAlias = Object.values(attributeMap).includes(field);
 
-    if (isInMap) {
+    if (isTargetAlias) {
       return true;
     }
   }
