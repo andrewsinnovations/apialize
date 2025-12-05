@@ -95,7 +95,7 @@ describe('destroy operation: comprehensive options coverage', () => {
 
   test('middleware can enforce parent scoping via req.apialize.options.where', async () => {
     const scope = (req, _res, next) => {
-      req.apialize.applyWhere({ parent_id: 50 });
+      req.apialize.apply_where({ parent_id: 50 });
       next();
     };
 

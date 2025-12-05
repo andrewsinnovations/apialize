@@ -652,7 +652,7 @@ describe('modelOptions scopes support', () => {
           {
             pre: async (context) => {
               // Add additional filtering on top of scopes
-              context.applyWhere({ tenant_id: 1 });
+              context.apply_where({ tenant_id: 1 });
               return { preHookFiltered: true };
             },
           },

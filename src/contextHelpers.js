@@ -257,6 +257,62 @@ function replaceWhere(newWhere) {
   return req.apialize.options.where;
 }
 
+function ensureBodyStructure(req) {
+  if (!req || !req.apialize) {
+    throw new Error('Helper must be called on req.apialize object');
+  }
+
+  if (!req.apialize.values) {
+    req.apialize.values = {};
+  }
+}
+
+function setValue(key, value) {
+  const req = this._req;
+
+  ensureBodyStructure(req);
+
+  if (typeof key !== 'string') {
+    throw new Error('Key must be a string');
+  }
+
+  req.apialize.values[key] = value;
+  return req.apialize.values;
+}
+
+function removeValue(keysToRemove) {
+  const req = this._req;
+
+  ensureBodyStructure(req);
+
+  const keysArray = [];
+  if (Array.isArray(keysToRemove)) {
+    for (let i = 0; i < keysToRemove.length; i++) {
+      keysArray.push(keysToRemove[i]);
+    }
+  } else {
+    keysArray.push(keysToRemove);
+  }
+
+  for (let i = 0; i < keysArray.length; i++) {
+    const keyToRemove = keysArray[i];
+    delete req.apialize.values[keyToRemove];
+  }
+
+  return req.apialize.values;
+}
+
+function replaceBody(newBody) {
+  const req = this._req;
+
+  if (!req || !req.apialize) {
+    throw new Error('Helper must be called on req.apialize object');
+  }
+
+  req.apialize.values = newBody || {};
+  return req.apialize.values;
+}
+
 function cancel_operation(statusCode, customResponse) {
   const ctx = this._ctx;
   if (!ctx) {
@@ -295,16 +351,26 @@ function createHelpers(req, model, ctx) {
 
   const helpers = {
     applyWhere: applyWhere.bind(context),
+    apply_where: applyWhere.bind(context),
     applyMultipleWhere: applyMultipleWhere.bind(context),
+    apply_multiple_where: applyMultipleWhere.bind(context),
     applyWhereIfNotExists: applyWhereIfNotExists.bind(context),
+    apply_where_if_not_exists: applyWhereIfNotExists.bind(context),
     removeWhere: removeWhere.bind(context),
+    remove_where: removeWhere.bind(context),
     replaceWhere: replaceWhere.bind(context),
+    replace_where: replaceWhere.bind(context),
+    set_value: setValue.bind(context),
+    remove_value: removeValue.bind(context),
+    replace_body: replaceBody.bind(context),
     cancel_operation: cancel_operation.bind(context),
   };
 
   if (model) {
     helpers.applyScope = applyScope.bind(context);
+    helpers.apply_scope = applyScope.bind(context);
     helpers.applyScopes = applyScopes.bind(context);
+    helpers.apply_scopes = applyScopes.bind(context);
   }
 
   return helpers;
@@ -318,6 +384,9 @@ module.exports = {
   applyScopes,
   removeWhere,
   replaceWhere,
+  setValue,
+  removeValue,
+  replaceBody,
   cancel_operation,
   createHelpers,
 };

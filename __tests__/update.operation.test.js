@@ -181,7 +181,7 @@ describe('update operation: comprehensive options coverage', () => {
 
   test('middleware can enforce parent scoping via req.apialize.options.where (preserve scoped fields)', async () => {
     const parentMiddleware = (req, _res, next) => {
-      req.apialize.applyWhere({ parent_id: 123 });
+      req.apialize.apply_where({ parent_id: 123 });
       next();
     };
 

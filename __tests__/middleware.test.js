@@ -55,7 +55,7 @@ describe('middleware access control for odd numbers (Sequelize)', () => {
 
     const oddNumbersFilter = (req, res, next) => {
       // Inject a where clause: value % 2 = 0 (SQLite supports %)
-      req.apialize.applyWhere({
+      req.apialize.apply_where({
         [Sequelize.Op.and]: Sequelize.literal('value % 2 = 1'),
       });
       next();

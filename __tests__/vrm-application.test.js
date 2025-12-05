@@ -225,7 +225,7 @@ describe('VRM Multi-Tenant Application', () => {
       const { organizationId } = req.session;
 
       // Apply organization filter to all queries (use camelCase for Sequelize attribute names)
-      req.apialize.applyWhere({ organizationId: organizationId });
+      req.apialize.apply_where({ organizationId: organizationId });
 
       // For create/update operations, ensure organizationId is set
       if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
@@ -285,10 +285,10 @@ describe('VRM Multi-Tenant Application', () => {
 
       // Scope to only these vehicles
       if (vehicleIds.length > 0) {
-        req.apialize.applyWhere({ id: vehicleIds });
+        req.apialize.apply_where({ id: vehicleIds });
       } else {
         // No vehicles - use impossible condition
-        req.apialize.applyWhere({ id: -1 });
+        req.apialize.apply_where({ id: -1 });
       }
 
       next();
@@ -322,9 +322,9 @@ describe('VRM Multi-Tenant Application', () => {
       const customerIds = customers.map((c) => c.id);
 
       if (customerIds.length > 0) {
-        req.apialize.applyWhere({ customerId: customerIds });
+        req.apialize.apply_where({ customerId: customerIds });
       } else {
-        req.apialize.applyWhere({ customerId: -1 });
+        req.apialize.apply_where({ customerId: -1 });
       }
 
       next();
@@ -436,7 +436,7 @@ describe('VRM Multi-Tenant Application', () => {
   const scopeToOrganization = (req, res, next) => {
     const { organizationId } = req.session;
 
-    req.apialize.applyWhere({ organizationId: organizationId });
+    req.apialize.apply_where({ organizationId: organizationId });
 
     if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
       req.apialize.values = {
@@ -1994,9 +1994,9 @@ describe('VRM Multi-Tenant Application', () => {
           const customerIds = customers.map((c) => c.id);
 
           if (customerIds.length > 0) {
-            req.apialize.applyWhere({ customerId: customerIds });
+            req.apialize.apply_where({ customerId: customerIds });
           } else {
-            req.apialize.applyWhere({ customerId: -1 });
+            req.apialize.apply_where({ customerId: -1 });
           }
 
           next();
@@ -2136,9 +2136,9 @@ describe('VRM Multi-Tenant Application', () => {
           const customerIds = customers.map((c) => c.id);
 
           if (customerIds.length > 0) {
-            req.apialize.applyWhere({ customerId: customerIds });
+            req.apialize.apply_where({ customerId: customerIds });
           } else {
-            req.apialize.applyWhere({ customerId: -1 });
+            req.apialize.apply_where({ customerId: -1 });
           }
 
           next();

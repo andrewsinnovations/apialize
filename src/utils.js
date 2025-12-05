@@ -231,7 +231,31 @@ function mergeReqOptionsIntoModelOptions(req, baseModelOptions) {
     typeof req.apialize.options === 'object'
   ) {
     const requestOptions = req.apialize.options;
-    copyOwnProperties(requestOptions, merged);
+    
+    // Handle where clause specially to avoid overwriting
+    const baseWhere = merged.where;
+    const requestWhere = requestOptions.where;
+    
+    // Copy all properties except where
+    for (const key in requestOptions) {
+      if (Object.prototype.hasOwnProperty.call(requestOptions, key) && key !== 'where') {
+        merged[key] = requestOptions[key];
+      }
+    }
+    
+    // Merge where clauses
+    if (baseWhere && typeof baseWhere === 'object' && Object.keys(baseWhere).length > 0) {
+      if (requestWhere && typeof requestWhere === 'object' && Object.keys(requestWhere).length > 0) {
+        // Both have where clauses - merge them
+        merged.where = Object.assign({}, baseWhere, requestWhere);
+      } else {
+        // Only base has where clause - keep it
+        merged.where = baseWhere;
+      }
+    } else if (requestWhere) {
+      // Only request has where clause
+      merged.where = requestWhere;
+    }
   }
   return merged;
 }

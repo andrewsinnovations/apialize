@@ -147,7 +147,7 @@ describe('patch operation: comprehensive options coverage', () => {
 
   test('middleware can enforce parent scoping and modify values', async () => {
     const scope = (req, _res, next) => {
-      req.apialize.applyWhere({ parent_id: 8 });
+      req.apialize.apply_where({ parent_id: 8 });
       next();
     };
     const override = (req, _res, next) => {

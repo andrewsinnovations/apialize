@@ -242,7 +242,7 @@ describe('single() with id_mapping option', () => {
 
     test('should respect existing where conditions in apialize context', async () => {
       const addWhereMiddleware = (req, res, next) => {
-        req.apialize.applyWhere({ name: 'Context Test' }); // Additional where condition using helper
+        req.apialize.apply_where({ name: 'Context Test' }); // Additional where condition using helper
         next();
       };
 

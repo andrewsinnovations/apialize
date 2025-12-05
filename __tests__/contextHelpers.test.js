@@ -99,13 +99,13 @@ describe('req.apialize Helper Functions', () => {
     app.use(bodyParser.json());
   });
 
-  test('req.apialize.applyWhere should add where conditions', async () => {
+  test('req.apialize.apply_where should add where conditions', async () => {
     app.use(
       '/items',
       list(Item, {
         pre: async (context) => {
           // Apply tenant filtering using req.apialize helper
-          context.req.apialize.applyWhere({ tenant_id: 1 });
+          context.req.apialize.apply_where({ tenant_id: 1 });
           return { tenantFiltered: true };
         },
       })
@@ -118,15 +118,15 @@ describe('req.apialize Helper Functions', () => {
     expect(response.body.data.every((item) => item.tenant_id === 1)).toBe(true);
   });
 
-  test('req.apialize.applyWhere should merge multiple conditions', async () => {
+  test('req.apialize.apply_where should merge multiple conditions', async () => {
     app.use(
       '/items',
       list(Item, {
         pre: async (context) => {
           // Apply multiple conditions
-          context.req.apialize.applyWhere({ tenant_id: 1 });
-          context.req.apialize.applyWhere({ status: 'active' });
-          context.req.apialize.applyWhere({ price: { [Op.gt]: 100 } });
+          context.req.apialize.apply_where({ tenant_id: 1 });
+          context.req.apialize.apply_where({ status: 'active' });
+          context.req.apialize.apply_where({ price: { [Op.gt]: 100 } });
           return { multipleFiltersApplied: true };
         },
       })
@@ -166,19 +166,19 @@ describe('req.apialize Helper Functions', () => {
     ).toBe(true);
   });
 
-  test('req.apialize.applyWhereIfNotExists should only add non-existing conditions', async () => {
+  test('req.apialize.apply_where_if_not_exists should only add non-existing conditions', async () => {
     app.use(
       '/items',
       list(Item, {
         pre: async (context) => {
           // First add a condition
-          context.req.apialize.applyWhere({ tenant_id: 1 });
+          context.req.apialize.apply_where({ tenant_id: 1 });
 
           // Try to add the same condition - should not override
-          context.req.apialize.applyWhereIfNotExists({ tenant_id: 2 });
+          context.req.apialize.apply_where_if_not_exists({ tenant_id: 2 });
 
           // Add a new condition - should work
-          context.req.apialize.applyWhereIfNotExists({ status: 'active' });
+          context.req.apialize.apply_where_if_not_exists({ status: 'active' });
 
           return { conditionalApplied: true };
         },
@@ -196,20 +196,20 @@ describe('req.apialize Helper Functions', () => {
     ).toBe(true);
   });
 
-  test('req.apialize.removeWhere should remove specified conditions', async () => {
+  test('req.apialize.remove_where should remove specified conditions', async () => {
     app.use(
       '/items',
       list(Item, {
         pre: async (context) => {
           // Add some conditions
-          context.req.apialize.applyWhere({
+          context.req.apialize.apply_where({
             tenant_id: 1,
             status: 'active',
             category: 'electronics',
           });
 
           // Remove one condition
-          context.req.apialize.removeWhere('category');
+          context.req.apialize.remove_where('category');
 
           return { conditionRemoved: true };
         },
@@ -226,19 +226,19 @@ describe('req.apialize Helper Functions', () => {
     ]);
   });
 
-  test('req.apialize.replaceWhere should replace entire where clause', async () => {
+  test('req.apialize.replace_where should replace entire where clause', async () => {
     app.use(
       '/items',
       list(Item, {
         pre: async (context) => {
           // Start with some conditions
-          context.req.apialize.applyWhere({
+          context.req.apialize.apply_where({
             tenant_id: 1,
             status: 'active',
           });
 
           // Replace entire where clause
-          context.req.apialize.replaceWhere({
+          context.req.apialize.replace_where({
             category: 'electronics',
           });
 
@@ -256,13 +256,13 @@ describe('req.apialize Helper Functions', () => {
     ).toBe(true);
   });
 
-  test('req.apialize.applyMultipleWhere should apply array of conditions', async () => {
+  test('req.apialize.apply_multiple_where should apply array of conditions', async () => {
     app.use(
       '/items',
       list(Item, {
         pre: async (context) => {
           // Apply multiple conditions at once
-          context.req.apialize.applyMultipleWhere([
+          context.req.apialize.apply_multiple_where([
             { tenant_id: 1 },
             { status: 'active' },
             { price: { [Op.gte]: 200 } },
@@ -283,16 +283,16 @@ describe('req.apialize Helper Functions', () => {
     ]);
   });
 
-  test('req.apialize.applyWhere should overwrite existing conditions', async () => {
+  test('req.apialize.apply_where should overwrite existing conditions', async () => {
     app.use(
       '/items',
       list(Item, {
         pre: async (context) => {
           // Apply initial condition
-          context.req.apialize.applyWhere({ tenant_id: 1 });
+          context.req.apialize.apply_where({ tenant_id: 1 });
 
           // Apply conflicting condition - should overwrite
-          context.req.apialize.applyWhere({ tenant_id: 2 });
+          context.req.apialize.apply_where({ tenant_id: 2 });
 
           return { overwriteTest: true };
         },
@@ -307,15 +307,15 @@ describe('req.apialize Helper Functions', () => {
     expect(response.body.data[0].name).toBe('Phone');
   });
 
-  test('req.apialize.applyWhere should handle sequential condition changes', async () => {
+  test('req.apialize.apply_where should handle sequential condition changes', async () => {
     app.use(
       '/items',
       list(Item, {
         pre: async (context) => {
           // Apply multiple conditions in sequence
-          context.req.apialize.applyWhere({ tenant_id: 1 });
-          context.req.apialize.applyWhere({ status: 'active' });
-          context.req.apialize.applyWhere({ status: 'inactive' }); // Should overwrite active
+          context.req.apialize.apply_where({ tenant_id: 1 });
+          context.req.apialize.apply_where({ status: 'active' });
+          context.req.apialize.apply_where({ status: 'inactive' }); // Should overwrite active
 
           return { sequentialTest: true };
         },
@@ -336,7 +336,7 @@ describe('req.apialize Helper Functions', () => {
     const tenantMiddleware = (req, res, next) => {
       // This should work because apializeContext is automatically run by list()
       if (req.user && req.user.tenantId) {
-        req.apialize.applyWhere({ tenant_id: req.user.tenantId });
+        req.apialize.apply_where({ tenant_id: req.user.tenantId });
       }
       next();
     };
@@ -405,16 +405,16 @@ describe('req.apialize Helper Functions', () => {
         pre: async (context) => {
           // Test that helper functions are available directly on context
           contextHelperCheck = {
-            hasApplyWhere: typeof context.applyWhere === 'function',
+            hasApplyWhere: typeof context.apply_where === 'function',
             hasApplyScope: typeof context.applyScope === 'function',
             hasApplyMultipleWhere:
-              typeof context.applyMultipleWhere === 'function',
-            hasRemoveWhere: typeof context.removeWhere === 'function',
-            hasReplaceWhere: typeof context.replaceWhere === 'function',
+              typeof context.apply_multiple_where === 'function',
+            hasRemoveWhere: typeof context.remove_where === 'function',
+            hasReplaceWhere: typeof context.replace_where === 'function',
           };
 
           // Just filter to return something simple
-          context.applyWhere({ tenant_id: 1 });
+          context.apply_where({ tenant_id: 1 });
 
           return { contextCheck: true };
         },

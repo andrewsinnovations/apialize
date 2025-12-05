@@ -1257,13 +1257,13 @@ The context object provides access to request data, model, options, and more:
   nextValues,            // (update/patch) values to be saved
 
   // Helper functions (available directly on context for convenience)
-  applyWhere,            // Apply where conditions (overwrites existing keys)
+  apply_where,            // Apply where conditions (overwrites existing keys)
   applyScope,            // Apply Sequelize scopes (when model available)
-  applyMultipleWhere,    // Apply multiple where conditions at once
-  applyWhereIfNotExists, // Apply conditions only if they don't exist
+  apply_multiple_where,    // Apply multiple where conditions at once
+  apply_where_if_not_exists, // Apply conditions only if they don't exist
   applyScopes,           // Apply multiple scopes in sequence (when model available)
-  removeWhere,           // Remove specific where conditions
-  replaceWhere,          // Replace entire where clause
+  remove_where,           // Remove specific where conditions
+  replace_where,          // Replace entire where clause
 }
 ```
 
@@ -1271,7 +1271,7 @@ The context object provides access to request data, model, options, and more:
 
 The context object in pre/post hooks includes built-in helper functions for convenience. These same functions are also available on `req.apialize` for use in middleware:
 
-#### `context.applyWhere(additionalWhere)` | `req.apialize.applyWhere(additionalWhere)`
+#### `context.apply_where(additionalWhere)` | `req.apialize.apply_where(additionalWhere)`
 
 Apply additional where conditions to the existing where clause. New conditions overwrite existing conditions for the same keys:
 
@@ -1282,20 +1282,20 @@ app.use(
   list(Item, {
     pre: async (context) => {
       // Simple where conditions - use context directly for convenience
-      context.applyWhere({
+      context.apply_where({
         tenant_id: context.req.user.tenantId,
         status: 'active',
       });
 
       // With Sequelize operators
       const { Op } = require('sequelize');
-      context.applyWhere({
+      context.apply_where({
         price: { [Op.gt]: 0 },
         created_at: { [Op.gte]: new Date('2024-01-01') },
       });
 
       // Later calls overwrite earlier ones for the same keys
-      context.applyWhere({ status: 'published' }); // status becomes 'published'
+      context.apply_where({ status: 'published' }); // status becomes 'published'
 
       return { tenantFiltered: true };
     },
@@ -1304,7 +1304,7 @@ app.use(
 
 // In middleware (req.apialize helpers are automatically available)
 const tenantMiddleware = (req, res, next) => {
-  req.apialize.applyWhere({ tenant_id: req.user.tenantId });
+  req.apialize.apply_where({ tenant_id: req.user.tenantId });
   next();
 };
 
@@ -1325,7 +1325,7 @@ app.use(
 
 ```js
 // Instead of multiple calls, build complex conditions explicitly
-req.apialize.applyWhere({
+req.apialize.apply_where({
   [Op.and]: [
     { price: { [Op.gte]: 100 } },
     { price: { [Op.lte]: 500 } },
@@ -1365,7 +1365,7 @@ app.use(
 );
 ```
 
-#### `context.applyWhereIfNotExists(conditionalWhere)`
+#### `context.apply_where_if_not_exists(conditionalWhere)`
 
 Apply where conditions only if they don't already exist:
 
@@ -1375,10 +1375,10 @@ app.use(
   list(Item, {
     pre: async (context) => {
       // Always apply tenant filtering
-      context.applyWhere({ tenant_id: context.req.user.tenantId });
+      context.apply_where({ tenant_id: context.req.user.tenantId });
 
       // Only apply default status if user hasn't specified one
-      context.applyWhereIfNotExists({ status: 'active' });
+      context.apply_where_if_not_exists({ status: 'active' });
 
       return { conditionalFiltersApplied: true };
     },
@@ -1386,7 +1386,7 @@ app.use(
 );
 ```
 
-#### `context.applyMultipleWhere(whereConditions)`
+#### `context.apply_multiple_where(whereConditions)`
 
 Apply multiple where conditions at once:
 
@@ -1401,7 +1401,7 @@ app.use(
         { price: { [Op.gt]: 0 } },
       ];
 
-      context.applyMultipleWhere(conditions);
+      context.apply_multiple_where(conditions);
 
       return { multipleFiltersApplied: true };
     },
@@ -1432,7 +1432,7 @@ app.use(
 );
 ```
 
-#### `context.removeWhere(keysToRemove)` & `context.replaceWhere(newWhere)`
+#### `context.remove_where(keysToRemove)` & `context.replace_where(newWhere)`
 
 Remove or replace where conditions:
 
@@ -1442,19 +1442,19 @@ app.use(
   list(Item, {
     pre: async (context) => {
       // Add base conditions
-      context.applyWhere({
+      context.apply_where({
         tenant_id: context.req.user.tenantId,
         status: 'active',
       });
 
       // Remove status filter for admin users
       if (context.req.user.role === 'admin') {
-        context.removeWhere('status');
+        context.remove_where('status');
       }
 
       // Or completely replace where clause
       if (context.req.user.role === 'superadmin') {
-        context.replaceWhere({}); // See everything
+        context.replace_where({}); // See everything
       }
 
       return { adminAccess: true };
@@ -1490,7 +1490,7 @@ app.use(
 
             case 'user':
               // User sees only their own items
-              context.applyWhere({ created_by: user.id });
+              context.apply_where({ created_by: user.id });
               break;
           }
 
@@ -1499,8 +1499,8 @@ app.use(
 
           // Handle special query parameters
           if (context.req.query.archived === 'true') {
-            context.removeWhere('status');
-            context.applyWhere({ archived_at: { [Op.not]: null } });
+            context.remove_where('status');
+            context.apply_where({ archived_at: { [Op.not]: null } });
           }
 
           return {
@@ -1548,13 +1548,13 @@ app.use(
     pre: [
       async (ctx) => {
         // Using helper functions (recommended)
-        ctx.applyWhere({ tenant_id: ctx.req.user.tenant_id });
+        ctx.apply_where({ tenant_id: ctx.req.user.tenant_id });
         return { step: 1 };
       },
       async (ctx) => {
         // Apply multiple conditions with operators
         const { Op } = require('sequelize');
-        ctx.applyWhere({
+        ctx.apply_where({
           status: 'active',
           price: { [Op.gt]: 0 },
         });
