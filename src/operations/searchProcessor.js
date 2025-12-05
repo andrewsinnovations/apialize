@@ -18,6 +18,8 @@ const SEARCH_DEFAULTS = {
   metaShowOrdering: false,
   allowFilteringOn: null,
   blockFilteringOn: null,
+  allowOrderingOn: null,
+  blockOrderingOn: null,
   pre: null,
   post: null,
   id_mapping: 'id',
@@ -924,7 +926,9 @@ function buildOrdering(
   idMapping,
   includes,
   relationIdMapping,
-  flattening
+  flattening,
+  allowOrderingOn,
+  blockOrderingOn
 ) {
   const items = normalizeOrderingItems(ordering);
   const orderClauses = [];
@@ -937,6 +941,20 @@ function buildOrdering(
     const column = extractOrderColumn(item);
     if (!column) {
       continue;
+    }
+
+    // Validate field is in allow list if configured
+    if (Array.isArray(allowOrderingOn)) {
+      if (!allowOrderingOn.includes(column)) {
+        return { error: `Ordering on field '${column}' is not allowed` };
+      }
+    }
+
+    // Validate field is not in block list if configured
+    if (Array.isArray(blockOrderingOn)) {
+      if (blockOrderingOn.includes(column)) {
+        return { error: `Ordering on field '${column}' is not allowed` };
+      }
     }
 
     const direction = normalizeOrderDirection(item, defaultOrderDir);
@@ -1007,6 +1025,8 @@ function extractMergedOptions(searchOptions) {
     relationIdMapping: merged.relation_id_mapping,
     disableSubqueryOnIncludeRequest: merged.disableSubqueryOnIncludeRequest,
     flattening: merged.flattening,
+    allowOrderingOn: merged.allowOrderingOn,
+    blockOrderingOn: merged.blockOrderingOn,
     pre: merged.pre,
     post: merged.post,
   };
@@ -1073,7 +1093,10 @@ async function executeSearchOperation(
         options.defaultOrderDir,
         options.idMapping,
         includes,
-        options.relationIdMapping
+        options.relationIdMapping,
+        options.flattening,
+        options.allowOrderingOn,
+        options.blockOrderingOn
       );
 
       if (orderArray && orderArray.error) {
@@ -1365,7 +1388,9 @@ async function processSearchRequest(context, config, req, res) {
     config.id_mapping,
     includes,
     config.relation_id_mapping,
-    config.flattening
+    config.flattening,
+    config.allowOrderingOn,
+    config.blockOrderingOn
   );
 
   if (orderArray && orderArray.error) {

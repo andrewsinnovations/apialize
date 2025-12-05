@@ -77,6 +77,8 @@ const OPERATION_DEFAULTS = {
     allowOrdering: true,
     allowFilteringOn: null,
     blockFilteringOn: null,
+    allowOrderingOn: null,
+    blockOrderingOn: null,
     metaShowFilters: false,
     metaShowOrdering: false,
     defaultPageSize: 100,
@@ -93,6 +95,8 @@ const OPERATION_DEFAULTS = {
     path: '/',
     allowFilteringOn: null,
     blockFilteringOn: null,
+    allowOrderingOn: null,
+    blockOrderingOn: null,
     metaShowOrdering: false,
     metaShowFilters: false,
     pre: null,
@@ -204,6 +208,12 @@ function buildOperationConfig(model, options = {}, operationType) {
     if (mergedOptions.block_filtering_on !== undefined) {
       config.blockFilteringOn = mergedOptions.block_filtering_on;
     }
+    if (mergedOptions.allow_ordering_on !== undefined) {
+      config.allowOrderingOn = mergedOptions.allow_ordering_on;
+    }
+    if (mergedOptions.block_ordering_on !== undefined) {
+      config.blockOrderingOn = mergedOptions.block_ordering_on;
+    }
   }
 
   if (operationType === OPERATION_TYPES.SEARCH) {
@@ -212,6 +222,12 @@ function buildOperationConfig(model, options = {}, operationType) {
     }
     if (mergedOptions.block_filtering_on !== undefined) {
       config.blockFilteringOn = mergedOptions.block_filtering_on;
+    }
+    if (mergedOptions.allow_ordering_on !== undefined) {
+      config.allowOrderingOn = mergedOptions.allow_ordering_on;
+    }
+    if (mergedOptions.block_ordering_on !== undefined) {
+      config.blockOrderingOn = mergedOptions.block_ordering_on;
     }
   }
 

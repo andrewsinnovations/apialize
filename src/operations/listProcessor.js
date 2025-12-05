@@ -6,6 +6,8 @@ const LIST_DEFAULTS = {
   allowOrdering: true,
   allowFilteringOn: null,
   blockFilteringOn: null,
+  allowOrderingOn: null,
+  blockOrderingOn: null,
   metaShowFilters: false,
   metaShowOrdering: false,
   defaultPageSize: 100,
@@ -277,6 +279,8 @@ function createSearchOptions(mergedOptions, idMapping) {
   searchOptions.flattening = mergedOptions.flattening;
   searchOptions.allowFilteringOn = mergedOptions.allowFilteringOn;
   searchOptions.blockFilteringOn = mergedOptions.blockFilteringOn;
+  searchOptions.allowOrderingOn = mergedOptions.allowOrderingOn;
+  searchOptions.blockOrderingOn = mergedOptions.blockOrderingOn;
 
   return searchOptions;
 }
