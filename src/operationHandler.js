@@ -38,6 +38,8 @@ const OPERATION_DEFAULTS = {
   [OPERATION_TYPES.CREATE]: {
     validate: true,
     allow_bulk_create: false,
+    allowed_fields: null,
+    blocked_fields: null,
     id_mapping: 'id',
     middleware: [],
     pre: null,
@@ -45,6 +47,8 @@ const OPERATION_DEFAULTS = {
   },
   [OPERATION_TYPES.UPDATE]: {
     validate: true,
+    allowed_fields: null,
+    blocked_fields: null,
     id_mapping: 'id',
     relation_id_mapping: null,
     middleware: [],
@@ -53,6 +57,8 @@ const OPERATION_DEFAULTS = {
   },
   [OPERATION_TYPES.PATCH]: {
     validate: true,
+    allowed_fields: null,
+    blocked_fields: null,
     id_mapping: 'id',
     relation_id_mapping: null,
     middleware: [],
@@ -69,6 +75,8 @@ const OPERATION_DEFAULTS = {
     middleware: [],
     allowFiltering: true,
     allowOrdering: true,
+    allowFilteringOn: null,
+    blockFilteringOn: null,
     metaShowFilters: false,
     metaShowOrdering: false,
     defaultPageSize: 100,
@@ -83,6 +91,8 @@ const OPERATION_DEFAULTS = {
   [OPERATION_TYPES.SEARCH]: {
     middleware: [],
     path: '/',
+    allowFilteringOn: null,
+    blockFilteringOn: null,
     metaShowOrdering: false,
     metaShowFilters: false,
     pre: null,
@@ -188,6 +198,35 @@ function buildOperationConfig(model, options = {}, operationType) {
     if (mergedOptions.allow_ordering !== undefined) {
       config.allowOrdering = mergedOptions.allow_ordering;
     }
+    if (mergedOptions.allow_filtering_on !== undefined) {
+      config.allowFilteringOn = mergedOptions.allow_filtering_on;
+    }
+    if (mergedOptions.block_filtering_on !== undefined) {
+      config.blockFilteringOn = mergedOptions.block_filtering_on;
+    }
+  }
+
+  if (operationType === OPERATION_TYPES.SEARCH) {
+    if (mergedOptions.allow_filtering_on !== undefined) {
+      config.allowFilteringOn = mergedOptions.allow_filtering_on;
+    }
+    if (mergedOptions.block_filtering_on !== undefined) {
+      config.blockFilteringOn = mergedOptions.block_filtering_on;
+    }
+  }
+
+  const isCreateUpdatePatch =
+    operationType === OPERATION_TYPES.CREATE ||
+    operationType === OPERATION_TYPES.UPDATE ||
+    operationType === OPERATION_TYPES.PATCH;
+
+  if (isCreateUpdatePatch) {
+    if (mergedOptions.allowed_fields !== undefined) {
+      config.allowedFields = mergedOptions.allowed_fields;
+    }
+    if (mergedOptions.blocked_fields !== undefined) {
+      config.blockedFields = mergedOptions.blocked_fields;
+    }
   }
 
   return config;
@@ -286,7 +325,10 @@ function createOperationHandler(
   const router = express.Router({ mergeParams: true });
   const handlers = buildHandlers(config.middleware, async (req, res) => {
     try {
-      const effectiveModel = applyEndpointConfiguration(model, effectiveModelOptions);
+      const effectiveModel = applyEndpointConfiguration(
+        model,
+        effectiveModelOptions
+      );
 
       const effectiveOptions = {
         ...options,

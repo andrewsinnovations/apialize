@@ -7,6 +7,7 @@ const {
   extractRawAttributes,
   handleValidationError,
   extractAffectedCount,
+  validateAllowedFields,
 } = require('../utils');
 const { validateData } = require('../validationMiddleware');
 const {
@@ -145,6 +146,21 @@ async function validatePatchData(model, provided, validate, res) {
 async function processPatchRequest(context, config, req, res) {
   const id = extractIdFromRequest(req);
   const provided = getProvidedValues(req);
+
+  // Validate allowed/blocked fields on request body only (not programmatic values)
+  const requestBody = req.body || {};
+  const fieldValidation = validateAllowedFields(
+    requestBody,
+    config.allowedFields,
+    config.blockedFields
+  );
+  if (!fieldValidation.valid) {
+    context.res.status(400).json({
+      success: false,
+      error: fieldValidation.error,
+    });
+    return;
+  }
 
   // Reverse-map foreign key fields from external IDs to internal IDs
   try {

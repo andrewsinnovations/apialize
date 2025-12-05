@@ -89,7 +89,9 @@ describe('Model Options Where Clause Merging', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(2);
-      expect(res.body.data.every((item) => item.status === 'active')).toBe(true);
+      expect(res.body.data.every((item) => item.status === 'active')).toBe(
+        true
+      );
     });
 
     test('single endpoint should preserve model_options where clause', async () => {
@@ -132,7 +134,9 @@ describe('Model Options Where Clause Merging', () => {
       expect(foundActive.body.record.name).toBe('Active Item');
 
       // Should NOT find inactive item due to where clause
-      const foundInactive = await request(app).get(`/active-items/${inactiveId}`);
+      const foundInactive = await request(app).get(
+        `/active-items/${inactiveId}`
+      );
       expect(foundInactive.status).toBe(404);
     });
 
@@ -216,7 +220,11 @@ describe('Model Options Where Clause Merging', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(2);
-      expect(res.body.data.every((item) => ['active', 'pending'].includes(item.status))).toBe(true);
+      expect(
+        res.body.data.every((item) =>
+          ['active', 'pending'].includes(item.status)
+        )
+      ).toBe(true);
     });
 
     test('should not lose model_options where when request has empty where', async () => {

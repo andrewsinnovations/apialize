@@ -4,6 +4,8 @@ const LIST_DEFAULTS = {
   middleware: [],
   allowFiltering: true,
   allowOrdering: true,
+  allowFilteringOn: null,
+  blockFilteringOn: null,
   metaShowFilters: false,
   metaShowOrdering: false,
   defaultPageSize: 100,
@@ -273,6 +275,8 @@ function createSearchOptions(mergedOptions, idMapping) {
   searchOptions.disableSubqueryOnIncludeRequest =
     mergedOptions.disableSubqueryOnIncludeRequest;
   searchOptions.flattening = mergedOptions.flattening;
+  searchOptions.allowFilteringOn = mergedOptions.allowFilteringOn;
+  searchOptions.blockFilteringOn = mergedOptions.blockFilteringOn;
 
   return searchOptions;
 }

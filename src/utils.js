@@ -231,21 +231,32 @@ function mergeReqOptionsIntoModelOptions(req, baseModelOptions) {
     typeof req.apialize.options === 'object'
   ) {
     const requestOptions = req.apialize.options;
-    
+
     // Handle where clause specially to avoid overwriting
     const baseWhere = merged.where;
     const requestWhere = requestOptions.where;
-    
+
     // Copy all properties except where
     for (const key in requestOptions) {
-      if (Object.prototype.hasOwnProperty.call(requestOptions, key) && key !== 'where') {
+      if (
+        Object.prototype.hasOwnProperty.call(requestOptions, key) &&
+        key !== 'where'
+      ) {
         merged[key] = requestOptions[key];
       }
     }
-    
+
     // Merge where clauses
-    if (baseWhere && typeof baseWhere === 'object' && Object.keys(baseWhere).length > 0) {
-      if (requestWhere && typeof requestWhere === 'object' && Object.keys(requestWhere).length > 0) {
+    if (
+      baseWhere &&
+      typeof baseWhere === 'object' &&
+      Object.keys(baseWhere).length > 0
+    ) {
+      if (
+        requestWhere &&
+        typeof requestWhere === 'object' &&
+        Object.keys(requestWhere).length > 0
+      ) {
         // Both have where clauses - merge them
         merged.where = Object.assign({}, baseWhere, requestWhere);
       } else {
@@ -338,6 +349,40 @@ function extractAffectedCount(updateResult) {
   return updateResult;
 }
 
+function validateAllowedFields(data, allowedFields, blockedFields) {
+  if (!data || typeof data !== 'object') {
+    return { valid: true };
+  }
+
+  const fields = Object.keys(data);
+
+  // Check allowed fields list
+  if (Array.isArray(allowedFields)) {
+    for (const field of fields) {
+      if (!allowedFields.includes(field)) {
+        return {
+          valid: false,
+          error: `Field '${field}' is not allowed`,
+        };
+      }
+    }
+  }
+
+  // Check blocked fields list (takes precedence)
+  if (Array.isArray(blockedFields)) {
+    for (const field of fields) {
+      if (blockedFields.includes(field)) {
+        return {
+          valid: false,
+          error: `Field '${field}' is not allowed`,
+        };
+      }
+    }
+  }
+
+  return { valid: true };
+}
+
 module.exports.filterMiddlewareFns = filterMiddlewareFns;
 module.exports.buildHandlers = buildHandlers;
 module.exports.getOwnershipWhere = getOwnershipWhere;
@@ -356,3 +401,4 @@ module.exports.extractRequestBody = extractRequestBody;
 module.exports.handleValidationError = handleValidationError;
 module.exports.extractRawAttributes = extractRawAttributes;
 module.exports.extractAffectedCount = extractAffectedCount;
+module.exports.validateAllowedFields = validateAllowedFields;

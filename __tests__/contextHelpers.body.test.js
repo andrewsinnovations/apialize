@@ -118,9 +118,7 @@ describe('Context Helpers - Body Value Management', () => {
         })
       );
 
-      const res = await request(app)
-        .post('/items')
-        .send({ name: 'Test Item' });
+      const res = await request(app).post('/items').send({ name: 'Test Item' });
 
       expect(res.status).toBe(201);
       const created = await TestModel.findByPk(res.body.id);
@@ -143,9 +141,7 @@ describe('Context Helpers - Body Value Management', () => {
         })
       );
 
-      await request(app)
-        .post('/items')
-        .send({ name: 'Test Item' });
+      await request(app).post('/items').send({ name: 'Test Item' });
 
       expect(capturedBody).toBeDefined();
       expect(capturedBody.status).toBe('active');
@@ -170,9 +166,7 @@ describe('Context Helpers - Body Value Management', () => {
         })
       );
 
-      const res = await request(app)
-        .post('/items')
-        .send({ name: 'Test Item' });
+      const res = await request(app).post('/items').send({ name: 'Test Item' });
 
       expect(res.status).toBe(400);
       expect(res.body.error).toBe('Key must be a string');
@@ -216,14 +210,12 @@ describe('Context Helpers - Body Value Management', () => {
         })
       );
 
-      const res = await request(app)
-        .post('/items')
-        .send({
-          name: 'Test Item',
-          category: 'A',
-          status: 'active',
-          priority: 3,
-        });
+      const res = await request(app).post('/items').send({
+        name: 'Test Item',
+        category: 'A',
+        status: 'active',
+        priority: 3,
+      });
 
       expect(res.status).toBe(201);
       const created = await TestModel.findByPk(res.body.id);
@@ -507,14 +499,12 @@ describe('Context Helpers - Body Value Management', () => {
         })
       );
 
-      const res = await request(app)
-        .post('/items')
-        .send({
-          name: 'Test Item',
-          status: 'active',
-          password: 'should_not_save',
-          api_key: 'secret123',
-        });
+      const res = await request(app).post('/items').send({
+        name: 'Test Item',
+        status: 'active',
+        password: 'should_not_save',
+        api_key: 'secret123',
+      });
 
       expect(res.status).toBe(201);
       const created = await TestModel.findByPk(res.body.id);

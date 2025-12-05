@@ -16,6 +16,8 @@ const SEARCH_DEFAULTS = {
   defaultOrderBy: 'id',
   defaultOrderDir: 'ASC',
   metaShowOrdering: false,
+  allowFilteringOn: null,
+  blockFilteringOn: null,
   pre: null,
   post: null,
   id_mapping: 'id',
@@ -289,10 +291,26 @@ function buildFieldPredicate(
   Op,
   includes,
   relationIdMapping,
-  flattening
+  flattening,
+  allowFilteringOn,
+  blockFilteringOn
 ) {
   const dialect = getDatabaseDialect(model);
   const operators = getCaseInsensitiveOperators(dialect, Op);
+
+  // Validate field is in allow list if configured
+  if (Array.isArray(allowFilteringOn)) {
+    if (!allowFilteringOn.includes(key)) {
+      return { error: `Filtering on field '${key}' is not allowed` };
+    }
+  }
+
+  // Validate field is not in block list if configured
+  if (Array.isArray(blockFilteringOn)) {
+    if (blockFilteringOn.includes(key)) {
+      return { error: `Filtering on field '${key}' is not allowed` };
+    }
+  }
 
   const fkMapping = findForeignKeyRelationMapping(
     key,
@@ -553,7 +571,9 @@ function processAndFilters(
   Op,
   includes,
   relationIdMapping,
-  flattening
+  flattening,
+  allowFilteringOn,
+  blockFilteringOn
 ) {
   const parts = [];
 
@@ -564,7 +584,9 @@ function processAndFilters(
       Op,
       includes,
       relationIdMapping,
-      flattening
+      flattening,
+      allowFilteringOn,
+      blockFilteringOn
     );
     if (subWhere && Object.keys(subWhere).length) {
       parts.push(subWhere);
@@ -599,7 +621,9 @@ function processOrFilters(
   Op,
   includes,
   relationIdMapping,
-  flattening
+  flattening,
+  allowFilteringOn,
+  blockFilteringOn
 ) {
   const parts = [];
 
@@ -610,7 +634,9 @@ function processOrFilters(
       Op,
       includes,
       relationIdMapping,
-      flattening
+      flattening,
+      allowFilteringOn,
+      blockFilteringOn
     );
     if (subWhere && Object.keys(subWhere).length) {
       parts.push(subWhere);
@@ -630,7 +656,9 @@ function processImplicitAndFilters(
   Op,
   includes,
   relationIdMapping,
-  flattening
+  flattening,
+  allowFilteringOn,
+  blockFilteringOn
 ) {
   const keys = Object.keys(filters);
   const andParts = [];
@@ -657,7 +685,9 @@ function processImplicitAndFilters(
       Op,
       includes,
       relationIdMapping,
-      flattening
+      flattening,
+      allowFilteringOn,
+      blockFilteringOn
     );
 
     if (predicate && predicate.error) {
@@ -707,7 +737,9 @@ function buildWhere(
   Op,
   includes,
   relationIdMapping,
-  flattening
+  flattening,
+  allowFilteringOn,
+  blockFilteringOn
 ) {
   if (!filters || typeof filters !== 'object') {
     return {};
@@ -720,7 +752,9 @@ function buildWhere(
       Op,
       includes,
       relationIdMapping,
-      flattening
+      flattening,
+      allowFilteringOn,
+      blockFilteringOn
     );
   }
 
@@ -731,7 +765,9 @@ function buildWhere(
       Op,
       includes,
       relationIdMapping,
-      flattening
+      flattening,
+      allowFilteringOn,
+      blockFilteringOn
     );
   }
 
@@ -741,7 +777,9 @@ function buildWhere(
     Op,
     includes,
     relationIdMapping,
-    flattening
+    flattening,
+    allowFilteringOn,
+    blockFilteringOn
   );
 }
 
@@ -1229,7 +1267,9 @@ async function processSearchRequest(context, config, req, res) {
     Op,
     includes,
     config.relation_id_mapping,
-    config.flattening
+    config.flattening,
+    config.allowFilteringOn,
+    config.blockFilteringOn
   );
 
   let whereTree = whereResult;

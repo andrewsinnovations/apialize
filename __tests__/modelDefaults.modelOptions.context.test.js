@@ -109,16 +109,27 @@ describe('Model-based apialize model_options in context', () => {
       testApp.use(bodyParser.json());
       testApp.use('/items', create(TestModel));
       testApp.use('/items', list(TestModel));
-      testApp.use('/items-active', list(TestModel, { apialize_context: 'activeOnly' }));
+      testApp.use(
+        '/items-active',
+        list(TestModel, { apialize_context: 'activeOnly' })
+      );
 
       // Create test records
       await request(testApp)
         .post('/items')
-        .send({ name: 'Active Item', external_id: 'active-1', status: 'active' });
+        .send({
+          name: 'Active Item',
+          external_id: 'active-1',
+          status: 'active',
+        });
 
       await request(testApp)
         .post('/items')
-        .send({ name: 'Inactive Item', external_id: 'inactive-1', status: 'inactive' });
+        .send({
+          name: 'Inactive Item',
+          external_id: 'inactive-1',
+          status: 'inactive',
+        });
 
       // List all items without context
       const allRes = await request(testApp).get('/items?api:page_size=100');
@@ -126,7 +137,9 @@ describe('Model-based apialize model_options in context', () => {
       expect(allRes.body.data).toHaveLength(2);
 
       // List with activeOnly context (should only show active items)
-      const activeRes = await request(testApp).get('/items-active?api:page_size=100');
+      const activeRes = await request(testApp).get(
+        '/items-active?api:page_size=100'
+      );
       expect(activeRes.status).toBe(200);
       expect(activeRes.body.data).toHaveLength(1);
       expect(activeRes.body.data[0].name).toBe('Active Item');
@@ -137,17 +150,28 @@ describe('Model-based apialize model_options in context', () => {
     test('should apply scopes from model_options in single featured context', async () => {
       app.use('/items', create(TestModel));
       app.use('/items', single(TestModel));
-      app.use('/featured-items', single(TestModel, { apialize_context: 'featured' }));
+      app.use(
+        '/featured-items',
+        single(TestModel, { apialize_context: 'featured' })
+      );
 
       // Create test records
       const activeRes = await request(app)
         .post('/items')
-        .send({ name: 'Featured Item', external_id: 'feat-1', is_featured: true });
+        .send({
+          name: 'Featured Item',
+          external_id: 'feat-1',
+          is_featured: true,
+        });
       expect(activeRes.status).toBe(201);
 
       const inactiveRes = await request(app)
         .post('/items')
-        .send({ name: 'Not Featured Item', external_id: 'not-feat-1', is_featured: false });
+        .send({
+          name: 'Not Featured Item',
+          external_id: 'not-feat-1',
+          is_featured: false,
+        });
       expect(inactiveRes.status).toBe(201);
 
       // Fetch featured item with default context (should work)
@@ -179,40 +203,40 @@ describe('Model-based apialize model_options in context', () => {
       // List endpoint with user-provided model_options that overrides context
       testApp.use(
         '/items-override',
-        list(TestModel, { apialize_context: 'activeOnly' }, { scopes: ['featured'] })
+        list(
+          TestModel,
+          { apialize_context: 'activeOnly' },
+          { scopes: ['featured'] }
+        )
       );
 
       // Create test records
-      await request(testApp)
-        .post('/items')
-        .send({
-          name: 'Active Featured Item',
-          external_id: 'active-feat-1',
-          status: 'active',
-          is_featured: true,
-        });
+      await request(testApp).post('/items').send({
+        name: 'Active Featured Item',
+        external_id: 'active-feat-1',
+        status: 'active',
+        is_featured: true,
+      });
 
-      await request(testApp)
-        .post('/items')
-        .send({
-          name: 'Active Not Featured Item',
-          external_id: 'active-not-feat-1',
-          status: 'active',
-          is_featured: false,
-        });
+      await request(testApp).post('/items').send({
+        name: 'Active Not Featured Item',
+        external_id: 'active-not-feat-1',
+        status: 'active',
+        is_featured: false,
+      });
 
-      await request(testApp)
-        .post('/items')
-        .send({
-          name: 'Inactive Featured Item',
-          external_id: 'inactive-feat-1',
-          status: 'inactive',
-          is_featured: true,
-        });
+      await request(testApp).post('/items').send({
+        name: 'Inactive Featured Item',
+        external_id: 'inactive-feat-1',
+        status: 'inactive',
+        is_featured: true,
+      });
 
       // User-provided model_options should override context model_options
       // So it should apply 'featured' scope instead of 'activeOnly'
-      const overrideRes = await request(testApp).get('/items-override?api:page_size=100');
+      const overrideRes = await request(testApp).get(
+        '/items-override?api:page_size=100'
+      );
       expect(overrideRes.status).toBe(200);
       // Should only return featured items (2 items: both active and inactive featured)
       expect(overrideRes.body.data).toHaveLength(2);
@@ -277,11 +301,19 @@ describe('Model-based apialize model_options in context', () => {
       // Create test records
       await request(mergedApp)
         .post('/items')
-        .send({ name: 'Active Item', external_id: 'merged-active-1', status: 'active' });
+        .send({
+          name: 'Active Item',
+          external_id: 'merged-active-1',
+          status: 'active',
+        });
 
       await request(mergedApp)
         .post('/items')
-        .send({ name: 'Inactive Item', external_id: 'merged-inactive-1', status: 'inactive' });
+        .send({
+          name: 'Inactive Item',
+          external_id: 'merged-inactive-1',
+          status: 'inactive',
+        });
 
       // Global default model_options should apply scope
       const listRes = await request(mergedApp).get('/items?api:page_size=100');
@@ -349,29 +381,46 @@ describe('Model-based apialize model_options in context', () => {
 
       combinedApp.use('/items', create(CombinedModel));
       combinedApp.use('/items', single(CombinedModel));
-      combinedApp.use('/items-filtered', single(CombinedModel, { apialize_context: 'filtered' }));
+      combinedApp.use(
+        '/items-filtered',
+        single(CombinedModel, { apialize_context: 'filtered' })
+      );
 
       // Create test records
       await request(combinedApp)
         .post('/items')
-        .send({ name: 'Active Item', external_id: 'comb-active-1', status: 'active' });
+        .send({
+          name: 'Active Item',
+          external_id: 'comb-active-1',
+          status: 'active',
+        });
 
       await request(combinedApp)
         .post('/items')
-        .send({ name: 'Inactive Item', external_id: 'comb-inactive-1', status: 'inactive' });
+        .send({
+          name: 'Inactive Item',
+          external_id: 'comb-inactive-1',
+          status: 'inactive',
+        });
 
       // Default context should find both
       const activeRes = await request(combinedApp).get('/items/comb-active-1');
       expect(activeRes.status).toBe(200);
 
-      const inactiveRes = await request(combinedApp).get('/items/comb-inactive-1');
+      const inactiveRes = await request(combinedApp).get(
+        '/items/comb-inactive-1'
+      );
       expect(inactiveRes.status).toBe(200);
 
       // Filtered context should only find active
-      const filteredActiveRes = await request(combinedApp).get('/items-filtered/comb-active-1');
+      const filteredActiveRes = await request(combinedApp).get(
+        '/items-filtered/comb-active-1'
+      );
       expect(filteredActiveRes.status).toBe(200);
 
-      const filteredInactiveRes = await request(combinedApp).get('/items-filtered/comb-inactive-1');
+      const filteredInactiveRes = await request(combinedApp).get(
+        '/items-filtered/comb-inactive-1'
+      );
       expect(filteredInactiveRes.status).toBe(404);
 
       await CombinedModel.destroy({ where: {} });

@@ -7,6 +7,7 @@ const {
   copyOwnProperties,
   extractRequestBody,
   handleValidationError,
+  validateAllowedFields,
 } = require('../utils');
 const { validateData } = require('../validationMiddleware');
 const {
@@ -153,6 +154,37 @@ async function processCreateRequest(context, config, req, res) {
   );
   if (!isValidRequest) {
     return;
+  }
+
+  // Validate allowed/blocked fields on request body only (not programmatic values)
+  if (Array.isArray(rawBody)) {
+    for (const item of rawBody) {
+      const fieldValidation = validateAllowedFields(
+        item,
+        config.allowedFields,
+        config.blockedFields
+      );
+      if (!fieldValidation.valid) {
+        context.res.status(400).json({
+          success: false,
+          error: fieldValidation.error,
+        });
+        return;
+      }
+    }
+  } else {
+    const fieldValidation = validateAllowedFields(
+      rawBody,
+      config.allowedFields,
+      config.blockedFields
+    );
+    if (!fieldValidation.valid) {
+      context.res.status(400).json({
+        success: false,
+        error: fieldValidation.error,
+      });
+      return;
+    }
   }
 
   // Reverse-map foreign key fields from external IDs to internal IDs

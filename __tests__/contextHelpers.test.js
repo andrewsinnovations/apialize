@@ -105,7 +105,7 @@ describe('req.apialize Helper Functions', () => {
       list(Item, {
         pre: async (context) => {
           // Apply tenant filtering using req.apialize helper
-          context.req.apialize.apply_where({ tenant_id: 1 });
+          context.apply_where({ tenant_id: 1 });
           return { tenantFiltered: true };
         },
       })
@@ -124,9 +124,9 @@ describe('req.apialize Helper Functions', () => {
       list(Item, {
         pre: async (context) => {
           // Apply multiple conditions
-          context.req.apialize.apply_where({ tenant_id: 1 });
-          context.req.apialize.apply_where({ status: 'active' });
-          context.req.apialize.apply_where({ price: { [Op.gt]: 100 } });
+          context.apply_where({ tenant_id: 1 });
+          context.apply_where({ status: 'active' });
+          context.apply_where({ price: { [Op.gt]: 100 } });
           return { multipleFiltersApplied: true };
         },
       })
@@ -148,8 +148,8 @@ describe('req.apialize Helper Functions', () => {
       list(Item, {
         pre: async (context) => {
           // Apply scopes using req.apialize helper
-          context.req.apialize.applyScope('byTenant', 1);
-          context.req.apialize.applyScope('activeOnly');
+          context.apply_scope('byTenant', 1);
+          context.apply_scope('activeOnly');
           return { scopesApplied: true };
         },
       })
@@ -172,13 +172,13 @@ describe('req.apialize Helper Functions', () => {
       list(Item, {
         pre: async (context) => {
           // First add a condition
-          context.req.apialize.apply_where({ tenant_id: 1 });
+          context.apply_where({ tenant_id: 1 });
 
           // Try to add the same condition - should not override
-          context.req.apialize.apply_where_if_not_exists({ tenant_id: 2 });
+          context.apply_where_if_not_exists({ tenant_id: 2 });
 
           // Add a new condition - should work
-          context.req.apialize.apply_where_if_not_exists({ status: 'active' });
+          context.apply_where_if_not_exists({ status: 'active' });
 
           return { conditionalApplied: true };
         },
@@ -202,14 +202,14 @@ describe('req.apialize Helper Functions', () => {
       list(Item, {
         pre: async (context) => {
           // Add some conditions
-          context.req.apialize.apply_where({
+          context.apply_where({
             tenant_id: 1,
             status: 'active',
             category: 'electronics',
           });
 
           // Remove one condition
-          context.req.apialize.remove_where('category');
+          context.remove_where('category');
 
           return { conditionRemoved: true };
         },
@@ -232,13 +232,13 @@ describe('req.apialize Helper Functions', () => {
       list(Item, {
         pre: async (context) => {
           // Start with some conditions
-          context.req.apialize.apply_where({
+          context.apply_where({
             tenant_id: 1,
             status: 'active',
           });
 
           // Replace entire where clause
-          context.req.apialize.replace_where({
+          context.replace_where({
             category: 'electronics',
           });
 
@@ -262,7 +262,7 @@ describe('req.apialize Helper Functions', () => {
       list(Item, {
         pre: async (context) => {
           // Apply multiple conditions at once
-          context.req.apialize.apply_multiple_where([
+          context.apply_multiple_where([
             { tenant_id: 1 },
             { status: 'active' },
             { price: { [Op.gte]: 200 } },
@@ -289,10 +289,10 @@ describe('req.apialize Helper Functions', () => {
       list(Item, {
         pre: async (context) => {
           // Apply initial condition
-          context.req.apialize.apply_where({ tenant_id: 1 });
+          context.apply_where({ tenant_id: 1 });
 
           // Apply conflicting condition - should overwrite
-          context.req.apialize.apply_where({ tenant_id: 2 });
+          context.apply_where({ tenant_id: 2 });
 
           return { overwriteTest: true };
         },
@@ -313,9 +313,9 @@ describe('req.apialize Helper Functions', () => {
       list(Item, {
         pre: async (context) => {
           // Apply multiple conditions in sequence
-          context.req.apialize.apply_where({ tenant_id: 1 });
-          context.req.apialize.apply_where({ status: 'active' });
-          context.req.apialize.apply_where({ status: 'inactive' }); // Should overwrite active
+          context.apply_where({ tenant_id: 1 });
+          context.apply_where({ status: 'active' });
+          context.apply_where({ status: 'inactive' }); // Should overwrite active
 
           return { sequentialTest: true };
         },

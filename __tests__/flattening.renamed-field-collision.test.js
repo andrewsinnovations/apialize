@@ -45,8 +45,14 @@ describe('Flattening Renamed Field Collision', () => {
     );
 
     // Associations - using hasMany to match the pattern in other tests
-    MainModel.hasMany(RelatedModel, { foreignKey: 'main_model_id', as: 'Related' });
-    RelatedModel.belongsTo(MainModel, { foreignKey: 'main_model_id', as: 'Main' });
+    MainModel.hasMany(RelatedModel, {
+      foreignKey: 'main_model_id',
+      as: 'Related',
+    });
+    RelatedModel.belongsTo(MainModel, {
+      foreignKey: 'main_model_id',
+      as: 'Main',
+    });
 
     await sequelize.sync({ force: true });
 
@@ -122,7 +128,9 @@ describe('Flattening Renamed Field Collision', () => {
       );
 
       // Test 1: Filter by the renamed field - should match related model's name
-      const res1 = await request(app).get('/main?related_model_name=Related One');
+      const res1 = await request(app).get(
+        '/main?related_model_name=Related One'
+      );
 
       expect(res1.status).toBe(200);
       expect(res1.body.data).toHaveLength(1);
@@ -170,13 +178,17 @@ describe('Flattening Renamed Field Collision', () => {
       );
 
       // Filter using icontains on the renamed field
-      const res = await request(app).get('/main?related_model_name:icontains=related');
+      const res = await request(app).get(
+        '/main?related_model_name:icontains=related'
+      );
 
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(3); // All three have "Related" in related model's name
 
       // Verify none of them match based on main model's name field
-      const res2 = await request(app).get('/main?related_model_name:icontains=main');
+      const res2 = await request(app).get(
+        '/main?related_model_name:icontains=main'
+      );
 
       expect(res2.status).toBe(200);
       expect(res2.body.data).toHaveLength(0); // Should be 0, not 3
@@ -198,10 +210,7 @@ describe('Flattening Renamed Field Collision', () => {
             flattening: {
               model: RelatedModel,
               as: 'Related',
-              attributes: [
-                ['name', 'related_model_name'],
-                'value',
-              ],
+              attributes: [['name', 'related_model_name'], 'value'],
             },
           },
           {
@@ -337,8 +346,8 @@ describe('Flattening Renamed Field Collision', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(2);
-      
-      const names = res.body.data.map(d => d.name).sort();
+
+      const names = res.body.data.map((d) => d.name).sort();
       expect(names).toEqual(['Main One', 'Main Two']);
     });
 
@@ -365,7 +374,7 @@ describe('Flattening Renamed Field Collision', () => {
         )
       );
 
-      // Complex filter: (main.name contains "Two" OR related.name contains "One") 
+      // Complex filter: (main.name contains "Two" OR related.name contains "One")
       const res = await request(app)
         .post('/main/search')
         .send({
@@ -379,8 +388,8 @@ describe('Flattening Renamed Field Collision', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(2);
-      
-      const names = res.body.data.map(d => d.name).sort();
+
+      const names = res.body.data.map((d) => d.name).sort();
       expect(names).toEqual(['Main One', 'Main Two']);
     });
 
@@ -421,7 +430,7 @@ describe('Flattening Renamed Field Collision', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveLength(3);
-      
+
       // DESC alphabetical order: Two > Three > One
       expect(res.body.data[0].related_model_name).toBe('Related Two');
       expect(res.body.data[1].related_model_name).toBe('Related Three');

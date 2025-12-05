@@ -280,6 +280,39 @@ function setValue(key, value) {
   return req.apialize.values;
 }
 
+function setMultipleValues(values) {
+  const req = this._req;
+
+  ensureBodyStructure(req);
+
+  if (Array.isArray(values)) {
+    // Handle array of [key, value] pairs
+    for (let i = 0; i < values.length; i++) {
+      const item = values[i];
+      if (Array.isArray(item) && item.length === 2) {
+        const [key, value] = item;
+        if (typeof key !== 'string') {
+          throw new Error('Key must be a string');
+        }
+        req.apialize.values[key] = value;
+      } else {
+        throw new Error('Array values must be [key, value] pairs');
+      }
+    }
+  } else if (values && typeof values === 'object') {
+    // Handle object with key-value pairs
+    const keys = Object.keys(values);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      req.apialize.values[key] = values[key];
+    }
+  } else {
+    throw new Error('Values must be an object or array of [key, value] pairs');
+  }
+
+  return req.apialize.values;
+}
+
 function removeValue(keysToRemove) {
   const req = this._req;
 
@@ -361,6 +394,7 @@ function createHelpers(req, model, ctx) {
     replaceWhere: replaceWhere.bind(context),
     replace_where: replaceWhere.bind(context),
     set_value: setValue.bind(context),
+    set_multiple_values: setMultipleValues.bind(context),
     remove_value: removeValue.bind(context),
     replace_body: replaceBody.bind(context),
     cancel_operation: cancel_operation.bind(context),
@@ -385,6 +419,7 @@ module.exports = {
   removeWhere,
   replaceWhere,
   setValue,
+  setMultipleValues,
   removeValue,
   replaceBody,
   cancel_operation,

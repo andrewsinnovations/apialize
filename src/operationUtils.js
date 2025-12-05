@@ -1314,7 +1314,11 @@ function extractModelApializeConfig(model, operationType, context = 'default') {
  * @param {String} context - Optional context name within the operation (e.g., 'default', 'other_context')
  * @returns {Object} - model_options object or empty object if not found
  */
-function extractModelApializeModelOptions(model, operationType, context = 'default') {
+function extractModelApializeModelOptions(
+  model,
+  operationType,
+  context = 'default'
+) {
   if (!model || !model.options || !model.options.apialize) {
     return {};
   }
@@ -1323,7 +1327,11 @@ function extractModelApializeModelOptions(model, operationType, context = 'defau
   const model_options = {};
 
   // First, apply global default model_options if it exists
-  if (apializeConfig.default && apializeConfig.default.model_options && typeof apializeConfig.default.model_options === 'object') {
+  if (
+    apializeConfig.default &&
+    apializeConfig.default.model_options &&
+    typeof apializeConfig.default.model_options === 'object'
+  ) {
     Object.assign(model_options, apializeConfig.default.model_options);
   }
 
@@ -1396,7 +1404,11 @@ function mergeModelAndUserModelOptions(
   operationType,
   context = 'default'
 ) {
-  const model_model_options = extractModelApializeModelOptions(model, operationType, context);
+  const model_model_options = extractModelApializeModelOptions(
+    model,
+    operationType,
+    context
+  );
   const merged = {};
 
   // Apply model model_options first

@@ -68,7 +68,7 @@ describe('cancel_operation', () => {
 
   it('should use default statusCode 400 when statusCode is null or undefined', () => {
     const boundCancel = cancel_operation.bind(mockContext);
-    
+
     boundCancel(null, { custom: 'response' });
     expect(mockContext._ctx._cancelStatusCode).toBe(400);
 
@@ -79,12 +79,18 @@ describe('cancel_operation', () => {
 
   it('should throw error when cancel_operation is not called on context object', () => {
     const boundCancel = cancel_operation.bind({});
-    expect(() => boundCancel()).toThrow('cancel_operation must be called on context object');
+    expect(() => boundCancel()).toThrow(
+      'cancel_operation must be called on context object'
+    );
   });
 
   it('should preserve custom response properties and add _apializeCancelled flag', () => {
     const boundCancel = cancel_operation.bind(mockContext);
-    const customResponse = { status: 'cancelled', reason: 'user_cancelled', data: { id: 123 } };
+    const customResponse = {
+      status: 'cancelled',
+      reason: 'user_cancelled',
+      data: { id: 123 },
+    };
     const result = boundCancel(422, customResponse);
 
     expect(result).toEqual({
@@ -143,7 +149,9 @@ describe('cancel_operation', () => {
       const createRouter = create(Customer, {
         pre: async (context) => {
           // Cancel the operation in pre-hook with custom statusCode
-          context.cancel_operation(422, { error: 'Pre-hook validation failed' });
+          context.cancel_operation(422, {
+            error: 'Pre-hook validation failed',
+          });
         },
       });
 
@@ -151,7 +159,11 @@ describe('cancel_operation', () => {
 
       const response = await request(app)
         .post('/customers')
-        .send({ firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' });
+        .send({
+          firstName: 'Jane',
+          lastName: 'Doe',
+          email: 'jane@example.com',
+        });
 
       expect(response.status).toBe(422);
       expect(response.body).toEqual({ error: 'Pre-hook validation failed' });
@@ -165,7 +177,9 @@ describe('cancel_operation', () => {
       const createRouter = create(Customer, {
         post: async (context) => {
           // Cancel the operation in post-hook with custom statusCode
-          context.cancel_operation(409, { error: 'Post-hook validation failed' });
+          context.cancel_operation(409, {
+            error: 'Post-hook validation failed',
+          });
         },
       });
 
@@ -173,7 +187,11 @@ describe('cancel_operation', () => {
 
       const response = await request(app)
         .post('/customers')
-        .send({ firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' });
+        .send({
+          firstName: 'Jane',
+          lastName: 'Doe',
+          email: 'jane@example.com',
+        });
 
       expect(response.status).toBe(409);
       expect(response.body).toEqual({ error: 'Post-hook validation failed' });
@@ -187,7 +205,9 @@ describe('cancel_operation', () => {
       const createRouter = create(Customer, {
         pre: async (context) => {
           // Cancel without providing statusCode
-          context.cancel_operation(undefined, { error: 'Cancelled without status code' });
+          context.cancel_operation(undefined, {
+            error: 'Cancelled without status code',
+          });
         },
       });
 
@@ -195,7 +215,11 @@ describe('cancel_operation', () => {
 
       const response = await request(app)
         .post('/customers')
-        .send({ firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' });
+        .send({
+          firstName: 'Jane',
+          lastName: 'Doe',
+          email: 'jane@example.com',
+        });
 
       expect(response.status).toBe(400);
       expect(response.body).toEqual({ error: 'Cancelled without status code' });
@@ -213,7 +237,11 @@ describe('cancel_operation', () => {
 
       const response = await request(app)
         .post('/customers')
-        .send({ firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' });
+        .send({
+          firstName: 'Jane',
+          lastName: 'Doe',
+          email: 'jane@example.com',
+        });
 
       expect(response.status).toBe(400);
       expect(response.body).toEqual({
@@ -237,7 +265,11 @@ describe('cancel_operation', () => {
 
       const response = await request(app)
         .post('/customers')
-        .send({ firstName: 'Jane', lastName: 'Doe', email: 'jane@example.com' });
+        .send({
+          firstName: 'Jane',
+          lastName: 'Doe',
+          email: 'jane@example.com',
+        });
 
       expect(response.status).toBe(403);
       expect(response.body).toMatchObject({
