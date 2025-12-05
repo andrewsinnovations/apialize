@@ -15,6 +15,7 @@ const {
   notFoundWithRollback,
   reverseMapForeignKeys,
 } = require('../operationUtils');
+const { mapFieldsToInternal } = require('../fieldAliasUtils');
 
 function removeIdMappingFromProvided(provided, idMapping) {
   const hasIdMappingProperty = Object.prototype.hasOwnProperty.call(
@@ -145,22 +146,54 @@ async function validatePatchData(model, provided, validate, res) {
 
 async function processPatchRequest(context, config, req, res) {
   const id = extractIdFromRequest(req);
-  const provided = getProvidedValues(req);
-
-  // Validate allowed/blocked fields on request body only (not programmatic values)
   const requestBody = req.body || {};
-  const fieldValidation = validateAllowedFields(
-    requestBody,
-    config.allowedFields,
-    config.blockedFields
-  );
-  if (!fieldValidation.valid) {
-    context.res.status(400).json({
-      success: false,
-      error: fieldValidation.error,
-    });
-    return;
+  
+  // Validate allowed/blocked fields on request body BEFORE mapping (using external names)
+  if (config.aliases) {
+    const { checkFieldAllowed } = require('../fieldAliasUtils');
+    
+    const fieldNames = Object.keys(requestBody);
+    for (const fieldName of fieldNames) {
+      const fieldCheck = checkFieldAllowed(
+        fieldName,
+        config.allowedFields,
+        config.blockedFields,
+        config.aliases
+      );
+      if (!fieldCheck.allowed) {
+        context.res.status(400).json({
+          success: false,
+          error: fieldCheck.error,
+        });
+        return;
+      }
+    }
+  } else {
+    // Standard validation without aliases
+    const fieldValidation = validateAllowedFields(
+      requestBody,
+      config.allowedFields,
+      config.blockedFields
+    );
+    if (!fieldValidation.valid) {
+      context.res.status(400).json({
+        success: false,
+        error: fieldValidation.error,
+      });
+      return;
+    }
   }
+  
+  // Map external field names to internal names if aliases are configured
+  if (config.aliases && req.body) {
+    req.body = mapFieldsToInternal(req.body, config.aliases);
+    // Also update req.apialize.values if it exists
+    if (req.apialize) {
+      req.apialize.values = req.body;
+    }
+  }
+  
+  const provided = getProvidedValues(req);
 
   // Reverse-map foreign key fields from external IDs to internal IDs
   try {
@@ -233,3 +266,4 @@ async function processPatchRequest(context, config, req, res) {
 module.exports = {
   processPatchRequest,
 };
+

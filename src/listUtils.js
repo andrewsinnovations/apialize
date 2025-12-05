@@ -1085,7 +1085,8 @@ async function buildResponse(
   req,
   idMapping,
   normalizeRows,
-  flattening
+  flattening,
+  aliases
 ) {
   const rows = convertResultRowsToPlainObjects(result.rows);
   const normFn = normalizeRows || createDefaultNormalizeFunction();
@@ -1094,6 +1095,12 @@ async function buildResponse(
   // Apply flattening if configured
   if (flattening) {
     normalizedRows = flattenResponseData(normalizedRows, flattening);
+  }
+
+  // Apply field aliases if configured (transform internal to external names)
+  if (aliases) {
+    const { mapArrayFieldsToExternal } = require('./fieldAliasUtils');
+    normalizedRows = mapArrayFieldsToExternal(normalizedRows, aliases);
   }
 
   const totalPages = Math.max(1, Math.ceil(result.count / pageSize));
@@ -1506,3 +1513,4 @@ module.exports = {
   mapFlattenedFieldToIncludePath,
   flattenResponseData,
 };
+

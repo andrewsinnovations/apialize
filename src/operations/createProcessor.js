@@ -15,6 +15,7 @@ const {
   reverseMapForeignKeys,
   reverseMapForeignKeysInBulk,
 } = require('../operationUtils');
+const { mapFieldsToInternal, mapArrayFieldsToExternal } = require('../fieldAliasUtils');
 
 /**
  * Validates bulk create request
@@ -156,11 +157,50 @@ async function processCreateRequest(context, config, req, res) {
     return;
   }
 
-  // Validate allowed/blocked fields on request body only (not programmatic values)
-  if (Array.isArray(rawBody)) {
-    for (const item of rawBody) {
+  // Validate allowed/blocked fields on request body BEFORE mapping (using external names)
+  if (config.aliases) {
+    const { checkFieldAllowed } = require('../fieldAliasUtils');
+    
+    const itemsToValidate = Array.isArray(rawBody) ? rawBody : [rawBody];
+    
+    for (const item of itemsToValidate) {
+      const fieldNames = Object.keys(item || {});
+      for (const fieldName of fieldNames) {
+        const fieldCheck = checkFieldAllowed(
+          fieldName,
+          config.allowedFields,
+          config.blockedFields,
+          config.aliases
+        );
+        if (!fieldCheck.allowed) {
+          context.res.status(400).json({
+            success: false,
+            error: fieldCheck.error,
+          });
+          return;
+        }
+      }
+    }
+  } else {
+    // Standard validation without aliases
+    if (Array.isArray(rawBody)) {
+      for (const item of rawBody) {
+        const fieldValidation = validateAllowedFields(
+          item,
+          config.allowedFields,
+          config.blockedFields
+        );
+        if (!fieldValidation.valid) {
+          context.res.status(400).json({
+            success: false,
+            error: fieldValidation.error,
+          });
+          return;
+        }
+      }
+    } else {
       const fieldValidation = validateAllowedFields(
-        item,
+        rawBody,
         config.allowedFields,
         config.blockedFields
       );
@@ -172,26 +212,29 @@ async function processCreateRequest(context, config, req, res) {
         return;
       }
     }
-  } else {
-    const fieldValidation = validateAllowedFields(
-      rawBody,
-      config.allowedFields,
-      config.blockedFields
-    );
-    if (!fieldValidation.valid) {
-      context.res.status(400).json({
-        success: false,
-        error: fieldValidation.error,
-      });
-      return;
+  }
+
+  // Map external field names to internal names if aliases are configured
+  let mappedBody = rawBody;
+  if (config.aliases) {
+    if (Array.isArray(rawBody)) {
+      mappedBody = rawBody.map(item => mapFieldsToInternal(item, config.aliases));
+    } else {
+      mappedBody = mapFieldsToInternal(rawBody, config.aliases);
+    }
+    // Update req.body so getProvidedValues uses the mapped names
+    req.body = mappedBody;
+    // Also update req.apialize.values if it exists
+    if (req.apialize) {
+      req.apialize.values = mappedBody;
     }
   }
 
   // Reverse-map foreign key fields from external IDs to internal IDs
   try {
-    if (Array.isArray(rawBody)) {
+    if (Array.isArray(mappedBody)) {
       await reverseMapForeignKeysInBulk(
-        rawBody,
+        mappedBody,
         context.model,
         config.relation_id_mapping,
         context.transaction
@@ -216,7 +259,7 @@ async function processCreateRequest(context, config, req, res) {
   if (config.validate) {
     const validationResult = await performCreateValidation(
       context.model,
-      rawBody,
+      mappedBody,
       req,
       context
     );
@@ -243,7 +286,7 @@ async function processCreateRequest(context, config, req, res) {
   return await executeCreateOperation(
     context.model,
     req,
-    rawBody,
+    mappedBody,
     createOptions,
     context,
     config.id_mapping
@@ -253,3 +296,4 @@ async function processCreateRequest(context, config, req, res) {
 module.exports = {
   processCreateRequest,
 };
+

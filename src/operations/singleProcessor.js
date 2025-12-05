@@ -9,6 +9,7 @@ const {
   flattenResponseData,
   validateFlatteningConfig,
 } = require('../listUtils');
+const { mapFieldsToExternal } = require('../fieldAliasUtils');
 
 /**
  * Converts record to plain object
@@ -209,6 +210,11 @@ async function processSingleRequest(context, config, req, res) {
     recordPayload = flattenedArray[0];
   }
 
+  // Apply field aliases if configured (transform internal to external names)
+  if (config.aliases) {
+    recordPayload = mapFieldsToExternal(recordPayload, config.aliases);
+  }
+
   context.payload = { success: true, record: recordPayload };
   return context.payload;
 }
@@ -216,3 +222,4 @@ async function processSingleRequest(context, config, req, res) {
 module.exports = {
   processSingleRequest,
 };
+

@@ -44,6 +44,7 @@ const OPERATION_DEFAULTS = {
     middleware: [],
     pre: null,
     post: null,
+    aliases: null,
   },
   [OPERATION_TYPES.UPDATE]: {
     validate: true,
@@ -54,6 +55,7 @@ const OPERATION_DEFAULTS = {
     middleware: [],
     pre: null,
     post: null,
+    aliases: null,
   },
   [OPERATION_TYPES.PATCH]: {
     validate: true,
@@ -64,6 +66,7 @@ const OPERATION_DEFAULTS = {
     middleware: [],
     pre: null,
     post: null,
+    aliases: null,
   },
   [OPERATION_TYPES.DESTROY]: {
     id_mapping: 'id',
@@ -89,6 +92,7 @@ const OPERATION_DEFAULTS = {
     relation_id_mapping: null,
     disableSubqueryOnIncludeRequest: true,
     flattening: null,
+    aliases: null,
   },
   [OPERATION_TYPES.SEARCH]: {
     middleware: [],
@@ -108,6 +112,7 @@ const OPERATION_DEFAULTS = {
     defaultPageSize: 100,
     defaultOrderBy: 'id',
     defaultOrderDir: 'ASC',
+    aliases: null,
   },
   [OPERATION_TYPES.SINGLE]: {
     middleware: [],
@@ -119,6 +124,7 @@ const OPERATION_DEFAULTS = {
     member_routes: [],
     flattening: null,
     relation_id_mapping: null,
+    aliases: null,
   },
 };
 
@@ -531,3 +537,4 @@ module.exports = {
   list,
   single,
 };
+

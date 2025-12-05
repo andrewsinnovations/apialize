@@ -1,4 +1,4 @@
-﻿const { mergeReqOptionsIntoModelOptions } = require('../utils');
+const { mergeReqOptionsIntoModelOptions } = require('../utils');
 const { normalizeRowsWithForeignKeys } = require('../operationUtils');
 const {
   validateColumnExists,
@@ -9,6 +9,10 @@ const {
   isFlattenedField,
   mapFlattenedFieldToIncludePath,
 } = require('../listUtils');
+const {
+  resolveAliasToInternal,
+  checkFieldAllowed,
+} = require('../fieldAliasUtils');
 
 const SEARCH_DEFAULTS = {
   middleware: [],
@@ -27,6 +31,7 @@ const SEARCH_DEFAULTS = {
   path: '/search',
   disableSubqueryOnIncludeRequest: true,
   flattening: null,
+  aliases: null,
 };
 
 class ValidationError extends Error {
@@ -295,27 +300,23 @@ function buildFieldPredicate(
   relationIdMapping,
   flattening,
   allowFilteringOn,
-  blockFilteringOn
+  blockFilteringOn,
+  aliases
 ) {
   const dialect = getDatabaseDialect(model);
   const operators = getCaseInsensitiveOperators(dialect, Op);
 
-  // Validate field is in allow list if configured
-  if (Array.isArray(allowFilteringOn)) {
-    if (!allowFilteringOn.includes(key)) {
-      return { error: `Filtering on field '${key}' is not allowed` };
-    }
+  // Validate field is in allow list if configured (checking with alias support)
+  const fieldCheck = checkFieldAllowed(key, allowFilteringOn, blockFilteringOn, aliases);
+  if (!fieldCheck.allowed) {
+    return { error: fieldCheck.error };
   }
 
-  // Validate field is not in block list if configured
-  if (Array.isArray(blockFilteringOn)) {
-    if (blockFilteringOn.includes(key)) {
-      return { error: `Filtering on field '${key}' is not allowed` };
-    }
-  }
+  // Resolve alias to internal column name
+  const internalKey = resolveAliasToInternal(key, aliases);
 
   const fkMapping = findForeignKeyRelationMapping(
-    key,
+    internalKey,
     model,
     relationIdMapping
   );
@@ -385,7 +386,7 @@ function buildFieldPredicate(
   }
 
   const fieldContext = resolveFieldContext(
-    key,
+    internalKey,
     model,
     includes,
     relationIdMapping,
@@ -575,7 +576,8 @@ function processAndFilters(
   relationIdMapping,
   flattening,
   allowFilteringOn,
-  blockFilteringOn
+  blockFilteringOn,
+  aliases
 ) {
   const parts = [];
 
@@ -588,7 +590,8 @@ function processAndFilters(
       relationIdMapping,
       flattening,
       allowFilteringOn,
-      blockFilteringOn
+      blockFilteringOn,
+      aliases
     );
     if (subWhere && Object.keys(subWhere).length) {
       parts.push(subWhere);
@@ -625,7 +628,8 @@ function processOrFilters(
   relationIdMapping,
   flattening,
   allowFilteringOn,
-  blockFilteringOn
+  blockFilteringOn,
+  aliases
 ) {
   const parts = [];
 
@@ -638,7 +642,8 @@ function processOrFilters(
       relationIdMapping,
       flattening,
       allowFilteringOn,
-      blockFilteringOn
+      blockFilteringOn,
+      aliases
     );
     if (subWhere && Object.keys(subWhere).length) {
       parts.push(subWhere);
@@ -660,7 +665,8 @@ function processImplicitAndFilters(
   relationIdMapping,
   flattening,
   allowFilteringOn,
-  blockFilteringOn
+  blockFilteringOn,
+  aliases
 ) {
   const keys = Object.keys(filters);
   const andParts = [];
@@ -689,7 +695,8 @@ function processImplicitAndFilters(
       relationIdMapping,
       flattening,
       allowFilteringOn,
-      blockFilteringOn
+      blockFilteringOn,
+      aliases
     );
 
     if (predicate && predicate.error) {
@@ -741,7 +748,8 @@ function buildWhere(
   relationIdMapping,
   flattening,
   allowFilteringOn,
-  blockFilteringOn
+  blockFilteringOn,
+  aliases
 ) {
   if (!filters || typeof filters !== 'object') {
     return {};
@@ -756,7 +764,8 @@ function buildWhere(
       relationIdMapping,
       flattening,
       allowFilteringOn,
-      blockFilteringOn
+      blockFilteringOn,
+      aliases
     );
   }
 
@@ -769,7 +778,8 @@ function buildWhere(
       relationIdMapping,
       flattening,
       allowFilteringOn,
-      blockFilteringOn
+      blockFilteringOn,
+      aliases
     );
   }
 
@@ -781,7 +791,8 @@ function buildWhere(
     relationIdMapping,
     flattening,
     allowFilteringOn,
-    blockFilteringOn
+    blockFilteringOn,
+    aliases
   );
 }
 
@@ -928,7 +939,8 @@ function buildOrdering(
   relationIdMapping,
   flattening,
   allowOrderingOn,
-  blockOrderingOn
+  blockOrderingOn,
+  aliases
 ) {
   const items = normalizeOrderingItems(ordering);
   const orderClauses = [];
@@ -943,25 +955,20 @@ function buildOrdering(
       continue;
     }
 
-    // Validate field is in allow list if configured
-    if (Array.isArray(allowOrderingOn)) {
-      if (!allowOrderingOn.includes(column)) {
-        return { error: `Ordering on field '${column}' is not allowed` };
-      }
-    }
-
-    // Validate field is not in block list if configured
-    if (Array.isArray(blockOrderingOn)) {
-      if (blockOrderingOn.includes(column)) {
-        return { error: `Ordering on field '${column}' is not allowed` };
-      }
+    // Validate field is in allow list if configured (checking with alias support)
+    const fieldCheck = checkFieldAllowed(column, allowOrderingOn, blockOrderingOn, aliases);
+    if (!fieldCheck.allowed) {
+      return { error: fieldCheck.error };
     }
 
     const direction = normalizeOrderDirection(item, defaultOrderDir);
-    const columnName = resolveOrderColumnName(column, idMapping);
+    
+    // Resolve alias to internal column name
+    const resolvedColumn = resolveOrderColumnName(column, idMapping);
+    const internalColumn = resolveAliasToInternal(resolvedColumn, aliases);
 
     const flattenedResult = processOrderItemForFlattening(
-      columnName,
+      internalColumn,
       flattening,
       model,
       includes,
@@ -977,7 +984,7 @@ function buildOrdering(
     }
 
     const includesResult = processOrderItemForIncludes(
-      columnName,
+      internalColumn,
       model,
       includes,
       relationIdMapping,
@@ -991,15 +998,16 @@ function buildOrdering(
       continue;
     }
 
-    if (!validateColumnExists(model, columnName)) {
-      return { error: `Invalid order column '${columnName}'` };
+    if (!validateColumnExists(model, internalColumn)) {
+      return { error: `Invalid order column '${column}'` };
     }
-    orderClauses.push([columnName, direction]);
+    orderClauses.push([internalColumn, direction]);
   }
 
   if (orderClauses.length === 0) {
     const effectiveOrderBy = resolveOrderColumnName(defaultOrderBy, idMapping);
-    orderClauses.push([effectiveOrderBy, defaultOrderDir || 'ASC']);
+    const internalOrderBy = resolveAliasToInternal(effectiveOrderBy, aliases);
+    orderClauses.push([internalOrderBy, defaultOrderDir || 'ASC']);
   }
 
   return orderClauses;
@@ -1027,6 +1035,7 @@ function extractMergedOptions(searchOptions) {
     flattening: merged.flattening,
     allowOrderingOn: merged.allowOrderingOn,
     blockOrderingOn: merged.blockOrderingOn,
+    aliases: merged.aliases,
     pre: merged.pre,
     post: merged.post,
   };
@@ -1292,7 +1301,8 @@ async function processSearchRequest(context, config, req, res) {
     config.relation_id_mapping,
     config.flattening,
     config.allowFilteringOn,
-    config.blockFilteringOn
+    config.blockFilteringOn,
+    config.aliases
   );
 
   let whereTree = whereResult;
@@ -1390,7 +1400,8 @@ async function processSearchRequest(context, config, req, res) {
     config.relation_id_mapping,
     config.flattening,
     config.allowOrderingOn,
-    config.blockOrderingOn
+    config.blockOrderingOn,
+    config.aliases
   );
 
   if (orderArray && orderArray.error) {
@@ -1423,7 +1434,8 @@ async function processSearchRequest(context, config, req, res) {
     req,
     config.id_mapping,
     normalizeRowsFn,
-    config.flattening
+    config.flattening,
+    config.aliases
   );
 
   return response;
@@ -1432,3 +1444,4 @@ async function processSearchRequest(context, config, req, res) {
 module.exports = {
   processSearchRequest,
 };
+

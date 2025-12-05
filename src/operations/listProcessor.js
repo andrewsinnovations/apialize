@@ -18,6 +18,7 @@ const LIST_DEFAULTS = {
   relation_id_mapping: null,
   disableSubqueryOnIncludeRequest: true,
   flattening: null,
+  aliases: null,
 };
 
 function extractValidPage(query) {
@@ -281,6 +282,7 @@ function createSearchOptions(mergedOptions, idMapping) {
   searchOptions.blockFilteringOn = mergedOptions.blockFilteringOn;
   searchOptions.allowOrderingOn = mergedOptions.allowOrderingOn;
   searchOptions.blockOrderingOn = mergedOptions.blockOrderingOn;
+  searchOptions.aliases = mergedOptions.aliases;
 
   return searchOptions;
 }
@@ -364,3 +366,4 @@ async function processListRequest(context, config, req, res) {
 module.exports = {
   processListRequest,
 };
+
