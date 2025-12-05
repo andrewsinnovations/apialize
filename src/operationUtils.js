@@ -101,8 +101,10 @@ function createBaseContext(params) {
   ctx.res = params.res;
   ctx.model = params.model;
   ctx.options = params.options;
-  ctx.modelOptions = params.modelOptions;
-  ctx.idMapping = params.idMapping;
+  ctx.modelOptions = params.modelOptions; // todo: deprecate camelCase in future
+  ctx.model_options = params.modelOptions; // snake_case alias
+  ctx.idMapping = params.idMapping; // todo: deprecate camelCase in future
+  ctx.id_mapping = params.idMapping; // snake_case alias
   // For read-only operations executed via withHooksOnly, tests expect transaction to be undefined.
   // It will be populated (non-undefined) explicitly when a real Sequelize transaction starts.
   ctx.transaction = undefined;
