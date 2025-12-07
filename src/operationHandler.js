@@ -41,6 +41,8 @@ const OPERATION_DEFAULTS = {
     allowed_fields: null,
     blocked_fields: null,
     id_mapping: 'id',
+    relation_id_mapping: null,
+    auto_relation_id_mapping: true,
     middleware: [],
     pre: null,
     post: null,
@@ -52,6 +54,7 @@ const OPERATION_DEFAULTS = {
     blocked_fields: null,
     id_mapping: 'id',
     relation_id_mapping: null,
+    auto_relation_id_mapping: true,
     middleware: [],
     pre: null,
     post: null,
@@ -63,6 +66,7 @@ const OPERATION_DEFAULTS = {
     blocked_fields: null,
     id_mapping: 'id',
     relation_id_mapping: null,
+    auto_relation_id_mapping: true,
     middleware: [],
     pre: null,
     post: null,
@@ -90,6 +94,7 @@ const OPERATION_DEFAULTS = {
     pre: null,
     post: null,
     relation_id_mapping: null,
+    auto_relation_id_mapping: true,
     disableSubqueryOnIncludeRequest: true,
     flattening: null,
     aliases: null,
@@ -107,6 +112,7 @@ const OPERATION_DEFAULTS = {
     post: null,
     id_mapping: 'id',
     relation_id_mapping: null,
+    auto_relation_id_mapping: true,
     disableSubqueryOnIncludeRequest: true,
     flattening: null,
     defaultPageSize: 100,
@@ -124,6 +130,7 @@ const OPERATION_DEFAULTS = {
     member_routes: [],
     flattening: null,
     relation_id_mapping: null,
+    auto_relation_id_mapping: true,
     aliases: null,
   },
 };
@@ -158,6 +165,50 @@ function validateModelForOperation(model, operationType) {
     const methodName = requiredMethods[i];
     ensureFn(model, methodName);
   }
+}
+
+/**
+ * Automatically generates relation_id_mapping from belongsTo associations
+ * where the related model has apialize_id configured
+ */
+function generateAutoRelationIdMapping(model) {
+  if (!model || !model.associations) {
+    return [];
+  }
+
+  const autoMapping = [];
+  const associationNames = Object.keys(model.associations);
+
+  for (let i = 0; i < associationNames.length; i++) {
+    const associationName = associationNames[i];
+    const association = model.associations[associationName];
+
+    // Only process BelongsTo associations
+    if (association.associationType !== 'BelongsTo') {
+      continue;
+    }
+
+    const targetModel = association.target;
+    if (!targetModel) {
+      continue;
+    }
+
+    // Check if target model has apialize_id configured
+    const hasApializeConfig =
+      targetModel.options &&
+      targetModel.options.apialize &&
+      targetModel.options.apialize.apialize_id;
+
+    if (hasApializeConfig) {
+      const idField = targetModel.options.apialize.apialize_id;
+      autoMapping.push({
+        model: targetModel,
+        id_field: idField,
+      });
+    }
+  }
+
+  return autoMapping;
 }
 
 function buildOperationConfig(model, options = {}, operationType) {
@@ -248,6 +299,18 @@ function buildOperationConfig(model, options = {}, operationType) {
     }
     if (mergedOptions.blocked_fields !== undefined) {
       config.blockedFields = mergedOptions.blocked_fields;
+    }
+  }
+
+  // Apply auto_relation_id_mapping if enabled and no manual relation_id_mapping provided
+  const shouldAutoGenerateMapping =
+    config.auto_relation_id_mapping === true &&
+    !config.relation_id_mapping;
+
+  if (shouldAutoGenerateMapping) {
+    const autoMapping = generateAutoRelationIdMapping(model);
+    if (autoMapping.length > 0) {
+      config.relation_id_mapping = autoMapping;
     }
   }
 
