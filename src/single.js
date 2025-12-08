@@ -905,6 +905,11 @@ function setupMemberRoutes(
       req.apialize.record = recordPayload;
       req.apialize.singlePayload = { success: true, record: recordPayload };
 
+      // Add models shortcut to context for member_routes
+      if (model && model.sequelize && model.sequelize.models) {
+        req.apialize.models = model.sequelize.models;
+      }
+
       return next();
     } catch (err) {
       return next(err);
@@ -984,7 +989,9 @@ function setupMemberRoutes(
       asyncHandler(loadSingleRecord),
       ...perRouteMiddleware,
       asyncHandler(async (req, res) => {
-        const handlerOutput = await route.handler(req, res);
+        // Pass context as third parameter (optional, doesn't interfere with Express)
+        const context = req.apialize || {};
+        const handlerOutput = await route.handler(req, res, context);
         const responseNotSent = !res.headersSent;
         if (responseNotSent) {
           const hasOutput = typeof handlerOutput !== 'undefined';

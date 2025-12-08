@@ -238,6 +238,55 @@ describe('Field Aliases', () => {
       const response = await request(app).get('/persons?api:order_by=email');
       expect(response.status).toBe(400);
     });
+
+    it('should use default_order_by with aliased field name', async () => {
+      const { Person, app } = await buildAppAndModels();
+      await seedData(Person);
+
+      const aliases = {
+        age: 'person_age',
+      };
+
+      app.use('/persons', list(Person, { aliases, default_order_by: 'age' }));
+
+      const response = await request(app).get('/persons');
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toHaveLength(3);
+      // Should be ordered by age ASC (default direction)
+      expect(response.body.data[0].age).toBe(25);
+      expect(response.body.data[1].age).toBe(30);
+      expect(response.body.data[2].age).toBe(35);
+    });
+
+    it('should use default_order_by with aliased id field', async () => {
+      const { Person, app } = await buildAppAndModels();
+      await seedData(Person);
+
+      const aliases = {
+        personId: 'id',
+      };
+
+      app.use(
+        '/persons',
+        list(Person, {
+          aliases,
+          id_mapping: 'id',
+          default_order_by: 'personId',
+        })
+      );
+
+      const response = await request(app).get('/persons');
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toHaveLength(3);
+      // Should be ordered by id ASC (default direction)
+      expect(response.body.data[0].personId).toBe(1);
+      expect(response.body.data[1].personId).toBe(2);
+      expect(response.body.data[2].personId).toBe(3);
+    });
   });
 
   describe('Search Operation', () => {
@@ -330,6 +379,91 @@ describe('Field Aliases', () => {
       expect(response.body.data[0].age).toBe(35);
       expect(response.body.data[1].age).toBe(30);
       expect(response.body.data[2].age).toBe(25);
+    });
+
+    it('should use default_order_by with aliased field name', async () => {
+      const { Person, app } = await buildAppAndModels();
+      await seedData(Person);
+
+      const aliases = {
+        age: 'person_age',
+      };
+
+      app.use(
+        '/persons',
+        search(Person, { aliases, default_order_by: 'age', path: '/' })
+      );
+
+      const response = await request(app).post('/persons').send({
+        filtering: {},
+        paging: { page: 1, size: 10 },
+      });
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data).toHaveLength(3);
+      // Should be ordered by age ASC (default direction)
+      expect(response.body.data[0].age).toBe(25);
+      expect(response.body.data[1].age).toBe(30);
+      expect(response.body.data[2].age).toBe(35);
+    });
+
+    it('should work with allowOrderingOn using aliased names', async () => {
+      const { Person, app } = await buildAppAndModels();
+      await seedData(Person);
+
+      const aliases = {
+        name: 'person_name',
+        age: 'person_age',
+      };
+
+      app.use(
+        '/persons',
+        search(Person, {
+          aliases,
+          allowOrderingOn: ['name'], // Use external alias name
+          path: '/',
+        })
+      );
+
+      const response1 = await request(app).post('/persons').send({
+        filtering: {},
+        ordering: [{ order_by: 'name', direction: 'ASC' }],
+        paging: { page: 1, size: 10 },
+      });
+      expect(response1.status).toBe(200);
+
+      const response2 = await request(app).post('/persons').send({
+        filtering: {},
+        ordering: [{ order_by: 'age', direction: 'ASC' }],
+        paging: { page: 1, size: 10 },
+      });
+      expect(response2.status).toBe(400);
+    });
+
+    it('should work with blockOrderingOn using aliased names', async () => {
+      const { Person, app } = await buildAppAndModels();
+      await seedData(Person);
+
+      const aliases = {
+        email: 'person_email',
+      };
+
+      app.use(
+        '/persons',
+        search(Person, {
+          aliases,
+          blockOrderingOn: ['email'], // Use external alias name
+          path: '/',
+        })
+      );
+
+      const response = await request(app).post('/persons').send({
+        filtering: {},
+        ordering: [{ order_by: 'email', direction: 'ASC' }],
+        paging: { page: 1, size: 10 },
+      });
+      expect(response.status).toBe(400);
     });
   });
 

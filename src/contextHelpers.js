@@ -405,6 +405,11 @@ function createHelpers(req, model, ctx) {
     helpers.apply_scope = applyScope.bind(context);
     helpers.applyScopes = applyScopes.bind(context);
     helpers.apply_scopes = applyScopes.bind(context);
+    
+    // Add shortcut to all Sequelize models
+    if (model.sequelize && model.sequelize.models) {
+      helpers.models = model.sequelize.models;
+    }
   }
 
   return helpers;
