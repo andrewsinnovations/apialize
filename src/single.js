@@ -37,6 +37,56 @@ function validateRelatedConfig(relatedConfig) {
   }
 }
 
+/**
+ * Coerce a value to match the type of a model field
+ * @param {*} value - The value to coerce
+ * @param {Object} model - The Sequelize model
+ * @param {string} fieldName - The field name to match type against
+ * @returns {*} The coerced value
+ */
+function coerceToFieldType(value, model, fieldName) {
+  if (value == null) {
+    return value;
+  }
+
+  const rawAttributes = model.rawAttributes || model.constructor?.rawAttributes;
+  if (!rawAttributes || !rawAttributes[fieldName]) {
+    return value;
+  }
+
+  const attribute = rawAttributes[fieldName];
+  const attributeType = attribute.type;
+
+  if (!attributeType) {
+    return value;
+  }
+
+  const typeName = attributeType.key || attributeType.constructor?.name || '';
+
+  // Handle integer types
+  if (typeName === 'INTEGER' || typeName === 'BIGINT' || typeName === 'TINYINT' || typeName === 'SMALLINT' || typeName === 'MEDIUMINT') {
+    const parsed = parseInt(value, 10);
+    return isNaN(parsed) ? value : parsed;
+  }
+
+  // Handle decimal/float types
+  if (typeName === 'FLOAT' || typeName === 'DOUBLE' || typeName === 'REAL' || typeName === 'DECIMAL') {
+    const parsed = parseFloat(value);
+    return isNaN(parsed) ? value : parsed;
+  }
+
+  // Handle boolean types
+  if (typeName === 'BOOLEAN') {
+    if (typeof value === 'boolean') return value;
+    if (value === 'true' || value === '1' || value === 1) return true;
+    if (value === 'false' || value === '0' || value === 0) return false;
+    return value;
+  }
+
+  // For other types (STRING, TEXT, DATE, UUID, etc.), return as-is
+  return value;
+}
+
 function setupRelatedEndpoints(
   router,
   parentModel,
@@ -121,7 +171,8 @@ function setupRelatedEndpoints(
       const needsMapping = effectiveIdMapping !== 'id';
 
       if (!needsMapping) {
-        return parentParamId;
+        // Coerce the param value to match the parent model's ID type
+        return coerceToFieldType(parentParamId, parentModel, 'id');
       }
 
       const where = {};
@@ -314,7 +365,13 @@ function setupRelatedEndpoints(
             return defaultNotFound(res);
           }
 
-          req.apialize.values[relatedForeignKey] = parentInternalId;
+          // Coerce the FK value to match the related model's FK field type
+          const coercedFkValue = coerceToFieldType(
+            parentInternalId,
+            relatedModel,
+            relatedForeignKey
+          );
+          req.apialize.values[relatedForeignKey] = coercedFkValue;
         }
         next();
       });

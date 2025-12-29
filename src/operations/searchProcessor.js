@@ -593,31 +593,28 @@ function processAndFilters(
       blockFilteringOn,
       aliases
     );
-    if (subWhere && Object.keys(subWhere).length) {
+
+    // Propagate errors from nested calls
+    if (subWhere && subWhere.__error) {
+      return subWhere;
+    }
+
+    if (subWhere && Reflect.ownKeys(subWhere).length) {
       parts.push(subWhere);
     }
   }
 
-  const merged = {};
-  const orClauses = [];
-
-  for (const part of parts) {
-    if (part[Op.or]) {
-      const orArray = Array.isArray(part[Op.or]) ? part[Op.or] : [part[Op.or]];
-      orClauses.push(...orArray);
-
-      const { [Op.or]: omitted, ...rest } = part;
-      mergeObjectProperties(merged, rest);
-    } else {
-      mergeObjectProperties(merged, part);
-    }
+  if (parts.length === 0) {
+    return {};
   }
 
-  if (orClauses.length) {
-    merged[Op.or] = orClauses;
+  if (parts.length === 1) {
+    return parts[0];
   }
 
-  return merged;
+  // Use Sequelize's Op.and to properly combine all parts
+  // This ensures nested OR conditions are preserved correctly
+  return { [Op.and]: parts };
 }
 
 function processOrFilters(
@@ -645,7 +642,13 @@ function processOrFilters(
       blockFilteringOn,
       aliases
     );
-    if (subWhere && Object.keys(subWhere).length) {
+
+    // Propagate errors from nested calls
+    if (subWhere && subWhere.__error) {
+      return subWhere;
+    }
+
+    if (subWhere && Reflect.ownKeys(subWhere).length) {
       parts.push(subWhere);
     }
   }
@@ -703,7 +706,7 @@ function processImplicitAndFilters(
       return { __error: predicate.error };
     }
 
-    if (predicate && Object.keys(predicate).length) {
+    if (predicate && Reflect.ownKeys(predicate).length) {
       if (predicate.__requiredInclude) {
         requiredIncludes.push(predicate.__requiredInclude);
         delete predicate.__requiredInclude;

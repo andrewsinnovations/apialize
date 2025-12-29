@@ -2,15 +2,127 @@
 
 The `list` operation provides a GET endpoint for retrieving collections of records with filtering, sorting, and pagination support.
 
+## Table of Contents
+
+- [Basic Usage](#basic-usage)
+- [Default Usage (No Configuration)](#default-usage-no-configuration)
+- [Configuration Options](#configuration-options)
+- [Query String Parameters](#query-string-parameters)
+- [Response Format](#response-format)
+- [Examples](#examples)
+- [Model Configuration](#model-configuration)
+
 ## Basic Usage
 
 ```javascript
 const { list } = require('apialize');
 
+// Item is a sequelize model
 app.use('/items', list(Item));
 ```
 
 This creates a `GET /items` endpoint.
+
+## Default Usage (No Configuration)
+
+With no configuration, the list operation provides full functionality out of the box:
+
+### Example Request
+
+```http
+GET /items
+```
+
+### Example Response
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "name": "Laptop",
+      "category": "electronics",
+      "price": 999.99,
+      "created_at": "2025-01-15T10:30:00.000Z",
+      "updated_at": "2025-01-15T10:30:00.000Z"
+    },
+    {
+      "id": 2,
+      "name": "Headphones",
+      "category": "electronics",
+      "price": 149.99,
+      "created_at": "2025-01-16T14:20:00.000Z",
+      "updated_at": "2025-01-16T14:20:00.000Z"
+    },
+    {
+      "id": 3,
+      "name": "Coffee Maker",
+      "category": "home",
+      "price": 79.99,
+      "created_at": "2025-01-17T09:15:00.000Z",
+      "updated_at": "2025-01-17T09:15:00.000Z"
+    }
+  ],
+  "meta": {
+    "paging": {
+      "count": 3,
+      "page": 1,
+      "size": 100,
+      "total_pages": 1
+    }
+  }
+}
+```
+
+### Default Behavior
+
+| Feature | Default Value |
+|---------|---------------|
+| Page size | 100 records |
+| Order by | `id` (ascending) |
+| Filtering | All fields allowed |
+| Ordering | All fields allowed |
+
+### Example with Query Parameters
+
+Lets order by price descending, with a page size of 10.
+
+```http
+GET /items?category=electronics&api:order_by=-price&api:page_size=10
+```
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": 1,
+      "name": "Laptop",
+      "category": "electronics",
+      "price": 999.99,
+      "created_at": "2025-01-15T10:30:00.000Z",
+      "updated_at": "2025-01-15T10:30:00.000Z"
+    },
+    {
+      "id": 2,
+      "name": "Headphones",
+      "category": "electronics",
+      "price": 149.99,
+      "created_at": "2025-01-16T14:20:00.000Z",
+      "updated_at": "2025-01-16T14:20:00.000Z"
+    }
+  ],
+  "meta": {
+    "paging": {
+      "count": 2,
+      "page": 1,
+      "size": 10,
+      "total_pages": 1
+    }
+  }
+}
+```
 
 ## Configuration Options
 
@@ -22,12 +134,37 @@ list(model, options, modelOptions)
 
 ### Options Parameter
 
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `allow_filtering_on` | `Array<string>` \| `null` | `null` | Whitelist of fields that can be filtered |
+| `block_filtering_on` | `Array<string>` \| `null` | `null` | Blacklist of fields that cannot be filtered |
+| `allow_filtering` | `boolean` | `true` | Enable/disable all query string filtering |
+| `allow_ordering_on` | `Array<string>` \| `null` | `null` | Whitelist of fields that can be used for ordering |
+| `block_ordering_on` | `Array<string>` \| `null` | `null` | Blacklist of fields that cannot be used for ordering |
+| `allow_ordering` | `boolean` | `true` | Enable/disable query string ordering |
+| `default_order_by` | `string` | `'id'` | Default field to order by |
+| `default_order_dir` | `'ASC'` \| `'DESC'` | `'ASC'` | Default sort direction |
+| `default_page_size` | `number` | `100` | Default number of records per page |
+| `id_mapping` | `string` | `'id'` | Field to use as the resource identifier |
+| `meta_show_filters` | `boolean` | `false` | Include applied filters in response metadata |
+| `meta_show_ordering` | `boolean` | `false` | Include ordering info in response metadata |
+| `middleware` | `Array<Function>` | `[]` | Express middleware functions to run before the operation |
+| `pre` | `Function` \| `Array<Function>` | `null` | Hook(s) called before query execution. See [Hooks](hooks.md) |
+| `post` | `Function` \| `Array<Function>` | `null` | Hook(s) called after query execution |
+| `aliases` | `Object` | `null` | Map external field names to internal column names. See [Field Aliasing](aliasing.md) |
+| `relation_id_mapping` | `Object` \| `Array` | `null` | Configure ID mapping for related models. See [Relation ID Mapping](relation_id_mapping.md) |
+| `auto_relation_id_mapping` | `boolean` | `true` | Auto-detect ID mappings for related models. See [Relation ID Mapping](relation_id_mapping.md) |
+| `flattening` | `Object` | `null` | Configuration for flattening nested relationships. See [Flattening](flattening.md) |
+| `disable_subquery` | `boolean` | `true` | Disable subQuery for Sequelize include operations |
+
 #### Filtering Options
+
+See [Filtering](filtering.md) for detailed information on filter operators and syntax.
 
 ##### `allow_filtering_on`
 - **Type:** `Array<string>` or `null`
 - **Default:** `null` (all fields allowed)
-- **Description:** Whitelist of fields that can be filtered. When set, only these fields can be used in query string filters.
+- **Description:** Whitelist of fields that can be filtered. When set, only these fields can be used in query string filters. See [Filtering](filtering.md) for available operators.
 
 ```javascript
 app.use('/items', list(Item, {
@@ -41,7 +178,7 @@ app.use('/items', list(Item, {
 ##### `block_filtering_on`
 - **Type:** `Array<string>` or `null`
 - **Default:** `null`
-- **Description:** Blacklist of fields that cannot be filtered. Takes precedence over `allow_filtering_on`.
+- **Description:** Blacklist of fields that cannot be filtered. Takes precedence over `allow_filtering_on`. See [Filtering](filtering.md).
 
 ```javascript
 app.use('/items', list(Item, {
@@ -52,7 +189,7 @@ app.use('/items', list(Item, {
 ##### `allow_filtering`
 - **Type:** `boolean`
 - **Default:** `true`
-- **Description:** When `false`, disables all query string filtering. Users can still fetch all records but cannot filter them.
+- **Description:** When `false`, disables all query string filtering. Users can still fetch all records but cannot filter them. See [Filtering](filtering.md).
 
 ```javascript
 app.use('/items', list(Item, {
@@ -155,7 +292,7 @@ app.use('/items', list(Item, {
 ##### `meta_show_filters`
 - **Type:** `boolean`
 - **Default:** `false`
-- **Description:** Include applied filters in response metadata.
+- **Description:** Include applied filters in response metadata. See [Filtering](filtering.md) for details on filter syntax.
 
 ```javascript
 app.use('/items', list(Item, {
@@ -215,7 +352,7 @@ app.use('/items', list(Item, {
 ##### `pre`
 - **Type:** `Function` or `Array<Function>`
 - **Default:** `null`
-- **Description:** Hook(s) called before query execution. Can return data to pass to post hooks.
+- **Description:** Hook(s) called before query execution. Can return data to pass to post hooks. See [Hooks](hooks.md) for comprehensive documentation.
 
 ```javascript
 app.use('/items', list(Item, {
@@ -247,7 +384,7 @@ app.use('/items', list(Item, {
 ##### `aliases`
 - **Type:** `Object`
 - **Default:** `null`
-- **Description:** Map external field names to internal database column names.
+- **Description:** Map external field names to internal database column names. See [Field Aliasing](aliasing.md) for comprehensive documentation.
 
 ```javascript
 app.use('/items', list(Item, {
@@ -264,9 +401,9 @@ app.use('/items', list(Item, {
 #### Relation ID Mapping
 
 ##### `relation_id_mapping`
-- **Type:** `Object`
+- **Type:** `Object` or `Array`
 - **Default:** `null`
-- **Description:** Configure ID mapping for related models.
+- **Description:** Configure ID mapping for related models when filtering, ordering, or in responses. See [Relation ID Mapping](relation_id_mapping.md) for comprehensive documentation.
 
 ```javascript
 app.use('/items', list(Item, {
@@ -276,17 +413,22 @@ app.use('/items', list(Item, {
 }));
 ```
 
+##### `auto_relation_id_mapping`
+- **Type:** `boolean`
+- **Default:** `true`
+- **Description:** Automatically detect and apply ID mappings for related models that have `apialize_id` configured. See [Relation ID Mapping](relation_id_mapping.md).
+
 #### Advanced Options
 
 ##### `flattening`
 - **Type:** `Object` or `null`
 - **Default:** `null`
-- **Description:** Configuration for flattening nested relationships into the main response.
+- **Description:** Configuration for flattening nested relationships into the main response. See [Response Flattening](flattening.md) for comprehensive documentation.
 
-##### `disable_subquery_on_include_request`
+##### `disable_subquery`
 - **Type:** `boolean`
 - **Default:** `true`
-- **Description:** When true, disables subQuery for Sequelize include operations to improve performance.
+- **Description:** When true, disables subQuery for Sequelize include operations to improve performance. Also accepts the longer form `disable_subquery_on_include_request`.
 
 ### Model Options Parameter
 
@@ -309,6 +451,8 @@ app.use('/items', list(Item, {}, {
 ## Query String Parameters
 
 ### Filtering
+
+See [Filtering](filtering.md) for comprehensive documentation on filter operators and syntax.
 
 Basic equality filter:
 ```

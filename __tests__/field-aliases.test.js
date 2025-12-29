@@ -148,7 +148,7 @@ describe('Field Aliases', () => {
       expect(response.body.data[2].age).toBe(25);
     });
 
-    it('should work with allowFilteringOn using aliased names', async () => {
+    it('should work with allow_filtering_on using aliased names', async () => {
       const { Person, app } = await buildAppAndModels();
       await seedData(Person);
 
@@ -161,7 +161,7 @@ describe('Field Aliases', () => {
         '/persons',
         list(Person, {
           aliases,
-          allowFilteringOn: ['name'], // Use external alias name
+          allow_filtering_on: ['name'], // Use external alias name
         })
       );
 
@@ -185,7 +185,7 @@ describe('Field Aliases', () => {
         '/persons',
         list(Person, {
           aliases,
-          blockFilteringOn: ['email'], // Use external alias name
+          block_filtering_on: ['email'], // Use external alias name
         })
       );
 
@@ -195,7 +195,7 @@ describe('Field Aliases', () => {
       expect(response.status).toBe(400);
     });
 
-    it('should work with allowOrderingOn using aliased names', async () => {
+    it('should work with allow_ordering_on using aliased names', async () => {
       const { Person, app } = await buildAppAndModels();
       await seedData(Person);
 
@@ -208,7 +208,7 @@ describe('Field Aliases', () => {
         '/persons',
         list(Person, {
           aliases,
-          allowOrderingOn: ['name'], // Use external alias name
+          allow_ordering_on: ['name'], // Use external alias name
         })
       );
 
@@ -219,7 +219,7 @@ describe('Field Aliases', () => {
       expect(response2.status).toBe(400);
     });
 
-    it('should work with blockOrderingOn using aliased names', async () => {
+    it('should work with block_ordering_on using aliased names', async () => {
       const { Person, app } = await buildAppAndModels();
       await seedData(Person);
 
@@ -231,7 +231,7 @@ describe('Field Aliases', () => {
         '/persons',
         list(Person, {
           aliases,
-          blockOrderingOn: ['email'], // Use external alias name
+          block_ordering_on: ['email'], // Use external alias name
         })
       );
 
@@ -408,7 +408,7 @@ describe('Field Aliases', () => {
       expect(response.body.data[2].age).toBe(35);
     });
 
-    it('should work with allowOrderingOn using aliased names', async () => {
+    it('should work with allow_ordering_on using aliased names', async () => {
       const { Person, app } = await buildAppAndModels();
       await seedData(Person);
 
@@ -421,7 +421,7 @@ describe('Field Aliases', () => {
         '/persons',
         search(Person, {
           aliases,
-          allowOrderingOn: ['name'], // Use external alias name
+          allow_ordering_on: ['name'], // Use external alias name
           path: '/',
         })
       );
@@ -441,7 +441,7 @@ describe('Field Aliases', () => {
       expect(response2.status).toBe(400);
     });
 
-    it('should work with blockOrderingOn using aliased names', async () => {
+    it('should work with block_ordering_on using aliased names', async () => {
       const { Person, app } = await buildAppAndModels();
       await seedData(Person);
 
@@ -453,7 +453,7 @@ describe('Field Aliases', () => {
         '/persons',
         search(Person, {
           aliases,
-          blockOrderingOn: ['email'], // Use external alias name
+          block_ordering_on: ['email'], // Use external alias name
           path: '/',
         })
       );

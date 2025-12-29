@@ -49,7 +49,7 @@ async function buildAppAndModels() {
     '/albums',
     search(
       Album,
-      { metaShowOrdering: true },
+      { meta_show_ordering: true },
       {
         include: [
           {

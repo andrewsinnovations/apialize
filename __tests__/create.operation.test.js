@@ -33,7 +33,7 @@ async function build({
     '/items',
     list(
       Item,
-      { metaShowFilters: true, metaShowOrdering: true },
+      { meta_show_filters: true, meta_show_ordering: true },
       listModelOptions
     )
   );
