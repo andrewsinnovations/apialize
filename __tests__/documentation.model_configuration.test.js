@@ -191,8 +191,8 @@ describe('Documentation - Model Configuration Examples', () => {
                 default_page_size: 50,
                 default_order_by: 'name',
                 default_order_dir: 'ASC',
-                orderable_fields: ['name', 'created_at'],
-                filterable_fields: ['status', 'category'],
+                allow_ordering_on: ['name', 'created_at'],
+                allow_filtering_on: ['status', 'category'],
               },
             },
             single: {
@@ -260,15 +260,15 @@ describe('Documentation - Model Configuration Examples', () => {
             list: {
               default: {
                 default_page_size: 20,
-                filterable_fields: ['status'],
+                allow_filtering_on: ['status'],
               },
               admin: {
                 default_page_size: 100,
-                filterable_fields: ['status', 'category'],
+                allow_filtering_on: ['status', 'category'],
               },
               public: {
                 default_page_size: 10,
-                filterable_fields: ['status'],
+                allow_filtering_on: ['status'],
               },
             },
             single: {
@@ -507,11 +507,11 @@ describe('Documentation - Model Configuration Examples', () => {
                 default_page_size: 25,
                 default_order_by: 'created_at',
                 default_order_dir: 'DESC',
-                filterable_fields: ['status'],
+                allow_filtering_on: ['status'],
               },
               admin: {
                 default_page_size: 100,
-                filterable_fields: ['status', 'tenant_id'],
+                allow_filtering_on: ['status', 'tenant_id'],
                 pre: [], // Override global pre-hook for admins
               },
             },
@@ -599,14 +599,14 @@ describe('Documentation - Model Configuration Examples', () => {
         list: {
           public: {
             default_page_size: 10,
-            filterable_fields: ['category'],
+            allow_filtering_on: ['category'],
             model_options: {
               scopes: ['published'],
             },
           },
           admin: {
             default_page_size: 50,
-            filterable_fields: ['status', 'category', 'author_id'],
+            allow_filtering_on: ['status', 'category', 'author_id'],
             model_options: {
               scopes: [],
             },
@@ -772,7 +772,7 @@ describe('Documentation - Model Configuration Examples', () => {
             list: {
               default: {
                 default_page_size: 50,
-                filterable_fields: ['status'],
+                allow_filtering_on: ['status'],
               },
             },
           },

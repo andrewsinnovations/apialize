@@ -96,8 +96,8 @@ Configure Apialize-specific behaviors:
 | `id_mapping` | string | Use a different field as the resource identifier | single, update, patch, destroy |
 | `middleware` | array | Custom middleware functions for hooks | All operations |
 | `default_page_size` | number | Default number of records per page | list, search |
-| `filterable_fields` | array | Fields that can be used in filters | list, search |
-| `orderable_fields` | array | Fields that can be used for sorting | list, search |
+| `allow_filtering_on` | array | Fields that can be used in filters | list, search |
+| `allow_ordering_on` | array | Fields that can be used for sorting | list, search |
 | `relation_id_mapping` | object | Map relationship IDs to custom fields | create, update, patch |
 | `field_aliases` | object | Map external field names to database columns | All operations |
 
@@ -121,8 +121,8 @@ app.use('/items', list(Item,
   {
     middleware: [authMiddleware],
     default_page_size: 25,
-    filterable_fields: ['category', 'status'],
-    orderable_fields: ['created_at', 'name']
+    allow_filtering_on: ['category', 'status'],
+    allow_ordering_on: ['created_at', 'name']
   },
   // Model options
   {

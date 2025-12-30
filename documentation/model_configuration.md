@@ -103,8 +103,8 @@ const Product = sequelize.define('Product', { /* ... */ }, {
         default_page_size: 50,
         default_order_by: 'name',
         default_order_dir: 'ASC',
-        orderable_fields: ['name', 'created_at'],
-        filterable_fields: ['status', 'category']
+        allow_ordering_on: ['name', 'created_at'],
+        allow_filtering_on: ['status', 'category']
       }
     },
     single: {
@@ -144,12 +144,12 @@ const Product = sequelize.define('Product', { /* ... */ }, {
       default: {
         // Standard list endpoint
         default_page_size: 20,
-        filterable_fields: ['status']
+        allow_filtering_on: ['status']
       },
       admin: {
         // Admin list endpoint with more options
         default_page_size: 100,
-        filterable_fields: ['status', 'category', 'supplier_id'],
+        allow_filtering_on: ['status', 'category', 'supplier_id'],
         model_options: {
           scopes: ['withDeleted']  // Include soft-deleted records
         }
@@ -157,7 +157,7 @@ const Product = sequelize.define('Product', { /* ... */ }, {
       public: {
         // Public API with restrictions
         default_page_size: 10,
-        filterable_fields: ['status'],
+        allow_filtering_on: ['status'],
         model_options: {
           scopes: ['published']  // Only published products
         }
@@ -281,10 +281,10 @@ These options can be set in `default` or any operation:
 - `default_page_size` - Default number of records per page
 - `default_order_by` - Default field to order by
 - `default_order_dir` - Default order direction (`'ASC'` or `'DESC'`)
-- `orderable_fields` - Array of fields that can be used for sorting
-- `filterable_fields` - Array of fields that can be filtered
+- `allow_ordering_on` - Array of fields that can be used for sorting
+- `allow_filtering_on` - Array of fields that can be filtered
 - `meta_show_ordering` - Include ordering info in response metadata
-- `meta_show_filtering` - Include filtering info in response metadata
+- `meta_show_filters` - Include filtering info in response metadata
 
 ### Single Operation
 
@@ -323,11 +323,11 @@ const Order = sequelize.define('Order', {
         default_page_size: 25,
         default_order_by: 'created_at',
         default_order_dir: 'DESC',
-        filterable_fields: ['status']
+        allow_filtering_on: ['status']
       },
       admin: {
         default_page_size: 100,
-        filterable_fields: ['status', 'tenant_id'],  // Admins can filter by tenant
+        allow_filtering_on: ['status', 'tenant_id'],  // Admins can filter by tenant
         pre: []  // Override global pre-hook for admins
       }
     },
@@ -363,14 +363,14 @@ const Article = sequelize.define('Article', {
     list: {
       public: {
         default_page_size: 10,
-        filterable_fields: ['category'],
+        allow_filtering_on: ['category'],
         model_options: {
           scopes: ['published']  // Only show published articles
         }
       },
       admin: {
         default_page_size: 50,
-        filterable_fields: ['status', 'category', 'author_id'],
+        allow_filtering_on: ['status', 'category', 'author_id'],
         model_options: {
           scopes: []  // Show all articles
         }
@@ -467,7 +467,7 @@ const Product = sequelize.define('Product', { /* ... */ }, {
     list: {
       default: {
         default_page_size: 50,
-        filterable_fields: ['status']
+        allow_filtering_on: ['status']
       }
     }
   }
@@ -499,6 +499,6 @@ app.use('/products', list(Product));  // Uses page_size: 50
 ## See Also
 
 - [Hooks](hooks.md) - Detailed information about pre and post hooks
-- [Filtering](filtering.md) - How to configure filterable fields
+- [Filtering](filtering.md) - How to configure filtering
 - [Relation ID Mapping](relation_id_mapping.md) - Mapping external IDs for relationships
 - [Context Helpers](context_helpers.md) - Helper functions available in hooks
