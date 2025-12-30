@@ -304,7 +304,7 @@ describe('single() with related models', () => {
               model: Post,
               options: {
                 allowFiltering: false,
-                defaultPageSize: 5,
+                default_page_size: 5,
               },
               operations: ['list'],
             },
@@ -334,7 +334,7 @@ describe('single() with related models', () => {
       const postsRes = await request(app).get(`/users/${userId}/posts`);
       expect(postsRes.status).toBe(200);
       expect(postsRes.body.success).toBe(true);
-      expect(postsRes.body.data).toHaveLength(5); // Should be limited by defaultPageSize
+      expect(postsRes.body.data).toHaveLength(5); // Should be limited by default_page_size
       expect(postsRes.body.meta.paging.size).toBe(5);
       expect(postsRes.body.meta.paging.total_pages).toBe(2);
     });

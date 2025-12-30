@@ -24,7 +24,7 @@ async function build({ createOptions = {}, listModelOptions = {} } = {}) {
   const app = express();
   app.use(bodyParser.json());
   app.use('/items', create(Item, createOptions));
-  app.use('/items', list(Item, { metaShowFilters: true }, listModelOptions));
+  app.use('/items', list(Item, { meta_show_filters: true }, listModelOptions));
   return { sequelize, Item, app };
 }
 

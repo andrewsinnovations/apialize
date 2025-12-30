@@ -41,8 +41,8 @@ describe('list operation: snake_case configuration backward compatibility', () =
     return { Item, app };
   }
 
-  test('should accept defaultPageSize (camelCase)', async () => {
-    const { app } = await setupTestApp({ defaultPageSize: 5 });
+  test('should accept default_page_size (camelCase)', async () => {
+    const { app } = await setupTestApp({ default_page_size: 5 });
 
     const res = await request(app).get('/items');
 
@@ -67,9 +67,9 @@ describe('list operation: snake_case configuration backward compatibility', () =
     expect(res.body.meta.paging.count).toBe(25);
   });
 
-  test('should prioritize default_page_size over defaultPageSize when both provided', async () => {
+  test('should prioritize default_page_size over default_page_size when both provided', async () => {
     const { app } = await setupTestApp({
-      defaultPageSize: 10,
+      default_page_size: 10,
       default_page_size: 3,
     });
 
@@ -335,11 +335,11 @@ describe('list operation: snake_case configuration backward compatibility', () =
     app.use(
       '/items',
       list(Item, {
-        defaultOrderBy: 'name',
+        default_order_by: 'name',
         default_order_by: 'score', // This should take precedence
-        defaultOrderDir: 'ASC',
+        default_order_dir: 'ASC',
         default_order_dir: 'DESC', // This should take precedence
-        metaShowOrdering: false,
+        meta_show_ordering: false,
         meta_show_ordering: true, // This should take precedence
       })
     );

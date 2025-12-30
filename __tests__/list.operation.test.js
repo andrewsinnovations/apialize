@@ -83,7 +83,7 @@ describe('list operation: comprehensive options coverage', () => {
 
   test('filtering by simple columns (category)', async () => {
     const ctx = await buildAppAndModel({
-      listOptions: { metaShowFilters: true },
+      listOptions: { meta_show_filters: true },
     });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
@@ -98,13 +98,13 @@ describe('list operation: comprehensive options coverage', () => {
     expect(res.status).toBe(200);
     expect(res.body.meta.paging.count).toBe(2);
     expect(names(res)).toEqual(['A1', 'A2']);
-    // meta.filtering included when metaShowFilters is true
+    // meta.filtering included when meta_show_filters is true
     expect(res.body.meta.filtering).toEqual({ category: 'A' });
   });
 
   test('ordering by one and multiple fields with global direction', async () => {
     const ctx = await buildAppAndModel({
-      listOptions: { metaShowOrdering: true },
+      listOptions: { meta_show_ordering: true },
     });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
@@ -177,7 +177,7 @@ describe('list operation: comprehensive options coverage', () => {
 
   test('colon operators: icontains, gte, and in', async () => {
     const ctx = await buildAppAndModel({
-      listOptions: { metaShowFilters: true },
+      listOptions: { meta_show_filters: true },
     });
     sequelize = ctx.sequelize;
     const { Item, app } = ctx;
@@ -350,10 +350,10 @@ describe('list operation: comprehensive options coverage', () => {
 
     await sequelize.close();
 
-    // allowOrdering: false should ignore query orderby and use model config or default order
+    // allow_ordering: false should ignore query orderby and use model config or default order
     const ctx2 = await buildAppAndModel({
       modelApialize: { orderby: 'name', orderdir: 'DESC' },
-      listOptions: { allowOrdering: false },
+      listOptions: { allow_ordering: false },
     });
     sequelize = ctx2.sequelize;
     const { Item: Item2, app: app2 } = ctx2;
@@ -371,7 +371,7 @@ describe('list operation: comprehensive options coverage', () => {
 
   test('listing by external id uses external_id as id and supports filtering', async () => {
     const ctx = await buildAppAndModel({
-      listOptions: { defaultOrderBy: 'external_id', metaShowOrdering: true },
+      listOptions: { default_order_by: 'external_id', meta_show_ordering: true },
       // Alias external_id to id so clients consume uuid as the id field
       modelOptions: {
         attributes: [['external_id', 'id'], 'name', 'category', 'score'],
@@ -385,7 +385,7 @@ describe('list operation: comprehensive options coverage', () => {
       { external_id: 'c-uuid', name: 'Cee', category: 'B', score: 3 },
     ]);
 
-    // With no api:order_by, list should use defaultOrderBy external_id ASC
+    // With no api:order_by, list should use default_order_by external_id ASC
     const res = await request(app).get('/items');
     expect(res.status).toBe(200);
     expect(names(res)).toEqual(['Aye', 'Bee', 'Cee']);

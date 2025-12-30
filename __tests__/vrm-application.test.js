@@ -1684,7 +1684,7 @@ describe('VRM Multi-Tenant Application', () => {
           '/test-customers',
           search(db.models.Customer, {
             middleware: authAndScope,
-            metaShowOrdering: true,
+            meta_show_ordering: true,
           })
         );
 
@@ -2053,8 +2053,8 @@ describe('VRM Multi-Tenant Application', () => {
       });
     });
 
-    describe('disableSubqueryOnIncludeRequest', () => {
-      test('disableSubqueryOnIncludeRequest: false enables subquery optimization', async () => {
+    describe('disable_subquery', () => {
+      test('disable_subquery: false enables subquery optimization', async () => {
         // Create test data with one-to-many relationship
         const customer = await db.models.Customer.create({
           organizationId: org.id,
@@ -2144,14 +2144,14 @@ describe('VRM Multi-Tenant Application', () => {
           next();
         };
 
-        // With disableSubqueryOnIncludeRequest: false, Sequelize may use subqueries
+        // With disable_subquery: false, Sequelize may use subqueries
         testApp.use(
           '/test-services',
           list(
             db.models.ServiceRecord,
             {
               middleware: [requireAuth, serviceRecordScopeMiddleware],
-              disableSubqueryOnIncludeRequest: false,
+              disable_subquery: false,
             },
             {
               include: [

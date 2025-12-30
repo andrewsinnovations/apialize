@@ -4,7 +4,7 @@ const request = require('supertest');
 const { Sequelize, DataTypes } = require('sequelize');
 const { search, list } = require('../src');
 
-describe('disableSubqueryOnIncludeRequest configuration', () => {
+describe('disable_subquery configuration', () => {
   let sequelize;
 
   afterEach(async () => {
@@ -159,9 +159,9 @@ describe('disableSubqueryOnIncludeRequest configuration', () => {
       Book.findAndCountAll = originalFindAndCountAll;
     });
 
-    test('should allow subQuery when disableSubqueryOnIncludeRequest is false', async () => {
+    test('should allow subQuery when disable_subquery is false', async () => {
       const { app, Book, Author } = await buildAppAndModels({
-        disableSubqueryOnIncludeRequest: false,
+        disable_subquery: false,
       });
       await seedData(Book, Author);
 

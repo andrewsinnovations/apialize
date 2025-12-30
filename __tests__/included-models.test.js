@@ -195,7 +195,7 @@ describe('included models filtering and ordering for list and search operations'
         '/albums',
         list(
           Album,
-          { metaShowOrdering: true },
+          { meta_show_ordering: true },
           { include: [{ model: Artist, as: 'artist' }] }
         )
       );
@@ -203,7 +203,7 @@ describe('included models filtering and ordering for list and search operations'
         '/albums',
         search(
           Album,
-          { metaShowOrdering: true },
+          { meta_show_ordering: true },
           { include: [{ model: Artist, as: 'artist' }] }
         )
       );
@@ -379,7 +379,7 @@ describe('included models filtering and ordering for list and search operations'
 
       app.use(
         '/albums',
-        list(Album, { metaShowOrdering: true }, includeConfig)
+        list(Album, { meta_show_ordering: true }, includeConfig)
       );
       app.use('/albums', search(Album, {}, includeConfig));
 
