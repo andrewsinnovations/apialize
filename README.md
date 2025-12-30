@@ -1,6 +1,6 @@
-# apialize
+# Apialize
 
-Turn a database model into a production ready REST(ish) CRUD API in a few lines.
+**Apialize** transforms Sequelize database models into production-ready REST APIs with minimal configuration. Build complete CRUD endpoints with filtering, pagination, relationships, and hooks in just a few lines of code.
 
 ## Installation
 
@@ -8,12 +8,27 @@ Turn a database model into a production ready REST(ish) CRUD API in a few lines.
 npm install apialize
 ```
 
+## What Does Apialize Do?
+
+Apialize creates production-ready REST API endpoints directly from your Sequelize models with minimal code. Simply pass your model to an operation function, and you get a fully functional endpoint with extensive configuration options:
+
+- **Easy Setup**: Transform models into API endpoints in a single line of code
+- **Flexible Configuration**: Customize behavior with dozens of options for filtering, pagination, field control, and more
+- **Granular Control**: Choose exactly which operations to expose for each resource
+- **Advanced Filtering**: Query by any field with support for operators and predicates  
+- **Relationship Handling**: Automatically include related models and manage foreign keys
+- **Custom ID Fields**: Use UUIDs or any field as resource identifiers
+- **Middleware Hooks**: Add authentication, validation, and transformation logic at any point
+- **Field Mapping**: Alias external API field names to internal database columns
+- **Nested Flattening**: Flatten relationships into parent responses for cleaner APIs
+- **Complex Search**: Build sophisticated queries with multiple filters and conditions
+
 ## Quick Start
 
 ```javascript
 const express = require('express');
 const { Sequelize, DataTypes } = require('sequelize');
-const { crud } = require('apialize');
+const { list, single, create, update, patch, destroy } = require('apialize');
 
 const sequelize = new Sequelize('sqlite::memory:');
 const User = sequelize.define('User', {
@@ -26,304 +41,100 @@ await sequelize.sync();
 
 const app = express();
 app.use(express.json());
-app.use('/users', crud(User));
+
+// Mount individual operations with full control
+app.use('/users', list(User));
+app.use('/users', single(User));
+app.use('/users', create(User));
+app.use('/users', patch(User));
+app.use('/users', destroy(User));
+
 app.listen(3000);
 ```
 
-This creates a full REST API with the following endpoints:
-- `GET /users` - List all users
-- `GET /users/:id` - Get a single user
-- `POST /users` - Create a user
-- `PUT /users/:id` - Update a user (full replace)
-- `PATCH /users/:id` - Partially update a user
-- `DELETE /users/:id` - Delete a user
-- `POST /users/search` - Search users with filters
+Each operation gives you precise control over your API endpoints!
 
-## Documentation
+## Available Operations & Endpoints
 
-- [List Operation](./documentation/list.md) - Complete guide to filtering, sorting, and pagination
+Apialize provides individual operation functions that give you precise control over which endpoints to expose.
 
-## Basic Usage
+| Operation | HTTP Method & Endpoint | Description | Documentation |
+|-----------|----------------------|-------------|---------------|
+| **list** | `GET /resource` | List all records with filtering, sorting, and pagination | [List Documentation](./documentation/list.md) |
+| **single** | `GET /resource/:id` | Get a single record by ID | [Single Documentation](./documentation/single.md) |
+| **create** | `POST /resource` | Create a new record | [Create Documentation](./documentation/create.md) |
+| **update** | `PUT /resource/:id` | Replace a record (full update) | [Update Documentation](./documentation/update.md) |
+| **patch** | `PATCH /resource/:id` | Partially update a record | [Patch Documentation](./documentation/patch.md) |
+| **destroy** | `DELETE /resource/:id` | Delete a record | [Destroy Documentation](./documentation/destroy.md) |
+| **search** | `POST /resource/search` | Advanced search with complex filters | [Search Documentation](./documentation/search.md) |
 
-### List Operation
-
-List all records with filtering, sorting, and pagination support. [Full documentation](./documentation/list.md)
-
-```javascript
-const { list } = require('apialize');
-
-app.use('/items', list(Item));
-```
-
-**Example Request:**
-```bash
-GET /items
-GET /items?category=A&page=1&page_size=10
-```
-
-**Example Response:**
-```json
-{
-  "success": true,
-  "data": [
-    { "id": 1, "name": "Item 1", "category": "A" },
-    { "id": 2, "name": "Item 2", "category": "A" }
-  ],
-  "meta": {
-    "paging": {
-      "count": 2,
-      "page": 1,
-      "page_size": 10
-    }
-  }
-}
-```
-
-### Single Operation
-
-Get a single record by ID.
+### Using Individual Operations
 
 ```javascript
-const { single } = require('apialize');
+const { list, single, create, update, patch, destroy, search } = require('apialize');
 
-app.use('/users', single(User));
+// Mount only the operations you need
+app.use('/users', list(User));        // GET /users
+app.use('/users', single(User));      // GET /users/:id
+app.use('/users', create(User));      // POST /users
+app.use('/users', update(User));      // PUT /users/:id
+app.use('/users', patch(User));       // PATCH /users/:id
+app.use('/users', destroy(User));     // DELETE /users/:id
+app.use('/users', search(User));      // POST /users/search
 ```
 
-**Example Request:**
-```bash
-GET /users/1
-```
+## Configuration Options
 
-**Example Response:**
-```json
-{
-  "success": true,
-  "record": {
-    "id": 1,
-    "name": "Alice"
-  }
-}
-```
+Apialize accepts two types of configuration: **Apialize Options** and **Model Options**.
 
-### Create Operation
+### Apialize Options
 
-Create a new record.
+Configure Apialize-specific behaviors:
 
-```javascript
-const { create } = require('apialize');
-
-app.use('/items', create(Item));
-```
-
-**Example Request:**
-```bash
-POST /items
-Content-Type: application/json
-
-{
-  "external_id": "uuid-123",
-  "name": "New Item",
-  "desc": "Description"
-}
-```
-
-**Example Response:**
-```json
-{
-  "success": true,
-  "id": 1
-}
-```
-
-### Update Operation
-
-Update a record (full replace - unspecified fields reset to defaults/null).
-
-```javascript
-const { update } = require('apialize');
-
-app.use('/items', update(Item));
-```
-
-**Example Request:**
-```bash
-PUT /items/1
-Content-Type: application/json
-
-{
-  "name": "Updated Name",
-  "external_id": "uuid-123"
-}
-```
-
-**Example Response:**
-```json
-{
-  "success": true,
-  "id": "1"
-}
-```
-
-### Patch Operation
-
-Partially update a record (only modifies provided fields).
-
-```javascript
-const { patch } = require('apialize');
-
-app.use('/items', patch(Item));
-```
-
-**Example Request:**
-```bash
-PATCH /items/1
-Content-Type: application/json
-
-{
-  "name": "Updated Name"
-}
-```
-
-**Example Response:**
-```json
-{
-  "success": true,
-  "id": "1"
-}
-```
-
-### Destroy Operation
-
-Delete a record.
-
-```javascript
-const { destroy } = require('apialize');
-
-app.use('/items', destroy(Item));
-```
-
-**Example Request:**
-```bash
-DELETE /items/1
-```
-
-**Example Response:**
-```json
-{
-  "success": true,
-  "id": "1"
-}
-```
-
-### Search Operation
-
-Search records with advanced filtering and predicates.
-
-```javascript
-const { search } = require('apialize');
-
-app.use('/items', search(Item));
-```
-
-**Example Request:**
-```bash
-POST /items/search
-Content-Type: application/json
-
-{
-  "filters": {
-    "category": "A",
-    "active": true
-  },
-  "page": 1,
-  "page_size": 10
-}
-```
-
-**Example Response:**
-```json
-{
-  "success": true,
-  "data": [
-    { "id": 1, "name": "Item 1", "category": "A", "active": true }
-  ],
-  "meta": {
-    "paging": {
-      "count": 1,
-      "page": 1,
-      "page_size": 10
-    }
-  }
-}
-```
-
-## Options
-
-### ID Mapping
-
-Use a different field as the resource identifier:
-
-```javascript
-// Use external_id instead of id
-app.use('/users', single(User, { id_mapping: 'external_id' }));
-app.use('/users', create(User, { id_mapping: 'external_id' }));
-```
-
-Now you can access: `GET /users/uuid-123` instead of `GET /users/1`
+| Option | Type | Description | Applies To |
+|--------|------|-------------|------------|
+| `id_mapping` | string | Use a different field as the resource identifier | single, update, patch, destroy |
+| `middleware` | array | Custom middleware functions for hooks | All operations |
+| `default_page_size` | number | Default number of records per page | list, search |
+| `filterable_fields` | array | Fields that can be used in filters | list, search |
+| `orderable_fields` | array | Fields that can be used for sorting | list, search |
+| `relation_id_mapping` | object | Map relationship IDs to custom fields | create, update, patch |
+| `field_aliases` | object | Map external field names to database columns | All operations |
 
 ### Model Options
 
-Control which fields are returned or can be modified:
+Standard Sequelize query options:
+
+| Option | Type | Description | Applies To |
+|--------|------|-------------|------------|
+| `attributes` | array | Control which fields are returned | list, single, search |
+| `fields` | array | Control which fields can be set | create, update, patch |
+| `include` | array | Include related models | list, single, search |
+| `where` | object | Apply fixed filters | list, search |
+| `scope` | string | Use a Sequelize scope | All operations |
+
+### Example: Combined Configuration
 
 ```javascript
-// Only return specific fields
-app.use('/users', single(User, {}, { 
-  attributes: ['id', 'name'] 
-}));
-
-// Control which fields can be set on create
-app.use('/items', create(Item, {}, { 
-  fields: ['external_id', 'name', 'desc'] 
-}));
-```
-
-### Middleware
-
-Add custom middleware for authentication, validation, or field manipulation:
-
-```javascript
-const authMiddleware = (req, res, next) => {
-  // Add authentication logic
-  req.apialize.apply_where({ user_id: req.user.id });
-  next();
-};
-
-app.use('/items', list(Item, { middleware: [authMiddleware] }));
-```
-
-### CRUD with All Operations
-
-Mount all operations at once:
-
-```javascript
-const { crud } = require('apialize');
-
-// Simple: all operations with defaults
-app.use('/users', crud(User));
-
-// With options: customize individual operations
-app.use('/items', crud(Item, {
-  middleware: [authMiddleware],
-  routes: {
-    list: { middleware: [cacheMiddleware] },
-    create: { middleware: [validationMiddleware] }
+app.use('/items', list(Item, 
+  // Apialize options
+  {
+    middleware: [authMiddleware],
+    default_page_size: 25,
+    filterable_fields: ['category', 'status'],
+    orderable_fields: ['created_at', 'name']
+  },
+  // Model options
+  {
+    attributes: ['id', 'name', 'category', 'status'],
+    include: [{ model: User, as: 'owner' }]
   }
-}));
+));
 ```
 
-## Advanced Features
+## Common Use Cases
 
-### Scoping and Filtering
+### Authentication & Scoping
 
 Automatically scope queries to the current user:
 
@@ -336,21 +147,68 @@ const scopeToUser = (req, res, next) => {
 app.use('/items', list(Item, { middleware: [scopeToUser] }));
 ```
 
-### Field Manipulation
+### Custom ID Fields
 
-Modify values before saving:
+Use UUIDs or external IDs instead of auto-increment IDs:
 
 ```javascript
-const prependPrefix = (req, res, next) => {
-  req.apialize.values = {
-    ...req.apialize.values,
-    name: 'PREFIX-' + req.apialize.values.name
-  };
-  next();
-};
-
-app.use('/items', create(Item, { middleware: [prependPrefix] }));
+app.use('/users', single(User, { id_mapping: 'external_id' }));
+// Access: GET /users/uuid-abc-123
 ```
+
+### Field Aliases
+
+Map external API field names to database columns:
+
+```javascript
+app.use('/users', list(User, {
+  field_aliases: {
+    'external_name': 'name',
+    'user_email': 'email'
+  }
+}));
+// Query: GET /users?external_name=John
+```
+
+### Including Relationships
+
+Automatically include related models:
+
+```javascript
+app.use('/posts', list(Post, {}, {
+  include: [
+    { model: User, as: 'author' },
+    { model: Comment, as: 'comments' }
+  ]
+}));
+```
+
+### Relationship ID Mapping
+
+Allow setting relationships by custom ID fields:
+
+```javascript
+app.use('/posts', create(Post, {
+  relation_id_mapping: {
+    'author': 'external_id'
+  }
+}));
+// POST /posts { "author_id": "uuid-123", ... }
+```
+
+## Advanced Features
+
+For detailed information on advanced features, see the full documentation:
+
+- **[Hooks & Middleware](./documentation/hooks.md)**: Add custom logic before and after operations
+- **[Filtering](./documentation/filtering.md)**: Complex query filters and operators
+- **[Flattening](./documentation/flattening.md)**: Flatten nested relationships into parent responses
+- **[Field Aliases](./documentation/aliasing.md)**: Map external to internal field names
+- **[Relation ID Mapping](./documentation/relation_id_mapping.md)**: Use custom fields for relationships
+- **[Model Configuration](./documentation/model_configuration.md)**: Configure default behaviors per model
+- **[Context Helpers](./documentation/context_helpers.md)**: Utilities for middleware and hooks
+- **[Single Member Routes](./documentation/single_member_routes.md)**: Custom routes for single resources
+- **[Single Related Models](./documentation/single_related_models.md)**: Access related resources directly
 
 ## License
 
@@ -359,3 +217,29 @@ MIT
 ## Repository
 
 https://github.com/andrewsinnovations/apialize
+
+---
+
+## Complete Documentation Reference
+
+### Core Operations
+- [index.md](./documentation/index.md) - Overview and introduction
+- [crud.md](./documentation/crud.md) - Complete CRUD operations (all endpoints at once)
+- [list.md](./documentation/list.md) - List operation (GET collection)
+- [single.md](./documentation/single.md) - Single record retrieval (GET by ID)
+- [create.md](./documentation/create.md) - Create operation (POST)
+- [update.md](./documentation/update.md) - Update operation (PUT - full replace)
+- [patch.md](./documentation/patch.md) - Patch operation (PATCH - partial update)
+- [destroy.md](./documentation/destroy.md) - Delete operation (DELETE)
+- [search.md](./documentation/search.md) - Advanced search (POST with filters)
+
+### Advanced Features
+- [filtering.md](./documentation/filtering.md) - Query filtering and operators
+- [hooks.md](./documentation/hooks.md) - Middleware and lifecycle hooks
+- [aliasing.md](./documentation/aliasing.md) - Field name aliasing
+- [flattening.md](./documentation/flattening.md) - Flatten nested relationships
+- [relation_id_mapping.md](./documentation/relation_id_mapping.md) - Custom relationship identifiers
+- [model_configuration.md](./documentation/model_configuration.md) - Per-model default configuration
+- [context_helpers.md](./documentation/context_helpers.md) - Request context utilities
+- [single_member_routes.md](./documentation/single_member_routes.md) - Custom single resource routes
+- [single_related_models.md](./documentation/single_related_models.md) - Direct access to related resources
