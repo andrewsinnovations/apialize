@@ -21,7 +21,10 @@
     "crud-operations"
   ],
   "author": "David Andrews <david@andrewsinnovations.com>",
-  "repository": "github:andrewsinnovations/apialize",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andrewsinnovations/apialize.git"
+  },
   "scripts": {
     "test": "jest --runInBand",
     "format": "prettier --write ."
