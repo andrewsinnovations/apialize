@@ -199,11 +199,11 @@ function setupRelatedEndpoints(
         }
 
         const hasGetMethod = parent.get;
-        if (hasGetMethod) {
-          return parent.get('id');
-        }
-
-        return parent.id;
+        const rawId = hasGetMethod ? parent.get('id') : parent.id;
+        
+        // Coerce the retrieved ID to match the parent model's ID type
+        // This handles BIGINT returned as string from PostgreSQL
+        return coerceToFieldType(rawId, parentModel, 'id');
       } catch (error) {
         return null;
       }

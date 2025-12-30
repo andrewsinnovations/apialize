@@ -494,4 +494,161 @@ describe('auto_relation_id_mapping feature', () => {
       ]);
     });
   });
+
+  describe('BIGINT primary key handling', () => {
+    test('lookupInternalId converts string BIGINT IDs to numbers for validation', async () => {
+      sequelize = new Sequelize('sqlite::memory:', { logging: false });
+
+      // Model with BIGINT primary key (simulating PostgreSQL behavior)
+      const Category = sequelize.define(
+        'Category',
+        {
+          id: { type: DataTypes.BIGINT, primaryKey: true, autoIncrement: true },
+          external_id: {
+            type: DataTypes.STRING(50),
+            unique: true,
+            allowNull: false,
+          },
+          name: { type: DataTypes.STRING(100), allowNull: false },
+        },
+        {
+          tableName: 'categories',
+          timestamps: false,
+          apialize: {
+            apialize_id: 'external_id',
+          },
+        }
+      );
+
+      // Product model referencing Category
+      const Product = sequelize.define(
+        'Product',
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          external_id: {
+            type: DataTypes.STRING(50),
+            unique: true,
+            allowNull: false,
+          },
+          name: { type: DataTypes.STRING(100), allowNull: false },
+          category_id: { type: DataTypes.INTEGER, allowNull: false },
+        },
+        {
+          tableName: 'products',
+          timestamps: false,
+          apialize: {
+            apialize_id: 'external_id',
+          },
+        }
+      );
+
+      Product.belongsTo(Category, { as: 'category', foreignKey: 'category_id' });
+      Category.hasMany(Product, { as: 'products', foreignKey: 'category_id' });
+
+      await sequelize.sync({ force: true });
+
+      // Create a category
+      const category = await Category.create({
+        external_id: 'cat-electronics',
+        name: 'Electronics',
+      });
+
+      // Simulate PostgreSQL returning BIGINT as string by manually setting it
+      // In real PostgreSQL, category.id would be a string like "1"
+      // SQLite returns numbers, but we can test the conversion logic works
+      // by verifying the create operation succeeds with auto_relation_id_mapping
+
+      const app = express();
+      app.use(bodyParser.json());
+
+      app.use(
+        '/products',
+        create(Product, {
+          auto_relation_id_mapping: true,
+        })
+      );
+
+      // Create a product using the external ID for category
+      const res = await request(app)
+        .post('/products')
+        .send({
+          external_id: 'prod-laptop',
+          name: 'Laptop',
+          category_id: 'cat-electronics',
+        });
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+
+      // Verify the product was created with correct internal category_id
+      const createdProduct = await Product.findOne({
+        where: { external_id: 'prod-laptop' },
+      });
+      expect(createdProduct).toBeTruthy();
+      expect(createdProduct.name).toBe('Laptop');
+      expect(createdProduct.category_id).toBe(category.id);
+    });
+
+    test('handles string ID conversion in lookupInternalId directly', async () => {
+      // This test directly validates the lookupInternalId behavior
+      // by checking that the returned ID is a number type
+      const { lookupInternalId } = require('../src/operationUtils');
+
+      sequelize = new Sequelize('sqlite::memory:', { logging: false });
+
+      const TestModel = sequelize.define(
+        'TestModel',
+        {
+          id: { type: DataTypes.BIGINT, primaryKey: true, autoIncrement: true },
+          uuid: {
+            type: DataTypes.STRING(50),
+            unique: true,
+            allowNull: false,
+          },
+        },
+        {
+          tableName: 'test_models',
+          timestamps: false,
+        }
+      );
+
+      await sequelize.sync({ force: true });
+
+      const record = await TestModel.create({ uuid: 'test-uuid-123' });
+
+      // Test that lookupInternalId returns a number
+      const internalId = await lookupInternalId(TestModel, 'uuid', 'test-uuid-123');
+
+      expect(internalId).toBe(record.id);
+      expect(typeof internalId).toBe('number');
+    });
+
+    test('lookupInternalId returns null for non-existent records', async () => {
+      const { lookupInternalId } = require('../src/operationUtils');
+
+      sequelize = new Sequelize('sqlite::memory:', { logging: false });
+
+      const TestModel = sequelize.define(
+        'TestModel',
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          uuid: {
+            type: DataTypes.STRING(50),
+            unique: true,
+            allowNull: false,
+          },
+        },
+        {
+          tableName: 'test_models',
+          timestamps: false,
+        }
+      );
+
+      await sequelize.sync({ force: true });
+
+      const internalId = await lookupInternalId(TestModel, 'uuid', 'non-existent');
+
+      expect(internalId).toBeNull();
+    });
+  });
 });

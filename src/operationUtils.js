@@ -1184,7 +1184,26 @@ async function lookupInternalId(
   }
 
   const record = await targetModel.findOne(findOptions);
-  return record ? record.id : null;
+  if (!record) return null;
+
+  const id = record.id;
+  
+  // PostgreSQL returns BIGINT/BIGSERIAL as strings because JavaScript's Number
+  // cannot precisely represent all 64-bit integers. Convert to number if safe.
+  // Also handles DECIMAL primary keys returned as strings.
+  if (typeof id === 'string') {
+    // Try integer conversion first (most common for primary keys)
+    const parsedInt = parseInt(id, 10);
+    if (!isNaN(parsedInt) && String(parsedInt) === id) {
+      return parsedInt;
+    }
+    // Try float conversion for DECIMAL/NUMERIC primary keys
+    const parsedFloat = parseFloat(id);
+    if (!isNaN(parsedFloat)) {
+      return parsedFloat;
+    }
+  }
+  return id;
 }
 
 /**
